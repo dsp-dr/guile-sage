@@ -18,17 +18,27 @@
     (version    (single-char #\v) (value #f))
     (model      (single-char #\m) (value #t))
     (session    (single-char #\s) (value #t))
-    (check      (single-char #\c) (value #f))))
+    (continue   (single-char #\c) (value #f))    ; Continue last session
+    (check      (value #f))                       ; Check config (no short flag)
+    (yolo       (single-char #\y) (value #f))
+    (workspace  (single-char #\w) (value #t))
+    (prompt     (single-char #\p) (value #t))    ; Initial prompt
+    (debug      (single-char #\d) (value #f))))
 
 (define (show-help)
   (display "guile-sage - AI REPL with tool calling\n\n")
-  (display "Usage: sage [options]\n\n")
+  (display "Usage: sage [options] [prompt]\n\n")
   (display "Options:\n")
   (display "  -h, --help       Show this help\n")
   (display "  -v, --version    Show version\n")
   (display "  -m, --model      Set model name\n")
   (display "  -s, --session    Load session by name\n")
-  (display "  -c, --check      Check configuration and exit\n"))
+  (display "  -c, --continue   Continue last session\n")
+  (display "  -y, --yolo       Enable YOLO mode (allow all tools)\n")
+  (display "  -w, --workspace  Set workspace directory\n")
+  (display "  -p, --prompt     Initial prompt to send\n")
+  (display "  -d, --debug      Enable debug mode\n")
+  (display "      --check      Check configuration and exit\n"))
 
 (define (show-version)
   (display "guile-sage v0.1.0\n"))
@@ -39,7 +49,13 @@
          (version? (option-ref options 'version #f))
          (model (option-ref options 'model #f))
          (session-name (option-ref options 'session #f))
-         (check? (option-ref options 'check #f)))
+         (continue? (option-ref options 'continue #f))
+         (check? (option-ref options 'check #f))
+         (yolo? (option-ref options 'yolo #f))
+         (workspace (option-ref options 'workspace #f))
+         (prompt (option-ref options 'prompt #f))
+         (debug? (option-ref options 'debug #f))
+         (rest-args (option-ref options '() '())))
 
     (cond
      (help?
@@ -52,8 +68,24 @@
       ;; Set model if provided
       (when model
         (setenv "SAGE_MODEL" model))
-      ;; Start REPL
-      (repl-start #:session-name session-name)))))
+      ;; Set YOLO mode
+      (when yolo?
+        (setenv "SAGE_YOLO_MODE" "1"))
+      ;; Set workspace
+      (when workspace
+        (setenv "SAGE_WORKSPACE" workspace))
+      ;; Set debug
+      (when debug?
+        (setenv "SAGE_DEBUG" "1"))
+      ;; Combine prompt from -p and remaining args
+      (let ((initial-prompt (or prompt
+                                (if (null? rest-args)
+                                    #f
+                                    (string-join rest-args " ")))))
+        ;; Start REPL
+        (repl-start #:session-name session-name
+                    #:continue? continue?
+                    #:initial-prompt initial-prompt))))))
 
 ;; Run if executed directly
 (when (equal? (current-filename) (car (command-line)))
