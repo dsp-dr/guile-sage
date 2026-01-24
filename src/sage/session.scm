@@ -32,13 +32,13 @@
 
 (define *session* #f)
 
-;;; session-dir: Get session storage directory
+;;; session-dir: Get session storage directory (XDG compliant)
 (define (session-dir)
-  (or (config-get "SESSION_DIR")
-      (let ((dir (string-append (getenv "HOME") "/.sage/sessions")))
-        (unless (file-exists? dir)
-          (system (format #f "mkdir -p ~a" dir)))
-        dir)))
+  (let ((dir (or (config-get "SESSION_DIR")
+                 (sage-sessions-dir))))
+    (unless (file-exists? dir)
+      (system (format #f "mkdir -p '~a'" dir)))
+    dir))
 
 ;;; session-create: Create a new session
 ;;; Arguments:
