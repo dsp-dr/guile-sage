@@ -1,0 +1,192 @@
+#+TITLE: Guile-Sage Requirements
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-24
+
+* Overview
+
+Guile3 implementation of an AI REPL with tool calling, based on:
+- aygp-dr/sage.el (Emacs Lisp)
+- aygp-dr/gemini-repl-009 (Rust)
+
+Default backend: Ollama (local or cloud)
+
+* Functional Requirements
+
+** Phase 1: Core Functionality (MVP)
+
+*** FR-001: Interactive REPL Loop
+- [ ] Read-eval-print loop with readline support
+- [ ] Handle Ctrl-C gracefully (prompt for confirmation)
+- [ ] Handle Ctrl-D as exit
+- [ ] Support command history with arrow keys
+
+*** FR-002: Slash Commands
+Required commands:
+| Command    | Description                | Priority |
+|------------+----------------------------+----------|
+| /help      | Display available commands | P1       |
+| /exit      | Exit the REPL              | P1       |
+| /clear     | Clear terminal screen      | P1       |
+| /model     | Show/change model          | P1       |
+| /stats     | Show session statistics    | P2       |
+| /context   | Display conversation       | P2       |
+| /save      | Save session to file       | P2       |
+| /load      | Load session from file     | P2       |
+| /tools     | List available tools       | P2       |
+| /workspace | Display workspace path     | P2       |
+| /reset     | Clear conversation         | P2       |
+| /version   | Show version info          | P2       |
+| /debug     | Toggle debug mode          | P3       |
+
+*** FR-003: Conversation Management
+- [ ] Maintain conversation context across messages
+- [ ] Track token usage per message and cumulatively
+- [ ] Support saving/loading conversation state
+- [ ] Estimate costs based on token usage
+
+** Phase 2: Enhanced Features
+
+*** FR-004: LLM API Integration
+- [X] Ollama API client (local)
+- [X] Ollama cloud API support (with auth)
+- [ ] Proper error handling with retries
+- [ ] Rate limiting with exponential backoff
+- [ ] Streaming responses (optional)
+- [ ] Support API key from:
+  - [X] Environment variable
+  - [X] .env file
+  - [ ] Config file
+
+*** FR-005: Model Selection
+- [ ] Model switching during session
+- [ ] Display current model in prompt
+- [ ] Validate model names
+- [ ] List available models (/models command)
+
+*** FR-006: Tool Calling Framework
+- [ ] Register tools with name, description, parameters
+- [ ] Permission system (safe vs dangerous tools)
+- [ ] Sandboxed execution environment
+- [ ] Validate all tool inputs
+- [ ] Log all tool executions
+
+*** FR-007: Built-in Tools
+| Tool           | Description                   | Safety |
+|----------------+-------------------------------+--------|
+| read_file      | Read file contents            | safe   |
+| list_files     | List files in directory       | safe   |
+| write_file     | Write content to file         | unsafe |
+| search_files   | Search content in files       | safe   |
+| git_status     | Get git repository status     | safe   |
+| git_diff       | Show git diff                 | safe   |
+| git_log        | Show commit history           | safe   |
+| run_command    | Execute whitelisted commands  | unsafe |
+
+Tool constraints:
+- Restrict file access to workspace directory
+- Prevent directory traversal attacks
+- Limit file sizes (configurable)
+- Sanitize all paths
+- Command whitelist for run_command
+
+** Phase 3: Advanced Features
+
+*** FR-008: Terminal Interface
+- [ ] Colored output (with disable option)
+- [ ] Visual indicators for status
+- [ ] Progress indicators for API calls
+- [ ] Streaming response display
+
+*** FR-009: Session Persistence
+- [ ] Named sessions
+- [ ] Auto-save periodically
+- [ ] Session resume
+- [ ] List available sessions
+- [ ] Export/import sessions
+
+*** FR-010: Logging and Metrics
+- [ ] Structured logging (JSON format)
+- [ ] Multiple log levels
+- [ ] Track per-session metrics:
+  - Total tokens (input/output)
+  - Number of requests
+  - Session duration
+  - Tool usage counts
+
+* Non-Functional Requirements
+
+** NFR-001: Performance
+- Startup time: <100ms target
+- Command processing: <50ms (excluding API)
+- Memory usage: <50MB base
+
+** NFR-002: Security
+- Never log API keys
+- Mask API keys in error messages
+- Workspace isolation for file operations
+- Path validation (no traversal)
+- Command sandboxing
+
+** NFR-003: Portability
+- Primary: FreeBSD, Linux
+- Secondary: macOS
+- Require only guile3 and curl
+
+* Configuration
+
+** Environment Variables
+| Variable          | Description                    | Default               |
+|-------------------+--------------------------------+-----------------------|
+| SAGE_PROVIDER     | LLM provider                   | ollama                |
+| SAGE_OLLAMA_HOST  | Ollama API endpoint            | http://localhost:11434|
+| SAGE_MODEL        | Model name                     | qwen3-coder:latest    |
+| OLLAMA_API_KEY    | API key for cloud              | (none)                |
+| SAGE_WORKSPACE    | Workspace directory            | current directory     |
+| SAGE_LOG_LEVEL    | Log level                      | info                  |
+
+** Configuration File (~/.sage/config.scm)
+#+begin_src scheme
+;; Example configuration
+(define *config*
+  '((provider . ollama)
+    (ollama-host . "http://host.lan:11434")
+    (model . "qwen3-coder:latest")
+    (workspace . "~/projects")
+    (tools
+     (enabled . #t)
+     (max-file-size . 1048576)  ; 1MB
+     (allowed-commands . ("ls" "cat" "git")))
+    (session
+     (auto-save . #t)
+     (auto-save-interval . 300))
+    (ui
+     (colors . #t)
+     (show-tokens . #t))))
+#+end_src
+
+* Implementation Status
+
+** Completed
+- [X] Project structure with Makefile
+- [X] Configuration module with .env loading
+- [X] HTTP/JSON utilities (curl-based)
+- [X] Ollama client module
+- [X] Tool prompt formatting
+- [X] Tool call parsing
+- [X] Cloud API authentication
+
+** In Progress
+- [ ] Tool registration system
+- [ ] REPL interface
+
+** Planned
+- [ ] Built-in tools
+- [ ] Session management
+- [ ] Command history
+- [ ] Logging system
+
+* References
+
+- aygp-dr/sage.el: https://github.com/aygp-dr/sage.el
+- aygp-dr/gemini-repl-009: https://github.com/aygp-dr/gemini-repl-009
+- Ollama API: https://github.com/ollama/ollama/blob/main/docs/api.md
