@@ -20,7 +20,7 @@ repl:
 	$(GUILE) -L $(SRCDIR)
 
 run:
-	$(GUILE) -L $(SRCDIR) -e '(sage main)' -c '(main (command-line))'
+	$(GUILE) -L $(SRCDIR) -c '(use-modules (sage repl)) (repl-start)'
 
 check:
 	@for test in $(TESTDIR)/test-*.scm; do \
