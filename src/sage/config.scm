@@ -31,10 +31,14 @@
 ;;;   default - Default value if not found (optional)
 ;;; Returns: Configuration value or default
 (define* (config-get key #:optional (default #f))
-  (let ((key-str (if (symbol? key) (symbol->string key) key)))
+  (let* ((key-str (if (symbol? key) (symbol->string key) key))
+         (key-upper (string-upcase key-str))
+         (sage-key (string-append "SAGE_" key-upper)))
     (or (hash-ref *config* key-str)
-        (getenv (string-upcase (string-append "SAGE_" key-str)))
-        (getenv (string-upcase key-str))
+        (hash-ref *config* key-upper)
+        (hash-ref *config* sage-key)
+        (getenv sage-key)
+        (getenv key-upper)
         default)))
 
 ;;; parse-dotenv-line: Parse a single .env line
