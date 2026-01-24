@@ -1,0 +1,49 @@
+#+TITLE: Contributing to guile-sage
+#+AUTHOR: dsp-dr
+
+* Development Setup
+
+1. Clone the repository
+2. Copy =.env.template= to =.env= and configure
+3. Start REPL: =make repl=
+
+* Project Structure
+
+#+begin_src
+src/sage/
+├── config.scm    # Configuration and environment
+├── util.scm      # HTTP/JSON utilities
+├── ollama.scm    # Ollama API client
+├── tools.scm     # Tool registration system
+├── repl.scm      # Interactive REPL
+└── main.scm      # CLI entry point
+#+end_src
+
+* Beads Methodology
+
+This project follows the beads methodology:
+- **Small**: One concept per commit
+- **Atomic**: Complete in themselves
+- **Reversible**: Easy to revert without side effects
+
+* Commit Messages
+
+Format: =<type>(<scope>): <description>=
+
+Types: =feat=, =fix=, =docs=, =test=, =refactor=, =chore=
+
+* Testing
+
+Run tests with =make check= or individual tests with:
+#+begin_src bash
+guile3 -L src tests/test-*.scm
+#+end_src
+
+* REPL Testing
+
+Always test in REPL before committing:
+#+begin_src bash
+$ make repl
+> (use-modules (sage ollama))
+> (ollama-list-models)
+#+end_src
