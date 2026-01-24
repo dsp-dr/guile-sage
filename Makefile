@@ -9,12 +9,18 @@ TESTDIR = tests
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run init check-config help docs publish run-yolo check-verbose uat uat-yolo install-hooks
+.PHONY: all clean check repl run init check-config help docs publish run-yolo check-verbose uat uat-yolo install-hooks version build
 
 all: $(OBJECTS)
 
+# Alias for all
+build: all
+
 %.go: %.scm
 	$(GUILD) compile -L $(SRCDIR) -o $@ $<
+
+version:
+	@$(GUILE) -L $(SRCDIR) -c '(use-modules (sage version)) (format #t "guile-sage v~a~%" (version-string))'
 
 repl:
 	$(GUILE) -L $(SRCDIR)
@@ -123,7 +129,8 @@ uat-yolo:
 
 help:
 	@echo "Targets:"
-	@echo "  all           - Compile all modules"
+	@echo "  all/build     - Compile all modules to .go files"
+	@echo "  version       - Show version"
 	@echo "  init          - Initialize and validate setup"
 	@echo "  install-hooks - Install git pre-commit hooks"
 	@echo "  check-config  - Check configuration"

@@ -9,6 +9,7 @@
 (define-module (sage main)
   #:use-module (sage config)
   #:use-module (sage repl)
+  #:use-module (sage version)
   #:use-module (ice-9 getopt-long)
   #:use-module (ice-9 format)
   #:export (main))
@@ -41,7 +42,8 @@
   (display "      --check      Check configuration and exit\n"))
 
 (define (show-version)
-  (display "guile-sage v0.1.0\n"))
+  (format #t "guile-sage v~a~%" (version-string))
+  (format #t "Guile ~a~%" (version)))
 
 (define (main args)
   (let* ((options (getopt-long args option-spec))
