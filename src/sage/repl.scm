@@ -287,7 +287,7 @@
 
 ;;; REPL Start
 
-(define* (repl-start #:key (session-name #f))
+(define* (repl-start #:key (session-name #f) (continue? #f) (initial-prompt #f))
   "Start the interactive REPL."
 
   ;; Load config
@@ -300,20 +300,42 @@
   ;; Initialize tools
   (init-default-tools)
 
+  ;; Check for debug mode
+  (when (config-get "DEBUG")
+    (set! *debug* #t))
+
   ;; Create or load session
-  (if session-name
-      (session-load session-name)
-      (session-create))
+  (cond
+   (continue?
+    ;; Load most recent session
+    (let ((sessions (session-list)))
+      (if (null? sessions)
+          (session-create)
+          (session-load (car sessions)))))
+   (session-name
+    (session-load session-name))
+   (else
+    (session-create)))
 
   ;; Welcome message
-  (display "\n")
-  (display "╔═══════════════════════════════════════╗\n")
-  (display "║         guile-sage v0.1.0             ║\n")
-  (display "║   Type /help for commands, /exit to quit  ║\n")
-  (display "╚═══════════════════════════════════════╝\n")
-  (format #t "Model: ~a~%" (ollama-model))
-  (format #t "Host: ~a~%" (ollama-host))
-  (display "\n")
+  (let ((yolo? (config-get "YOLO_MODE")))
+    (display "\n")
+    (display "╔═══════════════════════════════════════╗\n")
+    (display "║         guile-sage v0.1.0             ║\n")
+    (display "║   Type /help for commands, /exit to quit  ║\n")
+    (display "╚═══════════════════════════════════════╝\n")
+    (format #t "Model: ~a~%" (ollama-model))
+    (format #t "Host: ~a~%" (ollama-host))
+    (when yolo?
+      (display "Mode: YOLO (all tools enabled)\n"))
+    (when *debug*
+      (display "Debug: ON\n"))
+    (display "\n"))
+
+  ;; Process initial prompt if provided
+  (when initial-prompt
+    (format #t "sage> ~a~%" initial-prompt)
+    (repl-eval initial-prompt))
 
   ;; Activate readline if available
   (catch #t
