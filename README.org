@@ -92,6 +92,35 @@ SAGE_OLLAMA_HOST=https://api.example.com
 SAGE_OLLAMA_API_KEY=your-api-key
 #+end_src
 
+*** XDG Directory Structure
+
+guile-sage follows the XDG Base Directory specification:
+
+#+begin_example
+$XDG_CONFIG_HOME/sage/     # ~/.config/sage
+└── (config files)
+
+$XDG_DATA_HOME/sage/       # ~/.local/share/sage
+├── sessions/              # Saved conversation sessions
+├── agents/                # Custom agent definitions
+├── projects/              # Project-specific configurations
+└── commands/              # Custom slash commands
+
+$XDG_CACHE_HOME/sage/      # ~/.cache/sage
+└── (cache files)
+
+$XDG_STATE_HOME/sage/      # ~/.local/state/sage
+└── (state files)
+#+end_example
+
+Override with environment variables:
+
+#+begin_src bash
+SAGE_CONFIG_DIR=/custom/config/path
+SAGE_DATA_DIR=/custom/data/path
+SAGE_SESSION_DIR=/custom/sessions/path
+#+end_src
+
 ** Usage
 
 *** Starting the REPL

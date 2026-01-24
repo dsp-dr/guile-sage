@@ -293,6 +293,9 @@
   ;; Load config
   (config-load-dotenv)
 
+  ;; Ensure XDG directories exist
+  (ensure-sage-dirs)
+
   ;; Initialize tools
   (init-default-tools)
 

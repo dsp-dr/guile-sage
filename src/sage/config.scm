@@ -9,11 +9,26 @@
   #:use-module (ice-9 textual-ports)
   #:use-module (ice-9 regex)
   #:use-module (ice-9 match)
+  #:use-module (ice-9 format)
   #:export (config-get
             config-load-dotenv
             *default-provider*
             *default-ollama-host*
-            *default-model*))
+            *default-model*
+            ;; XDG Base Directory support
+            xdg-config-home
+            xdg-data-home
+            xdg-cache-home
+            xdg-state-home
+            sage-config-dir
+            sage-data-dir
+            sage-cache-dir
+            sage-state-dir
+            sage-sessions-dir
+            sage-agents-dir
+            sage-projects-dir
+            sage-commands-dir
+            ensure-sage-dirs))
 
 ;;; Constants
 
@@ -77,3 +92,72 @@
                   (loop (get-line port)
                         (if parsed (1+ count) count)))))))
       0))
+
+;;; ============================================================
+;;; XDG Base Directory Support
+;;; ============================================================
+
+;;; XDG Base Directories (with fallbacks)
+(define (xdg-config-home)
+  (or (getenv "XDG_CONFIG_HOME")
+      (string-append (getenv "HOME") "/.config")))
+
+(define (xdg-data-home)
+  (or (getenv "XDG_DATA_HOME")
+      (string-append (getenv "HOME") "/.local/share")))
+
+(define (xdg-cache-home)
+  (or (getenv "XDG_CACHE_HOME")
+      (string-append (getenv "HOME") "/.cache")))
+
+(define (xdg-state-home)
+  (or (getenv "XDG_STATE_HOME")
+      (string-append (getenv "HOME") "/.local/state")))
+
+;;; Sage-specific directories
+(define (sage-config-dir)
+  (or (config-get "CONFIG_DIR")
+      (string-append (xdg-config-home) "/sage")))
+
+(define (sage-data-dir)
+  (or (config-get "DATA_DIR")
+      (string-append (xdg-data-home) "/sage")))
+
+(define (sage-cache-dir)
+  (or (config-get "CACHE_DIR")
+      (string-append (xdg-cache-home) "/sage")))
+
+(define (sage-state-dir)
+  (or (config-get "STATE_DIR")
+      (string-append (xdg-state-home) "/sage")))
+
+;;; Sage subdirectories
+(define (sage-sessions-dir)
+  (string-append (sage-data-dir) "/sessions"))
+
+(define (sage-agents-dir)
+  (string-append (sage-data-dir) "/agents"))
+
+(define (sage-projects-dir)
+  (string-append (sage-data-dir) "/projects"))
+
+(define (sage-commands-dir)
+  (string-append (sage-data-dir) "/commands"))
+
+;;; ensure-dir: Create directory if it doesn't exist
+(define (ensure-dir path)
+  (unless (file-exists? path)
+    (system (format #f "mkdir -p '~a'" path)))
+  path)
+
+;;; ensure-sage-dirs: Create all sage directories
+(define (ensure-sage-dirs)
+  (ensure-dir (sage-config-dir))
+  (ensure-dir (sage-data-dir))
+  (ensure-dir (sage-cache-dir))
+  (ensure-dir (sage-state-dir))
+  (ensure-dir (sage-sessions-dir))
+  (ensure-dir (sage-agents-dir))
+  (ensure-dir (sage-projects-dir))
+  (ensure-dir (sage-commands-dir))
+  #t)
