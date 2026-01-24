@@ -1,0 +1,256 @@
+#+TITLE: guile-sage
+#+AUTHOR: dsp-dr
+#+OPTIONS: toc:2 num:nil
+
+[[https://www.gnu.org/software/guile/][file:https://img.shields.io/badge/Guile-3.0-blue.svg]]
+[[https://ollama.ai][file:https://img.shields.io/badge/Ollama-supported-green.svg]]
+[[https://github.com/dsp-dr/guile-sage/actions][file:https://img.shields.io/github/actions/workflow/status/dsp-dr/guile-sage/test.yml?branch=main&label=tests]]
+[[https://github.com/dsp-dr/guile-sage/blob/main/LICENSE][file:https://img.shields.io/badge/license-MIT-blue.svg]]
+[[https://freebsd.org][file:https://img.shields.io/badge/FreeBSD-14.3-red.svg]]
+
+*AI REPL with tool calling for Guile Scheme*
+
+** Overview
+
+guile-sage is an interactive AI assistant REPL written in Guile3 Scheme. It provides:
+
+- Chat interface with Ollama-compatible LLMs
+- Tool calling system with safety permissions
+- Session management with persistence
+- Self-modification capabilities
+- Context compaction for long conversations
+
+** Features
+
+*** Chat Interface
+- Interactive REPL with readline support
+- Slash commands for configuration
+- Debug mode for development
+
+*** Tool System
+| Tool | Description | Safe |
+|------+-------------+------|
+| =read_file= | Read file contents | Yes |
+| =list_files= | List directory contents | Yes |
+| =write_file= | Write content to file | No |
+| =edit_file= | Search/replace in file | No |
+| =git_status= | Show git status | Yes |
+| =git_diff= | Show git diff | Yes |
+| =git_log= | Show git history | Yes |
+| =git_commit= | Create commits | No |
+| =git_add_note= | Add git notes | No |
+| =search_files= | Grep for patterns | Yes |
+| =glob_files= | Find files by pattern | Yes |
+| =run_tests= | Execute test suite | No |
+| =eval_scheme= | Evaluate Scheme code | No |
+| =reload_module= | Hot-reload modules | No |
+| =create_tool= | Register new tools | No |
+
+*** Session Management
+- Conversation history with token tracking
+- Save/load sessions to JSON
+- Context compaction for long conversations
+- Statistics tracking (tokens, requests, tool calls)
+
+** Requirements
+
+- Guile 3.0+
+- curl (for HTTP requests)
+- Ollama (local or cloud API)
+
+** Installation
+
+#+begin_src bash
+# Clone the repository
+git clone https://github.com/dsp-dr/guile-sage.git
+cd guile-sage
+
+# Initialize configuration
+make init
+
+# Verify setup
+make check-config
+#+end_src
+
+** Configuration
+
+Create a =.env= file based on the template:
+
+#+begin_src bash
+cp .env.template .env
+#+end_src
+
+Configure your Ollama endpoint:
+
+#+begin_src bash
+# Local Ollama
+SAGE_OLLAMA_HOST=http://localhost:11434
+SAGE_MODEL=qwen3-coder:latest
+
+# Cloud Ollama (with authentication)
+SAGE_OLLAMA_HOST=https://api.example.com
+SAGE_OLLAMA_API_KEY=your-api-key
+#+end_src
+
+** Usage
+
+*** Starting the REPL
+
+#+begin_src bash
+make run
+#+end_src
+
+Or directly:
+
+#+begin_src bash
+guile3 -L src -c '(use-modules (sage repl)) (repl-start)'
+#+end_src
+
+*** Slash Commands
+
+| Command | Description |
+|---------+-------------|
+| =/help= | Show available commands |
+| =/exit=, =/quit= | Exit the REPL |
+| =/clear= | Clear screen |
+| =/reset= | Clear conversation history |
+| =/status=, =/stats= | Show session statistics |
+| =/compact [n]= | Compact history, keep last n messages |
+| =/context= | Show conversation context |
+| =/model [name]= | Show or set model |
+| =/models= | List available models |
+| =/save [name]= | Save session |
+| =/load <name>= | Load session |
+| =/sessions= | List saved sessions |
+| =/tools= | List available tools |
+| =/workspace= | Show workspace directory |
+| =/debug= | Toggle debug mode |
+| =/version= | Show version info |
+
+*** Example Session
+
+#+begin_example
+╔═══════════════════════════════════════╗
+║         guile-sage v0.1.0             ║
+║   Type /help for commands, /exit to quit  ║
+╚═══════════════════════════════════════╝
+Model: qwen3-coder:latest
+Host: http://mac.lan:11434
+
+sage> What files are in the src directory?
+
+I'll list the files in the src directory for you.
+
+[Tool: list_files]
+sage
+config.scm
+main.scm
+ollama.scm
+repl.scm
+session.scm
+tools.scm
+util.scm
+
+The src/sage directory contains the core modules...
+
+sage> /status
+Session: session-1769297211
+Model: qwen3-coder:latest
+Messages: 3
+Tokens: 245 (in: 52, out: 193)
+Requests: 1
+Tool calls: 1
+
+sage> /exit
+Goodbye!
+#+end_example
+
+** Development
+
+*** Project Structure
+
+#+begin_example
+guile-sage/
+├── src/sage/
+│   ├── config.scm    # Configuration and .env loading
+│   ├── util.scm      # HTTP/JSON utilities
+│   ├── ollama.scm    # Ollama API client
+│   ├── tools.scm     # Tool registration system
+│   ├── session.scm   # Session management
+│   ├── repl.scm      # Interactive REPL
+│   └── main.scm      # CLI entry point
+├── tests/
+│   ├── test-ollama.scm
+│   ├── test-session.scm
+│   └── test-tools.scm
+├── scripts/
+│   ├── init.sh
+│   └── check-config.sh
+├── .env.template
+├── Makefile
+├── TESTING.org
+├── CONTRIBUTING.org
+└── REQUIREMENTS.org
+#+end_example
+
+*** Running Tests
+
+#+begin_src bash
+# Run all tests
+make check
+
+# Run individual test file
+guile3 -L src tests/test-tools.scm
+#+end_src
+
+*** Makefile Targets
+
+| Target | Description |
+|--------+-------------|
+| =all= | Compile all modules |
+| =init= | Initialize and validate setup |
+| =check-config= | Check configuration |
+| =repl= | Start interactive REPL |
+| =run= | Run sage CLI |
+| =check= | Run tests |
+| =clean= | Remove compiled files |
+
+** Architecture
+
+*** Beads Methodology
+
+This project follows the beads methodology for development:
+- Small, atomic commits
+- Progressive commit protocol (PCP)
+- Git notes for documentation
+- Explicit file staging (never =git add -A=)
+
+*** Self-Modification
+
+guile-sage can modify itself through its tool system:
+- =eval_scheme= evaluates arbitrary Scheme code
+- =create_tool= registers new tools dynamically
+- =reload_module= hot-reloads modified modules
+- =edit_file= modifies source files
+
+** Platform Notes
+
+*** FreeBSD
+
+Developed and tested on FreeBSD 14.3. Known workarounds:
+- Uses =curl= with temp files instead of =open-input-pipe= (segfault issue)
+- Custom JSON parser (guile-json not available)
+
+** License
+
+MIT License - see LICENSE file for details.
+
+** Contributing
+
+See [[file:CONTRIBUTING.org][CONTRIBUTING.org]] for guidelines.
+
+** Related Projects
+
+- [[https://github.com/aygp-dr/sage.el][sage.el]] - Emacs multi-provider LLM interface (inspiration)
+- [[https://ollama.ai][Ollama]] - Local LLM runtime
+- [[https://www.gnu.org/software/guile/][GNU Guile]] - Scheme implementation
