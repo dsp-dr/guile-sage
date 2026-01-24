@@ -1,0 +1,200 @@
+#+TITLE: guile-sage: AI REPL with Tool Calling
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-24
+#+OPTIONS: toc:nil num:nil H:2
+#+STARTUP: beamer
+#+LaTeX_CLASS: beamer
+#+LaTeX_CLASS_OPTIONS: [presentation]
+#+BEAMER_THEME: default
+
+* Introduction
+
+** What is guile-sage?
+
+- AI-powered REPL in Guile3 Scheme
+- Conversational interface to LLMs
+- Tool calling for code manipulation
+- Self-modifying capabilities
+
+** Why Guile Scheme?
+
+- Powerful macro system
+- First-class functions
+- REPL-native development
+- GNU ecosystem integration
+
+* Architecture
+
+** System Overview
+
+#+begin_example
+┌─────────────────────┐
+│   User Interface    │
+│   (REPL + Commands) │
+├─────────────────────┤
+│  Session Management │
+│  (History, Context) │
+├─────────────────────┤
+│    Tool System      │
+│  (15 built-in)      │
+├─────────────────────┤
+│   Ollama Backend    │
+│   (LLM API)         │
+└─────────────────────┘
+#+end_example
+
+** Module Structure
+
+| Module | Purpose |
+|--------+---------|
+| config.scm | Configuration, XDG |
+| util.scm | HTTP/JSON utilities |
+| ollama.scm | API client |
+| tools.scm | Tool registration |
+| session.scm | Context management |
+| repl.scm | Interactive loop |
+
+* Features
+
+** Tool Categories
+
+*** Safe Tools (Always Allowed)
+- read_file, list_files
+- git_status, git_diff, git_log
+- search_files, glob_files
+
+*** Unsafe Tools (YOLO Mode)
+- write_file, edit_file
+- git_commit, eval_scheme
+- create_tool, reload_module
+
+** Self-Modification
+
+#+begin_src scheme
+;; Create new tools dynamically
+(execute-tool "create_tool"
+  '(("name" . "greet")
+    ("description" . "Say hello")
+    ("code" . "(lambda (args) \"Hello!\")")))
+
+;; Evaluate arbitrary code
+(execute-tool "eval_scheme"
+  '(("code" . "(+ 1 2 3)")))
+#+end_src
+
+** Session Management
+
+- Persistent conversation history
+- Token tracking
+- Context compaction
+- Project-local sessions
+
+* Safety Model
+
+** Path Safety
+
+#+begin_src scheme
+(define (safe-path? path)
+  (and (not (string-contains path ".."))
+       (not (regexp-exec
+             (make-regexp "(\\.env|\\.git/|\\.ssh)")
+             path))))
+#+end_src
+
+** Permission System
+
+#+begin_src scheme
+(define (check-permission tool args)
+  (or (member tool *safe-tools*)
+      (config-get "YOLO_MODE")
+      #f))  ; Default deny
+#+end_src
+
+* Development
+
+** Beads Methodology
+
+1. Small, atomic commits
+2. Progressive building
+3. Test-driven development
+4. Git notes for documentation
+
+** Test Coverage
+
+| Test Suite | Count |
+|------------+-------|
+| Unit tests | 56 |
+| UAT tests | 35 |
+| Total | 91 |
+
+* Demo
+
+** Starting the REPL
+
+#+begin_src bash
+# Normal mode
+make run
+
+# YOLO mode
+guile3 -L src -c \
+  '(use-modules (sage repl)) (repl-start)' \
+  --yolo
+#+end_src
+
+** Example Session
+
+#+begin_example
+sage> /status
+Session: session-1769298528
+Model: qwen3-coder:latest
+Messages: 0
+Tokens: 0
+
+sage> List the files in src/
+[Tool: list_files]
+sage
+config.scm
+main.scm
+...
+#+end_example
+
+* Future Work
+
+** Roadmap
+
+1. MCP Protocol support
+2. Multi-provider backends
+3. Agent orchestration
+4. Streaming responses
+5. IDE integration
+
+** AGENTS.md Support
+
+- Project-specific instructions
+- XDG-compliant locations
+- Hierarchical loading
+
+* Conclusion
+
+** Key Takeaways
+
+- Guile3 enables powerful AI tooling
+- Safety-first permission model
+- Self-modification for AI improvement
+- Claude Code-compatible patterns
+
+** Resources
+
+- GitHub: github.com/dsp-dr/guile-sage
+- Ollama: ollama.ai
+- Guile: gnu.org/software/guile
+
+* Q&A
+
+** Questions?
+
+#+begin_center
+*Thank you!*
+
+github.com/dsp-dr/guile-sage
+#+end_center

@@ -1,0 +1,297 @@
+#+TITLE: guile-sage Development Approach
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-24
+#+OPTIONS: toc:3 num:t
+
+* Introduction
+
+This document describes the development approach used to build guile-sage,
+an AI REPL with tool calling capabilities in Guile3 Scheme.
+
+* Inspiration and Source Analysis
+
+** sage.el (aygp-dr/sage.el)
+
+The primary inspiration was sage.el, an Emacs package providing multi-provider
+LLM integration. Key features analyzed:
+
+- Multi-provider architecture (Ollama, OpenAI, Anthropic, etc.)
+- Tool calling with safety permissions
+- Session management with persistence
+- Context window management
+- Streaming responses
+
+We adopted:
+- Tool calling patterns
+- Session structure (messages, stats, timestamps)
+- Safety permission model (safe vs unsafe tools)
+
+** gemini-repl-009 (aygp-dr/gemini-repl-009)
+
+Requirements documentation that informed our feature set:
+
+- Phase-based development (Core, Tools, Context, Session)
+- Tool schema definitions
+- Context compaction strategies
+- Testing requirements
+
+** Claude Code System Prompts (Piebald-AI)
+
+Studied Claude Code's approach to:
+- System prompt structure and best practices
+- Tool descriptions and usage guidelines
+- Path safety and workspace isolation
+- Project directory encoding (-home-user-project style)
+
+* Development Methodology
+
+** Beads Methodology
+
+We followed the "beads" methodology for development:
+
+1. *Small Commits* - Each logical change is its own commit
+2. *Atomic Changes* - Complete and reversible
+3. *Progressive Protocol* - Build feature by feature
+4. *Git Notes* - Document issues and decisions
+
+Example commit progression:
+#+begin_example
+a0968f1 chore: Initial project setup
+80b1111 feat(util): Add configuration and HTTP/JSON utilities
+547c073 fix(config): Lookup keys with multiple naming conventions
+d52dafd fix(util): Use temp files for HTTP to avoid FreeBSD popen segfault
+30440e8 feat(ollama): Add Ollama API client module
+7c962f1 test(ollama): Add comprehensive test suite
+df5b1c5 feat(ollama): Add cloud API support with authentication
+#+end_example
+
+** Test-Driven Development
+
+Tests were written alongside features:
+
+| Module | Tests | Focus |
+|--------+-------+-------|
+| ollama.scm | 17 | JSON parsing, API calls |
+| session.scm | 18 | Messages, context, persistence |
+| tools.scm | 25 | Registration, permissions, execution |
+| UAT | 35 | End-to-end tool calling |
+
+** Platform-Specific Workarounds
+
+FreeBSD 14.3 presented unique challenges:
+
+1. *popen Segfault* - Guile3's =open-input-pipe= caused segfaults
+   - Solution: Use =system()= with temp files for curl operations
+
+2. *Missing guile-json* - No JSON library available
+   - Solution: Implement custom JSON parser/writer
+
+* Architecture Decisions
+
+** Module Structure
+
+#+begin_example
+src/sage/
+├── config.scm    # Configuration, XDG, project encoding
+├── util.scm      # HTTP/JSON utilities
+├── ollama.scm    # Ollama API client
+├── tools.scm     # Tool registration and execution
+├── session.scm   # Session and context management
+├── repl.scm      # Interactive REPL with commands
+└── main.scm      # CLI entry point
+#+end_example
+
+Rationale:
+- Clear separation of concerns
+- Each module independently testable
+- Minimal dependencies between modules
+
+** Tool Permission Model
+
+#+begin_src scheme
+;; Safe tools - always allowed
+(define *safe-tools*
+  '("read_file" "list_files" "git_status" "git_diff" ...))
+
+;; Permission check
+(define (check-permission tool-name args)
+  (or (member tool-name *safe-tools*)
+      (config-get "YOLO_MODE")
+      #f))
+#+end_src
+
+Rationale:
+- Default-deny for unsafe operations
+- YOLO mode for trusted environments
+- Clear boundary between read/write operations
+
+** XDG Compliance
+
+#+begin_src scheme
+(define (xdg-data-home)
+  (or (getenv "XDG_DATA_HOME")
+      (string-append (getenv "HOME") "/.local/share")))
+
+(define (sage-data-dir)
+  (string-append (xdg-data-home) "/sage"))
+#+end_src
+
+Rationale:
+- Standard directory structure
+- Override via environment variables
+- Clean separation of config/data/cache/state
+
+** Project Path Encoding
+
+#+begin_src scheme
+;; /home/user/project -> -home-user-project
+(define (path->project-id path)
+  (string-map (lambda (c) (if (char=? c #\/) #\- c)) path))
+#+end_src
+
+Rationale:
+- Matches Claude Code behavior
+- Per-project session isolation
+- Valid filesystem names
+
+* Tool Implementation Patterns
+
+** Tool Registration
+
+#+begin_src scheme
+(register-tool
+ "read_file"
+ "Read contents of a file within workspace"
+ '(("type" . "object")
+   ("properties" . (("path" . (("type" . "string")
+                               ("description" . "File path")))))
+   ("required" . #("path")))
+ (lambda (args)
+   (let ((path (assoc-ref args "path")))
+     (if (safe-path? path)
+         (call-with-input-file (full-path path) get-string-all)
+         (format #f "Unsafe path: ~a" path)))))
+#+end_src
+
+** Self-Modification Tools
+
+Critical for AI self-improvement:
+
+1. *eval_scheme* - Evaluate arbitrary Scheme code
+2. *create_tool* - Register new tools dynamically
+3. *reload_module* - Hot-reload modified modules
+4. *edit_file* - Modify source files
+
+* Testing Strategy
+
+** Unit Tests
+
+Each module has comprehensive unit tests:
+
+#+begin_src scheme
+(run-test "read_file reads fixture"
+  (lambda ()
+    (let ((result (execute-tool "read_file"
+                               '(("path" . "fixtures/test.txt")))))
+      (unless (string-contains result "test file")
+        (error "content not found" result)))))
+#+end_src
+
+** User Acceptance Tests
+
+UAT directory with end-to-end scenarios:
+
+#+begin_example
+guile-sage-uat/
+├── UAT-PLAN.org          # Test plan document
+├── fixtures/             # Test data files
+│   ├── test.txt
+│   └── sample.scm
+└── tests/
+    └── test-tools-uat.scm  # 35 UAT tests
+#+end_example
+
+** Test Modes
+
+Tests adapt to YOLO mode:
+
+#+begin_src scheme
+(run-test "write_file permission depends on mode"
+  (lambda ()
+    (let ((allowed (check-permission "write_file" '())))
+      (if *yolo-mode*
+          (unless allowed (error "should be allowed in YOLO"))
+          (when allowed (error "should be blocked"))))))
+#+end_src
+
+* CLI Design
+
+** Claude Code-Style Flags
+
+#+begin_example
+Usage: sage [options] [prompt]
+
+Options:
+  -h, --help       Show this help
+  -v, --version    Show version
+  -m, --model      Set model name
+  -s, --session    Load session by name
+  -c, --continue   Continue last session
+  -y, --yolo       Enable YOLO mode (allow all tools)
+  -w, --workspace  Set workspace directory
+  -p, --prompt     Initial prompt to send
+  -d, --debug      Enable debug mode
+#+end_example
+
+** Slash Commands
+
+#+begin_example
+/help     - Show available commands
+/status   - Show session statistics
+/tools    - List available tools
+/model    - Show or set model
+/compact  - Compact conversation history
+/save     - Save session
+/load     - Load session
+/debug    - Toggle debug mode
+#+end_example
+
+* Lessons Learned
+
+1. *Platform Testing* - FreeBSD revealed issues not seen on Linux
+2. *JSON Independence* - Don't assume library availability
+3. *Safety First* - Default-deny is better than default-allow
+4. *Incremental Testing* - Test each feature as it's built
+5. *Documentation* - Org-mode keeps docs close to code
+
+* Future Considerations
+
+1. *Streaming Responses* - For long generations
+2. *Multi-Provider* - Beyond Ollama
+3. *MCP Protocol* - Standard tool interop
+4. *Agent Teams* - Multi-agent coordination
+5. *IDE Integration* - Beyond CLI
+
+* Appendix: Commit History
+
+#+begin_example
+97ce3c6 docs: Remove last-commit badge from README
+e156f8e feat(cli): Add YOLO mode and Claude Code-style flags
+34f4d0f feat(config): Add Claude-style project directory encoding
+0347540 feat(config): Add XDG Base Directory support
+a34ded0 docs: Add comprehensive README.org with badges
+1e29de6 chore: Initialize beads issue tracking
+5acef9b docs: Add comprehensive testing procedures documentation
+e1ba1d5 feat(tools): Add self-modification tools for dynamic capabilities
+7c8b962 fix(session): Format timestamps as strings instead of time objects
+12c35c7 feat(repl): Add session management and interactive REPL
+33c34d4 feat(tools): Add tool registration system with tests
+836fdd5 docs: Add comprehensive requirements from gemini-repl-009
+df5b1c5 feat(ollama): Add cloud API support with authentication
+7c962f1 test(ollama): Add comprehensive test suite
+30440e8 feat(ollama): Add Ollama API client module
+d52dafd fix(util): Use temp files for HTTP to avoid FreeBSD popen segfault
+547c073 fix(config): Lookup keys with multiple naming conventions
+80b1111 feat(util): Add configuration and HTTP/JSON utilities
+a0968f1 chore: Initial project setup with Makefile and configuration
+#+end_example

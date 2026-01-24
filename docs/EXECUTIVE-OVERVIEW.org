@@ -1,0 +1,121 @@
+#+TITLE: guile-sage Executive Overview
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-24
+#+OPTIONS: toc:2 num:nil
+
+* Executive Summary
+
+*guile-sage* is an AI-powered REPL (Read-Eval-Print Loop) written in Guile3 Scheme
+that enables conversational interaction with Large Language Models through tool calling.
+Built on the Ollama backend, it provides a self-modifying coding assistant that can
+read, write, and execute code within a controlled workspace.
+
+* Key Features
+
+| Feature | Description |
+|---------+-------------|
+| Tool Calling | 15 built-in tools for file operations, git, search |
+| YOLO Mode | Optional unrestricted tool access for power users |
+| Session Management | Persistent conversations with context compaction |
+| XDG Compliance | Standard directory structure following XDG spec |
+| Project Isolation | Per-project sessions (Claude Code-style path encoding) |
+| Self-Modification | Tools to create tools, eval code, reload modules |
+
+* Technical Architecture
+
+#+begin_example
+┌─────────────────────────────────────────────────────┐
+│                   guile-sage                        │
+├─────────────────────────────────────────────────────┤
+│  REPL Layer (repl.scm)                              │
+│  - Slash commands (/help, /status, /tools, etc.)   │
+│  - Chat handling with tool call parsing            │
+├─────────────────────────────────────────────────────┤
+│  Session Layer (session.scm)                        │
+│  - Message history with token tracking             │
+│  - Context compaction for long conversations       │
+│  - Save/load to JSON                               │
+├─────────────────────────────────────────────────────┤
+│  Tool Layer (tools.scm)                             │
+│  - Safe/unsafe tool permissions                    │
+│  - Workspace isolation                             │
+│  - Dynamic tool registration                       │
+├─────────────────────────────────────────────────────┤
+│  API Layer (ollama.scm)                             │
+│  - HTTP/JSON communication                         │
+│  - Tool prompt formatting                          │
+│  - Response parsing                                │
+├─────────────────────────────────────────────────────┤
+│  Config Layer (config.scm)                          │
+│  - .env file loading                               │
+│  - XDG directory management                        │
+│  - Project path encoding                           │
+└─────────────────────────────────────────────────────┘
+                        │
+                        ▼
+             ┌──────────────────┐
+             │  Ollama Backend  │
+             │ (host.lan:11434)  │
+             └──────────────────┘
+#+end_example
+
+* Safety Model
+
+** Safe Tools (Always Allowed)
+- read_file, list_files
+- git_status, git_diff, git_log
+- search_files, glob_files
+
+** Unsafe Tools (Require YOLO Mode)
+- write_file, edit_file
+- git_commit, git_add_note
+- eval_scheme, create_tool, reload_module
+- run_tests
+
+** Path Safety
+- Workspace isolation (no access outside project)
+- Parent traversal blocked (..)
+- Sensitive files protected (.env, .git/, .ssh/)
+
+* Metrics
+
+| Metric | Value |
+|--------+-------|
+| Core modules | 6 |
+| Built-in tools | 15 |
+| Unit tests | 56 |
+| UAT tests | 35 |
+| Lines of Scheme | ~1500 |
+
+* Deployment
+
+** Requirements
+- Guile 3.0+
+- curl (HTTP client)
+- Ollama (local or cloud)
+
+** Quick Start
+#+begin_src bash
+git clone https://github.com/dsp-dr/guile-sage
+cd guile-sage
+cp .env.template .env
+# Edit .env with your Ollama host
+make run
+#+end_src
+
+** YOLO Mode
+#+begin_src bash
+guile3 -L src -c '(use-modules (sage repl)) (repl-start)' --yolo
+#+end_src
+
+* Future Roadmap
+
+1. *MCP Protocol* - Model Context Protocol support for tool interop
+2. *Multi-Provider* - Support for OpenAI, Anthropic, etc.
+3. *Agent System* - Multi-agent orchestration
+4. *Hooks* - Pre/post tool execution hooks
+5. *Streaming* - Real-time response streaming
+
+* License
+
+MIT License - Open source, commercially permissive.

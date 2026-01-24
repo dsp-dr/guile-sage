@@ -1,0 +1,75 @@
+#+TITLE: guile-sage Test Metrics
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-24
+
+* Test Coverage Summary
+
+| Date | Unit Tests | UAT Tests | Total | Pass Rate |
+|------+------------+-----------+-------+-----------|
+| 2026-01-24 | 56 | 35 | 91 | 100% |
+
+* Test Breakdown by Module
+
+** Unit Tests (56 total)
+
+| Module | Tests | Description |
+|--------+-------+-------------|
+| test-ollama.scm | 17 | JSON parsing, API, tool prompts |
+| test-session.scm | 18 | Sessions, context, path encoding |
+| test-tools.scm | 25 | Tool registration, permissions, execution |
+
+** UAT Tests (35 total)
+
+| Category | Tests | Description |
+|----------+-------+-------------|
+| Tool Registration | 7 | Default tools, existence checks |
+| Safe Tool Execution | 7 | read_file, list_files, git_*, search |
+| Path Safety | 5 | Traversal, .env, .git blocking |
+| Dynamic Evaluation | 3 | eval_scheme with YOLO mode |
+| Permission System | 5 | Safe/unsafe checks, mode-dependent |
+| Session Integration | 4 | Create, messages, tool calls, context |
+| XDG Directories | 4 | Paths, project encoding |
+
+* Test Categories
+
+** Functional Tests
+- Tool execution
+- Session management
+- API communication
+
+** Security Tests
+- Path traversal prevention
+- Sensitive file protection
+- Permission enforcement
+
+** Integration Tests
+- End-to-end tool calling
+- Session persistence
+- Context management
+
+* Running Tests
+
+#+begin_src bash
+# All unit tests
+make check
+
+# Verbose with metrics
+make check-verbose
+
+# UAT tests
+make uat
+
+# UAT with YOLO mode
+make uat-yolo
+#+end_src
+
+* CI/CD
+
+GitHub Actions workflow runs:
+1. Linting (make lint)
+2. Unit tests (all test-*.scm)
+3. Test summary generation
+
+Triggered on:
+- Push to main
+- Pull requests to main
