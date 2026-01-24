@@ -4,9 +4,9 @@
 
 [[https://www.gnu.org/software/guile/][file:https://img.shields.io/badge/Guile-3.0-blue.svg]]
 [[https://ollama.ai][file:https://img.shields.io/badge/Ollama-supported-green.svg]]
-[[https://github.com/dsp-dr/guile-sage/actions][file:https://img.shields.io/github/actions/workflow/status/dsp-dr/guile-sage/test.yml?branch=main&label=tests]]
 [[https://github.com/dsp-dr/guile-sage/blob/main/LICENSE][file:https://img.shields.io/badge/license-MIT-blue.svg]]
 [[https://freebsd.org][file:https://img.shields.io/badge/FreeBSD-14.3-red.svg]]
+[[https://github.com/dsp-dr/guile-sage][file:https://img.shields.io/github/last-commit/dsp-dr/guile-sage.svg]]
 
 *AI REPL with tool calling for Guile Scheme*
 
@@ -120,6 +120,21 @@ SAGE_CONFIG_DIR=/custom/config/path
 SAGE_DATA_DIR=/custom/data/path
 SAGE_SESSION_DIR=/custom/sessions/path
 #+end_src
+
+*** Project-Local Sessions
+
+Like Claude Code, guile-sage stores sessions per-project using path encoding:
+
+#+begin_example
+/home/user/myproject  ->  -home-user-myproject
+#+end_example
+
+Sessions are stored in:
+#+begin_example
+$XDG_DATA_HOME/sage/projects/-home-user-myproject/sessions/
+#+end_example
+
+This keeps conversation history separate per working directory.
 
 ** Usage
 

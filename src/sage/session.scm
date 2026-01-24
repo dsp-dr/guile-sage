@@ -33,9 +33,12 @@
 (define *session* #f)
 
 ;;; session-dir: Get session storage directory (XDG compliant)
-(define (session-dir)
+;;; Uses project-specific directory by default (like Claude Code)
+(define* (session-dir #:key (project-local #t))
   (let ((dir (or (config-get "SESSION_DIR")
-                 (sage-sessions-dir))))
+                 (if project-local
+                     (sage-project-sessions-dir)
+                     (sage-sessions-dir)))))
     (unless (file-exists? dir)
       (system (format #f "mkdir -p '~a'" dir)))
     dir))
