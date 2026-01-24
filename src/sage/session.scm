@@ -45,10 +45,12 @@
 ;;;   name - Optional session name
 ;;; Returns: New session alist
 (define* (session-create #:key (name #f) (model #f))
-  (let ((session `(("name" . ,(or name (format #f "session-~a" (current-time))))
-                   ("model" . ,(or model (config-get "MODEL") "qwen3-coder:latest"))
-                   ("created" . ,(current-time))
-                   ("updated" . ,(current-time))
+  (let* ((now (current-time))
+         (timestamp (number->string (time-second now)))
+         (session `(("name" . ,(or name (string-append "session-" timestamp)))
+                    ("model" . ,(or model (config-get "MODEL") "qwen3-coder:latest"))
+                    ("created" . ,timestamp)
+                    ("updated" . ,timestamp)
                    ("messages" . ())
                    ("stats" . (("total_tokens" . 0)
                               ("input_tokens" . 0)
@@ -68,7 +70,7 @@
     (session-create))
   (let* ((msg `(("role" . ,role)
                 ("content" . ,content)
-                ("timestamp" . ,(current-time))
+                ("timestamp" . ,(number->string (time-second (current-time))))
                 ("tokens" . ,(or tokens (estimate-tokens content)))))
          (messages (assoc-ref *session* "messages"))
          (stats (assoc-ref *session* "stats"))
@@ -99,7 +101,7 @@
                           ("tool_calls" . ,tools)))))
     ;; Update timestamp
     (set! *session*
-          (assoc-set! *session* "updated" (current-time)))
+          (assoc-set! *session* "updated" (number->string (time-second (current-time)))))
     msg))
 
 ;;; session-get-messages: Get all messages
@@ -159,7 +161,7 @@
             (let ((summary-msg `(("role" . "system")
                                  ("content" . ,(format #f "[Compacted ~a messages, ~a tokens]"
                                                        to-remove old-tokens))
-                                 ("timestamp" . ,(current-time))
+                                 ("timestamp" . ,(number->string (time-second (current-time))))
                                  ("tokens" . 20))))
               (set! new-messages (cons summary-msg new-messages))))
           ;; Update session
