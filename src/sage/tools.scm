@@ -14,9 +14,11 @@
   #:use-module (ice-9 ftw)
   #:use-module (ice-9 regex)
   #:use-module (ice-9 textual-ports)
+  #:use-module (ice-9 eval-string)
   #:export (*tools*
             *safe-tools*
             *workspace*
+            workspace
             register-tool
             register-safe-tool
             get-tool
@@ -285,4 +287,165 @@
          (system (string-append cmd " > " tmp))
          (let ((result (call-with-input-file tmp get-string-all)))
            (delete-file tmp)
-           result))))))
+           result)))))
+
+  ;; ============================================================
+  ;; Self-Modification Tools
+  ;; ============================================================
+
+  ;; edit_file - Edit existing files with search/replace
+  (register-tool
+   "edit_file"
+   "Edit a file by replacing text (search and replace)"
+   '(("type" . "object")
+     ("properties" . (("path" . (("type" . "string")
+                                 ("description" . "File path relative to workspace")))
+                      ("search" . (("type" . "string")
+                                   ("description" . "Text to search for")))
+                      ("replace" . (("type" . "string")
+                                    ("description" . "Text to replace with")))))
+     ("required" . #("path" "search" "replace")))
+   (lambda (args)
+     (let ((path (assoc-ref args "path"))
+           (search (assoc-ref args "search"))
+           (replace (assoc-ref args "replace")))
+       (if (safe-path? path)
+           (let ((full-path (string-append (workspace) "/" path)))
+             (if (file-exists? full-path)
+                 (let* ((content (call-with-input-file full-path get-string-all))
+                        (new-content (string-replace-substring content search replace)))
+                   (if (equal? content new-content)
+                       (format #f "No match found for search text in ~a" path)
+                       (begin
+                         (call-with-output-file full-path
+                           (lambda (port) (display new-content port)))
+                         (format #f "Replaced text in ~a" path))))
+                 (format #f "File not found: ~a" path)))
+           (format #f "Unsafe path: ~a" path)))))
+
+  ;; run_tests - Execute test suite
+  (register-tool
+   "run_tests"
+   "Run the test suite"
+   '(("type" . "object")
+     ("properties" . (("pattern" . (("type" . "string")
+                                    ("description" . "Test file pattern (default: test-*.scm)")))))
+     ("required" . #()))
+   (lambda (args)
+     (let* ((pattern (or (assoc-ref args "pattern") "test-*.scm"))
+            (cmd (format #f "cd ~a && for test in tests/~a; do guile3 -L src $test 2>&1; done"
+                         (workspace) pattern))
+            (tmp (format #f "/tmp/sage-test-~a" (getpid))))
+       (system (string-append cmd " > " tmp " 2>&1"))
+       (let ((result (call-with-input-file tmp get-string-all)))
+         (delete-file tmp)
+         result))))
+
+  ;; git_commit - Make atomic commits
+  (register-tool
+   "git_commit"
+   "Stage files and create a git commit"
+   '(("type" . "object")
+     ("properties" . (("files" . (("type" . "array")
+                                  ("items" . (("type" . "string")))
+                                  ("description" . "Files to stage")))
+                      ("message" . (("type" . "string")
+                                    ("description" . "Commit message")))))
+     ("required" . #("files" "message")))
+   (lambda (args)
+     (let* ((files (assoc-ref args "files"))
+            (message (assoc-ref args "message"))
+            (file-list (if (list? files)
+                           (string-join files " ")
+                           files))
+            (tmp (format #f "/tmp/sage-commit-~a" (getpid)))
+            (cmd (format #f "cd ~a && git add ~a && git commit -m '~a\n\nCo-Authored-By: Claude <noreply@anthropic.com>'"
+                         (workspace) file-list message)))
+       (system (string-append cmd " > " tmp " 2>&1"))
+       (let ((result (call-with-input-file tmp get-string-all)))
+         (delete-file tmp)
+         result))))
+
+  ;; git_add_note - Add git notes for documentation
+  (register-tool
+   "git_add_note"
+   "Add a git note to the current HEAD commit"
+   '(("type" . "object")
+     ("properties" . (("message" . (("type" . "string")
+                                    ("description" . "Note message")))))
+     ("required" . #("message")))
+   (lambda (args)
+     (let* ((message (assoc-ref args "message"))
+            (tmp (format #f "/tmp/sage-note-~a" (getpid)))
+            (cmd (format #f "cd ~a && git notes add -f -m '~a'"
+                         (workspace) message)))
+       (system (string-append cmd " > " tmp " 2>&1"))
+       (let ((result (call-with-input-file tmp get-string-all)))
+         (delete-file tmp)
+         (if (string-null? (string-trim-both result))
+             "Note added successfully"
+             result)))))
+
+  ;; eval_scheme - Evaluate scheme code dynamically
+  (register-tool
+   "eval_scheme"
+   "Evaluate Scheme code and return result"
+   '(("type" . "object")
+     ("properties" . (("code" . (("type" . "string")
+                                 ("description" . "Scheme code to evaluate")))))
+     ("required" . #("code")))
+   (lambda (args)
+     (let ((code (assoc-ref args "code")))
+       (catch #t
+         (lambda ()
+           (let ((result (eval-string code)))
+             (format #f "~s" result)))
+         (lambda (key . rest)
+           (format #f "Evaluation error: ~a ~a" key rest))))))
+
+  ;; reload_module - Reload a guile module
+  (register-tool
+   "reload_module"
+   "Reload a Guile module to pick up changes"
+   '(("type" . "object")
+     ("properties" . (("module" . (("type" . "string")
+                                   ("description" . "Module name (e.g. sage tools)")))))
+     ("required" . #("module")))
+   (lambda (args)
+     (let ((module-str (assoc-ref args "module")))
+       (catch #t
+         (lambda ()
+           (let* ((module-name (map string->symbol (string-split module-str #\space)))
+                  (mod (resolve-module module-name)))
+             (reload-module mod)
+             (format #f "Reloaded module: ~a" module-name)))
+         (lambda (key . rest)
+           (format #f "Reload error: ~a ~a" key rest))))))
+
+  ;; create_tool - Dynamically register a new tool
+  (register-tool
+   "create_tool"
+   "Create and register a new tool dynamically"
+   '(("type" . "object")
+     ("properties" . (("name" . (("type" . "string")
+                                 ("description" . "Tool name")))
+                      ("description" . (("type" . "string")
+                                        ("description" . "Tool description")))
+                      ("code" . (("type" . "string")
+                                 ("description" . "Scheme code for tool execution function (lambda (args) ...)")))))
+     ("required" . #("name" "description" "code")))
+   (lambda (args)
+     (let ((name (assoc-ref args "name"))
+           (desc (assoc-ref args "description"))
+           (code (assoc-ref args "code")))
+       (catch #t
+         (lambda ()
+           (let ((fn (eval-string code)))
+             (register-tool name desc
+                           '(("type" . "object")
+                             ("properties" . ())
+                             ("required" . #()))
+                           fn)
+             (format #f "Created tool: ~a" name)))
+         (lambda (key . rest)
+           (format #f "Error creating tool: ~a ~a" key rest)))))))

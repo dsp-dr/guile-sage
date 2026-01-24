@@ -15,7 +15,9 @@
   #:export (http-get
             http-post
             json-read-string
-            json-write-string))
+            json-write-string
+            string-replace-substring
+            make-temp-file))
 
 ;;; ============================================================
 ;;; JSON Parser (minimal implementation)
@@ -222,3 +224,22 @@
              (body-lines (drop-right lines 1)))
         (cons (string->number code-line)
               (string-join body-lines "\n"))))))
+
+;;; ============================================================
+;;; String Utilities
+;;; ============================================================
+
+;;; string-replace-substring: Replace all occurrences of search with replace
+(define (string-replace-substring str search replace)
+  (let ((search-len (string-length search)))
+    (if (= search-len 0)
+        str
+        (let loop ((pos 0) (acc '()))
+          (let ((found (string-contains str search pos)))
+            (if found
+                (loop (+ found search-len)
+                      (cons replace
+                            (cons (substring str pos found)
+                                  acc)))
+                (string-concatenate
+                 (reverse (cons (substring str pos) acc)))))))))
