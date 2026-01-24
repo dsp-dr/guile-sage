@@ -1,0 +1,14 @@
+# Environment files with secrets
+.env
+
+# Guile compiled files
+*.go
+*~
+
+# Editor backups
+\#*\#
+.\#*
+
+# Local development
+.direnv/
+.envrc.local
