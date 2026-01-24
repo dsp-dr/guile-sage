@@ -43,6 +43,37 @@
       (unless (= tokens 0)
         (error "should return 0 for empty string" tokens)))))
 
+;;; Path Encoding Tests (Claude-style)
+
+(format #t "~%--- Path Encoding ---~%")
+
+(run-test "path->project-id encodes path"
+  (lambda ()
+    (let ((id (path->project-id "/home/user/project")))
+      (unless (equal? id "-home-user-project")
+        (error "wrong encoding" id)))))
+
+(run-test "project-id->path decodes path"
+  (lambda ()
+    (let ((path (project-id->path "-home-user-project")))
+      (unless (equal? path "/home/user/project")
+        (error "wrong decoding" path)))))
+
+(run-test "path encoding roundtrip (no hyphens)"
+  (lambda ()
+    ;; Note: paths with hyphens don't roundtrip (same as Claude Code)
+    (let* ((original "/home/user/projects/test")
+           (encoded (path->project-id original))
+           (decoded (project-id->path encoded)))
+      (unless (equal? original decoded)
+        (error "roundtrip failed" original decoded)))))
+
+(run-test "current-project-id returns encoded cwd"
+  (lambda ()
+    (let ((id (current-project-id)))
+      (unless (string-prefix? "-" id)
+        (error "should start with dash" id)))))
+
 ;;; Session Creation Tests
 
 (format #t "~%--- Session Creation ---~%")

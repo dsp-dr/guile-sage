@@ -295,6 +295,7 @@
 
   ;; Ensure XDG directories exist
   (ensure-sage-dirs)
+  (ensure-project-dirs)
 
   ;; Initialize tools
   (init-default-tools)

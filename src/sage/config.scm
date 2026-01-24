@@ -28,7 +28,14 @@
             sage-agents-dir
             sage-projects-dir
             sage-commands-dir
-            ensure-sage-dirs))
+            ensure-sage-dirs
+            ;; Project directory encoding
+            path->project-id
+            project-id->path
+            current-project-id
+            sage-project-dir
+            sage-project-sessions-dir
+            ensure-project-dirs))
 
 ;;; Constants
 
@@ -160,4 +167,40 @@
   (ensure-dir (sage-agents-dir))
   (ensure-dir (sage-projects-dir))
   (ensure-dir (sage-commands-dir))
+  #t)
+
+;;; ============================================================
+;;; Project Directory Encoding (Claude-style)
+;;; ============================================================
+
+;;; path->project-id: Encode a path to project directory name
+;;; Replaces "/" with "-" (like Claude Code does)
+;;; /home/user/project -> -home-user-project
+(define (path->project-id path)
+  (string-map (lambda (c) (if (char=? c #\/) #\- c)) path))
+
+;;; project-id->path: Decode project directory name back to path
+;;; -home-user-project -> /home/user/project
+(define (project-id->path project-id)
+  (if (string-prefix? "-" project-id)
+      (string-map (lambda (c) (if (char=? c #\-) #\/ c)) project-id)
+      project-id))
+
+;;; current-project-id: Get encoded project ID for current directory
+(define (current-project-id)
+  (path->project-id (getcwd)))
+
+;;; sage-project-dir: Get project-specific data directory
+;;; Uses current working directory encoded as project ID
+(define (sage-project-dir)
+  (string-append (sage-projects-dir) "/" (current-project-id)))
+
+;;; sage-project-sessions-dir: Get project-specific sessions directory
+(define (sage-project-sessions-dir)
+  (string-append (sage-project-dir) "/sessions"))
+
+;;; ensure-project-dirs: Create project-specific directories
+(define (ensure-project-dirs)
+  (ensure-dir (sage-project-dir))
+  (ensure-dir (sage-project-sessions-dir))
   #t)
