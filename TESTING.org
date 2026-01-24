@@ -1,0 +1,167 @@
+#+TITLE: Testing Procedures for guile-sage
+#+AUTHOR: guile-sage team
+#+DATE: 2026-01-24
+
+* Overview
+
+guile-sage uses a simple test framework with explicit assertions.
+Tests are located in the =tests/= directory.
+
+* Running Tests
+
+** All Tests
+#+begin_src bash
+make check
+#+end_src
+
+Or manually:
+#+begin_src bash
+guile3 -L src tests/test-ollama.scm
+guile3 -L src tests/test-session.scm
+guile3 -L src tests/test-tools.scm
+#+end_src
+
+** Individual Test Files
+#+begin_src bash
+guile3 -L src tests/test-<module>.scm
+#+end_src
+
+* Test File Structure
+
+Each test file follows this pattern:
+
+#+begin_src scheme
+#!/usr/bin/env guile3
+!#
+;;; test-<module>.scm --- Tests for <module>
+
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
+
+(use-modules (sage <module>)
+             (ice-9 format))
+
+;;; Test helpers
+(define *tests-run* 0)
+(define *tests-passed* 0)
+
+(define (run-test name thunk)
+  (set! *tests-run* (1+ *tests-run*))
+  (catch #t
+    (lambda ()
+      (thunk)
+      (set! *tests-passed* (1+ *tests-passed*))
+      (format #t "PASS: ~a~%" name))
+    (lambda (key . args)
+      (format #t "FAIL: ~a - ~a: ~a~%" name key args))))
+
+;;; Test cases
+(run-test "test description"
+  (lambda ()
+    (unless (expected-condition)
+      (error "error message"))))
+
+;;; Summary
+(format #t "Tests: ~a/~a passed~%" *tests-passed* *tests-run*)
+(exit (if (= *tests-passed* *tests-run*) 0 1))
+#+end_src
+
+* Test Suites
+
+** test-ollama.scm (17 tests)
+- Configuration tests: host, model, API key
+- Model listing tests
+- Response parsing tests
+- Tool call formatting and parsing
+
+** test-session.scm (14 tests)
+- Token estimation
+- Session creation
+- Message management
+- Context management
+- Session clear/compact
+- Status reporting
+
+** test-tools.scm (25 tests)
+- Tool registration
+- Permission checking
+- Path safety validation
+- Tool execution
+- Schema generation
+- Custom tool registration
+
+* Manual Testing
+
+** Starting the REPL
+#+begin_src bash
+make run
+#+end_src
+
+Or:
+#+begin_src bash
+guile3 -L src -c '(use-modules (sage repl)) (repl-start)'
+#+end_src
+
+** Test Commands
+| Command    | Expected Result                   |
+|------------+-----------------------------------|
+| /help      | Show available commands           |
+| /status    | Show session statistics           |
+| /tools     | List registered tools             |
+| /models    | List available Ollama models      |
+| /version   | Show version information          |
+| /workspace | Show workspace directory          |
+| /debug     | Toggle debug mode                 |
+| /clear     | Clear screen                      |
+| /reset     | Clear conversation history        |
+| /compact   | Compact conversation history      |
+
+** Testing Chat
+#+begin_example
+sage> Hello, what can you do?
+#+end_example
+
+Should receive response from Ollama model.
+
+** Testing Tool Calls
+#+begin_example
+sage> List the files in the src directory
+#+end_example
+
+Should invoke list_files tool and return results.
+
+* Adding New Tests
+
+1. Create a new test file in =tests/= following the pattern
+2. Import the module to test
+3. Write test cases using =run-test=
+4. Add summary and exit code at the end
+5. Run with =guile3 -L src tests/test-<module>.scm=
+
+* Configuration for Tests
+
+Tests use environment variables or =.env= file:
+
+#+begin_src bash
+# .env
+SAGE_OLLAMA_HOST=http://host.lan:11434
+SAGE_MODEL=qwen3-coder:latest
+#+end_src
+
+Check configuration:
+#+begin_src bash
+make check-config
+#+end_src
+
+* Troubleshooting
+
+** FreeBSD popen segfault
+guile3's =open-input-pipe= causes segfault on FreeBSD 14.3.
+Workaround: use =system()= with temp files (already implemented in util.scm).
+
+** Missing JSON module
+guile-json not available on FreeBSD.
+Workaround: custom JSON parser in util.scm.
+
+** Compilation Warnings
+Check for forward references in module definitions.
+Ensure functions are defined before use in same file.
