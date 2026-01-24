@@ -9,7 +9,7 @@ TESTDIR = tests
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run init check-config help docs publish run-yolo check-verbose uat uat-yolo
+.PHONY: all clean check repl run init check-config help docs publish run-yolo check-verbose uat uat-yolo install-hooks
 
 all: $(OBJECTS)
 
@@ -46,6 +46,23 @@ init:
 
 check-config:
 	@sh scripts/check-config.sh
+
+install-hooks:
+	@echo "Installing git hooks..."
+	@if [ -f .git/hooks/pre-commit ]; then \
+		if ! grep -q "guile-sage pre-commit" .git/hooks/pre-commit; then \
+			echo "" >> .git/hooks/pre-commit; \
+			echo "# guile-sage pre-commit hook" >> .git/hooks/pre-commit; \
+			echo "if [ -x scripts/pre-commit ]; then scripts/pre-commit || exit 1; fi" >> .git/hooks/pre-commit; \
+			echo "Added guile-sage hook to existing pre-commit."; \
+		else \
+			echo "guile-sage hook already installed."; \
+		fi; \
+	else \
+		cp scripts/pre-commit .git/hooks/pre-commit; \
+		chmod +x .git/hooks/pre-commit; \
+		echo "Installed pre-commit hook."; \
+	fi
 
 # Documentation targets (non-phony, depend on .org sources)
 DOCS_ORG = $(wildcard docs/*.org)
@@ -106,16 +123,17 @@ uat-yolo:
 
 help:
 	@echo "Targets:"
-	@echo "  all          - Compile all modules"
-	@echo "  init         - Initialize and validate setup"
-	@echo "  check-config - Check configuration"
-	@echo "  repl         - Start interactive REPL"
-	@echo "  run          - Run sage CLI"
-	@echo "  run-yolo     - Run sage CLI in YOLO mode"
-	@echo "  check        - Run tests"
-	@echo "  check-verbose- Run tests with metrics"
-	@echo "  uat          - Run UAT tests"
-	@echo "  uat-yolo     - Run UAT tests in YOLO mode"
-	@echo "  docs         - Build documentation"
-	@echo "  publish      - Build and prepare for publishing"
-	@echo "  clean        - Remove compiled files"
+	@echo "  all           - Compile all modules"
+	@echo "  init          - Initialize and validate setup"
+	@echo "  install-hooks - Install git pre-commit hooks"
+	@echo "  check-config  - Check configuration"
+	@echo "  repl          - Start interactive REPL"
+	@echo "  run           - Run sage CLI"
+	@echo "  run-yolo      - Run sage CLI in YOLO mode"
+	@echo "  check         - Run tests"
+	@echo "  check-verbose - Run tests with metrics"
+	@echo "  uat           - Run UAT tests"
+	@echo "  uat-yolo      - Run UAT tests in YOLO mode"
+	@echo "  docs          - Build documentation"
+	@echo "  publish       - Build and prepare for publishing"
+	@echo "  clean         - Remove compiled files"

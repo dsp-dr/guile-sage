@@ -12,6 +12,29 @@ cd "$PROJECT_DIR"
 echo "=== Guile-Sage Initialization ==="
 echo ""
 
+# Step 0: Install git hooks
+echo "Step 0: Installing git hooks..."
+if [ -d .git ]; then
+    # Install pre-commit hook (append to existing if present)
+    if [ -f .git/hooks/pre-commit ]; then
+        # Check if our hook is already installed
+        if ! grep -q "guile-sage pre-commit" .git/hooks/pre-commit; then
+            echo "" >> .git/hooks/pre-commit
+            echo "# guile-sage pre-commit hook" >> .git/hooks/pre-commit
+            echo "if [ -x scripts/pre-commit ]; then scripts/pre-commit || exit 1; fi" >> .git/hooks/pre-commit
+            echo "Added guile-sage hook to existing pre-commit."
+        else
+            echo "guile-sage hook already installed."
+        fi
+    else
+        cp scripts/pre-commit .git/hooks/pre-commit
+        chmod +x .git/hooks/pre-commit
+        echo "Installed pre-commit hook."
+    fi
+else
+    echo "Not a git repository, skipping hook installation."
+fi
+
 # Step 1: Check configuration
 echo "Step 1: Checking configuration..."
 if ! sh scripts/check-config.sh; then

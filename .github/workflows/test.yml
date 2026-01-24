@@ -33,15 +33,15 @@ jobs:
         sudo apt-get install -y guile-3.0
 
     - name: Run session tests
-      run: guile3 -L src tests/test-session.scm
+      run: guile -L src tests/test-session.scm
 
     - name: Run tools tests
-      run: guile3 -L src tests/test-tools.scm
+      run: guile -L src tests/test-tools.scm
 
     - name: Run JSON/util tests (from ollama tests)
       run: |
         # Run only the JSON parsing tests (no API calls)
-        guile3 -L src -c '
+        guile -L src -c '
           (add-to-load-path "src")
           (use-modules (sage util))
           (define (test name fn)
@@ -71,9 +71,9 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### test-session.scm" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        guile3 -L src tests/test-session.scm 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY
+        guile -L src tests/test-session.scm 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
         echo "### test-tools.scm" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        guile3 -L src tests/test-tools.scm 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY
+        guile -L src tests/test-tools.scm 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY

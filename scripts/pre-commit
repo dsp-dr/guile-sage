@@ -1,0 +1,45 @@
+#!/bin/sh
+# guile-sage pre-commit hook
+# Runs lint and tests before allowing commits
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+cd "$PROJECT_DIR"
+
+# Detect guile command (guile3 on FreeBSD/local, guile on Ubuntu/CI)
+if command -v guile3 >/dev/null 2>&1; then
+    GUILE=guile3
+elif command -v guile >/dev/null 2>&1; then
+    GUILE=guile
+else
+    echo "Error: guile not found" >&2
+    exit 1
+fi
+
+echo "=== Pre-commit checks ==="
+
+# Step 1: Lint
+echo "Running lint..."
+if grep -rn "make-vector" src/ 2>/dev/null; then
+    echo "Warning: make-vector conflicts with core Guile"
+fi
+
+# Step 2: Run session tests
+echo "Running session tests..."
+if ! $GUILE -L src tests/test-session.scm; then
+    echo "FAIL: test-session.scm" >&2
+    exit 1
+fi
+
+# Step 3: Run tools tests
+echo "Running tools tests..."
+if ! $GUILE -L src tests/test-tools.scm; then
+    echo "FAIL: test-tools.scm" >&2
+    exit 1
+fi
+
+echo "=== All pre-commit checks passed ==="
+exit 0
