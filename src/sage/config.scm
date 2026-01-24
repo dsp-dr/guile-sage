@@ -35,7 +35,10 @@
             current-project-id
             sage-project-dir
             sage-project-sessions-dir
-            ensure-project-dirs))
+            ensure-project-dirs
+            ;; AGENTS.md support
+            find-agents-md
+            load-agents-md))
 
 ;;; Constants
 
@@ -204,3 +207,37 @@
   (ensure-dir (sage-project-dir))
   (ensure-dir (sage-project-sessions-dir))
   #t)
+
+;;; ============================================================
+;;; AGENTS.md Support (like Claude's CLAUDE.md)
+;;; ============================================================
+
+;;; find-agents-md: Find AGENTS.md files in order of precedence
+;;; Returns: List of paths to AGENTS.md files found
+(define (find-agents-md)
+  (let ((candidates (list
+                     ;; 1. Current directory
+                     (string-append (getcwd) "/AGENTS.md")
+                     ;; 2. Project-specific in XDG
+                     (string-append (sage-project-dir) "/AGENTS.md")
+                     ;; 3. Global in XDG config
+                     (string-append (sage-config-dir) "/AGENTS.md")
+                     ;; 4. Global in XDG data
+                     (string-append (sage-data-dir) "/AGENTS.md")
+                     ;; 5. Home directory (fallback)
+                     (string-append (getenv "HOME") "/.sage/AGENTS.md"))))
+    (filter file-exists? candidates)))
+
+;;; load-agents-md: Load and concatenate all AGENTS.md files
+;;; Returns: Combined content string or #f if none found
+(define (load-agents-md)
+  (let ((files (find-agents-md)))
+    (if (null? files)
+        #f
+        (string-join
+         (map (lambda (f)
+                (format #f "# From: ~a\n~a"
+                        f
+                        (call-with-input-file f get-string-all)))
+              files)
+         "\n\n"))))
