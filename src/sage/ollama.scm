@@ -12,6 +12,9 @@
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
   #:export (ollama-host
+            ollama-api-key
+            ollama-model
+            ollama-auth-headers
             ollama-list-models
             ollama-chat
             ollama-chat-with-tools
@@ -25,11 +28,32 @@
       (config-get "ollama-host")
       *default-ollama-host*))
 
+;;; ollama-api-key: Get API key for cloud Ollama
+;;; Returns: API key string or #f if not set
+(define (ollama-api-key)
+  (or (config-get "OLLAMA_API_KEY")
+      (config-get "ollama-api-key")))
+
+;;; ollama-model: Get configured model
+;;; Returns: Model name string
+(define (ollama-model)
+  (or (config-get "MODEL")
+      (config-get "SAGE_MODEL")
+      "qwen3-coder:latest"))
+
+;;; ollama-auth-headers: Get authentication headers for cloud API
+;;; Returns: List of header pairs
+(define (ollama-auth-headers)
+  (let ((api-key (ollama-api-key)))
+    (if api-key
+        `(("Authorization" . ,(string-append "Bearer " api-key)))
+        '())))
+
 ;;; ollama-list-models: List available models
 ;;; Returns: List of model info alists
 (define (ollama-list-models)
   (let* ((url (string-append (ollama-host) "/api/tags"))
-         (result (http-get url))
+         (result (http-get url #:headers (ollama-auth-headers)))
          (code (car result))
          (body (cdr result)))
     (if (= code 200)
@@ -49,7 +73,7 @@
                     ("messages" . ,(list->vector messages))
                     ("stream" . ,stream)))
          (body (json-write-string request))
-         (result (http-post url body))
+         (result (http-post url body #:headers (ollama-auth-headers)))
          (code (car result))
          (resp-body (cdr result)))
     (if (= code 200)
