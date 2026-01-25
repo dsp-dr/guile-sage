@@ -68,6 +68,7 @@ For session 3, focus on:
 | +scoping | 169,447 | 153 | Lexical scoping explanation |
 | +errors | 171,382 | 155 | Error handling comparison (800 words) |
 | +conts | 172,856 | 157 | Continuations explanation (600 words) |
+| +testing | 174,568 | 159 | Testing comparison PBT vs EBT (700 words) |
 
 ## Bug Fixes During Session 3
 
