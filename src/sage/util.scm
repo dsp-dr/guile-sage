@@ -258,7 +258,8 @@
           (body->string response-body))))
 
 ;;; http-post-curl: Curl fallback for HTTPS
-(define* (http-post-curl url body #:key (headers '()))
+;;; Now with timeout support (default 5 minutes)
+(define* (http-post-curl url body #:key (headers '()) (timeout 300))
   (let* ((in-file (make-temp-file "sage-post-in"))
          (out-file (make-temp-file "sage-post-out"))
          (dummy (call-with-output-file in-file
@@ -271,8 +272,8 @@
                                             (shell-escape (cdr h))))
                                   headers))
                        " "))
-         (cmd (format #f "curl -s -w '\\n%{http_code}' -X POST ~a -d '@~a' '~a' > '~a'"
-                      header-args in-file
+         (cmd (format #f "curl -s --max-time ~a -w '\\n%{http_code}' -X POST ~a -d '@~a' '~a' > '~a'"
+                      timeout header-args in-file
                       (shell-escape url)
                       out-file)))
     (system cmd)

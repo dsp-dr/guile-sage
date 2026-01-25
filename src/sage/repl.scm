@@ -461,16 +461,17 @@
   ;; Welcome message
   (let* ((yolo? (config-get "YOLO_MODE"))
          (ver-str (format #f "guile-sage v~a" (version-string)))
-         (pad-len (quotient (- 39 (string-length ver-str)) 2))
+         (box-width 44)
+         (pad-len (quotient (- box-width (string-length ver-str)) 2))
          (ver-line (format #f "║~a~a~a║"
                            (make-string pad-len #\space)
                            ver-str
-                           (make-string (- 39 pad-len (string-length ver-str)) #\space))))
+                           (make-string (- box-width pad-len (string-length ver-str)) #\space))))
     (display "\n")
-    (display "╔═══════════════════════════════════════╗\n")
+    (display "╔════════════════════════════════════════════╗\n")
     (display ver-line) (newline)
-    (display "║   Type /help for commands, /exit to quit  ║\n")
-    (display "╚═══════════════════════════════════════╝\n")
+    (display "║   Type /help for commands, /exit to quit   ║\n")
+    (display "╚════════════════════════════════════════════╝\n")
     (format #t "Model: ~a~%" (ollama-model))
     (format #t "Host: ~a~%" (ollama-host))
     (when yolo?

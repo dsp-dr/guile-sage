@@ -9,7 +9,9 @@
   #:use-module (sage config)
   #:use-module (sage util)
   #:use-module (sage logging)
+  #:use-module (sage status)
   #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-19)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
   #:export (ollama-host
@@ -82,17 +84,27 @@
          (request `(("model" . ,model)
                     ("messages" . ,(list->vector messages))
                     ("stream" . ,stream)))
-         (body (json-write-string request)))
+         (body (json-write-string request))
+         (start-time (current-time)))
 
     ;; Log the API request
     (log-api-request model "/api/chat" #:tokens (length messages))
 
+    ;; Show status
+    (status-thinking)
+
     (let* ((result (http-post url body #:headers (ollama-auth-headers)))
+           (elapsed (- (time-second (current-time)) (time-second start-time)))
            (code (if (pair? result) (car result) 0))
            (resp-body (if (pair? result) (cdr result) "")))
+
+      ;; Clear status
+      (status-done elapsed)
+
       (cond
        ((not (number? code))
         (log-error "ollama" "Invalid API response" `(("result" . ,(format #f "~a" result))))
+        (status-clear)
         (error "Invalid API response" result))
        ((= code 200)
         (catch #t
