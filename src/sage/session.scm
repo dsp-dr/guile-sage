@@ -8,6 +8,7 @@
 (define-module (sage session)
   #:use-module (sage config)
   #:use-module (sage util)
+  #:use-module (sage logging)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-19)
   #:use-module (ice-9 format)
@@ -50,7 +51,8 @@
 (define* (session-create #:key (name #f) (model #f))
   (let* ((now (current-time))
          (timestamp (number->string (time-second now)))
-         (session `(("name" . ,(or name (string-append "session-" timestamp)))
+         (session-name (or name (string-append "session-" timestamp)))
+         (session `(("name" . ,session-name)
                     ("model" . ,(or model (config-get "MODEL") "qwen3-coder:latest"))
                     ("created" . ,timestamp)
                     ("updated" . ,timestamp)
@@ -61,6 +63,7 @@
                               ("request_count" . 0)
                               ("tool_calls" . 0))))))
     (set! *session* session)
+    (log-info "session" "Session created" `(("name" . ,session-name)))
     session))
 
 ;;; session-add-message: Add a message to session
@@ -159,6 +162,11 @@
                (old-tokens (fold + 0 (map (lambda (m)
                                             (or (assoc-ref m "tokens") 0))
                                           old-messages))))
+          ;; Log before compaction
+          (log-info "session" "Compacting session"
+                    `(("before_messages" . ,len)
+                      ("removing" . ,to-remove)
+                      ("removing_tokens" . ,old-tokens)))
           ;; If summarize is provided, add summary as system message
           (when summarize
             (let ((summary-msg `(("role" . "system")
@@ -170,6 +178,8 @@
           ;; Update session
           (set! *session*
                 (assoc-set! *session* "messages" new-messages))
+          (log-info "session" "Session compacted"
+                    `(("after_messages" . ,(length new-messages))))
           (format #f "Compacted ~a messages (~a tokens)" to-remove old-tokens)))))
 
 ;;; session-clear!: Clear conversation history
@@ -198,9 +208,15 @@
                            session-name
                            (string-append session-name ".json"))
                        (string-append (session-dir) "/" session-name ".json")))
-         (json (json-write-string *session*)))
+         (json (json-write-string *session*))
+         (stats (assoc-ref *session* "stats")))
     (call-with-output-file filename
       (lambda (port) (display json port)))
+    (log-info "session" "Session saved"
+              `(("name" . ,session-name)
+                ("file" . ,filename)
+                ("messages" . ,(length (session-get-messages)))
+                ("tokens" . ,(assoc-ref stats "total_tokens"))))
     (format #f "Saved to ~a" filename)))
 
 ;;; session-load: Load session from file
@@ -211,10 +227,16 @@
     (if (file-exists? filename)
         (let ((json (call-with-input-file filename get-string-all)))
           (set! *session* (json-read-string json))
-          (format #f "Loaded ~a (~a messages)"
-                  (assoc-ref *session* "name")
-                  (length (session-get-messages))))
-        (format #f "Session not found: ~a" filename))))
+          (let ((session-name (assoc-ref *session* "name"))
+                (msg-count (length (session-get-messages))))
+            (log-info "session" "Session loaded"
+                      `(("name" . ,session-name)
+                        ("file" . ,filename)
+                        ("messages" . ,msg-count)))
+            (format #f "Loaded ~a (~a messages)" session-name msg-count)))
+        (begin
+          (log-warn "session" "Session not found" `(("file" . ,filename)))
+          (format #f "Session not found: ~a" filename)))))
 
 ;;; session-list: List available sessions
 (define (session-list)

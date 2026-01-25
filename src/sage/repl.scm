@@ -8,6 +8,7 @@
 (define-module (sage repl)
   #:use-module (sage config)
   #:use-module (sage util)
+  #:use-module (sage logging)
   #:use-module (sage ollama)
   #:use-module (sage session)
   #:use-module (sage tools)
@@ -113,7 +114,8 @@
     ("/debug"     . ,cmd-debug)
     ("/version"   . ,cmd-version)
     ("/reload"    . ,cmd-reload)
-    ("/refresh"   . ,cmd-reload)))
+    ("/refresh"   . ,cmd-reload)
+    ("/logs"      . ,cmd-logs)))
 
 ;;; Command Implementations
 
@@ -136,6 +138,7 @@
   (display "  /debug          - Toggle debug mode\n")
   (display "  /version        - Show version info\n")
   (display "  /reload         - Hot-reload sage modules\n")
+  (display "  /logs [n] [lvl] - Show recent log entries\n")
   #t)
 
 (define (cmd-exit args)
@@ -268,14 +271,30 @@
       ;; Reload core modules
       (reload-module (resolve-module '(sage util)))
       (reload-module (resolve-module '(sage config)))
+      (reload-module (resolve-module '(sage logging)))
       (reload-module (resolve-module '(sage ollama)))
       (reload-module (resolve-module '(sage tools)))
       (reload-module (resolve-module '(sage session)))
       ;; Don't reload repl - we're running in it!
-      (display "Reloaded: util, config, ollama, tools, session\n")
+      (display "Reloaded: util, config, logging, ollama, tools, session\n")
       (display "Note: repl module requires restart\n"))
     (lambda (key . args)
       (format #t "Reload error: ~a ~a~%" key args)))
+  #t)
+
+(define (cmd-logs args)
+  "Show recent log entries."
+  (let* ((parts (string-split args #\space))
+         (lines (if (and (not (null? parts))
+                         (not (string-null? (car parts))))
+                    (string->number (car parts))
+                    20))
+         (level (if (> (length parts) 1)
+                    (cadr parts)
+                    #f)))
+    (display (read-recent-logs #:lines (or lines 20)
+                               #:level level))
+    (newline))
   #t)
 
 ;;; Command Handler
@@ -288,10 +307,13 @@
              (args (if (> (length parts) 1)
                        (string-join (cdr parts) " ")
                        "")))
+        (log-debug "repl" (format #f "Command: ~a" cmd)
+                   `(("args" . ,args)))
         (let ((handler (assoc-ref *commands* cmd)))
           (if handler
               (handler args)
               (begin
+                (log-warn "repl" "Unknown command" `(("cmd" . ,cmd)))
                 (format #t "Unknown command: ~a~%" cmd)
                 (display "Type /help for available commands.\n")
                 #t))))
@@ -407,6 +429,14 @@
   ;; Ensure XDG directories exist
   (ensure-sage-dirs)
   (ensure-project-dirs)
+
+  ;; Initialize logging
+  (init-logging)
+  (log-info "repl" "REPL starting"
+            `(("version" . ,(version-string))
+              ("model" . ,(ollama-model))
+              ("host" . ,(ollama-host))
+              ("workspace" . ,(getcwd))))
 
   ;; Initialize tools
   (init-default-tools)

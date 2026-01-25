@@ -42,7 +42,12 @@
             ;; Token limits
             *token-limits*
             get-token-limit
-            is-local-provider?))
+            is-local-provider?
+            ;; Logging configuration
+            sage-log-dir
+            sage-log-level
+            sage-log-max-size
+            sage-log-keep))
 
 ;;; Constants
 
@@ -309,3 +314,33 @@
        (assoc-ref *token-limits* "cloud"))
    ;; Ultimate fallback
    4000))
+
+;;; ============================================================
+;;; Logging Configuration
+;;; ============================================================
+
+;;; sage-log-dir: Get log directory (project-local .logs/)
+(define (sage-log-dir)
+  (or (config-get "LOG_DIR")
+      (string-append (getcwd) "/.logs")))
+
+;;; sage-log-level: Get log level (debug, info, warn, error)
+(define (sage-log-level)
+  (let ((level (config-get "LOG_LEVEL")))
+    (if level
+        (string->symbol level)
+        'info)))
+
+;;; sage-log-max-size: Get max log file size in bytes
+(define (sage-log-max-size)
+  (let ((size (config-get "LOG_MAX_SIZE")))
+    (if size
+        (string->number size)
+        10485760)))  ; 10MB default
+
+;;; sage-log-keep: Get number of rotated logs to keep
+(define (sage-log-keep)
+  (let ((keep (config-get "LOG_KEEP")))
+    (if keep
+        (string->number keep)
+        5)))
