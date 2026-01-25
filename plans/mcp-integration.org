@@ -1,0 +1,60 @@
+#+TITLE: MCP Integration Plan (Low Priority)
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-25
+#+STATUS: Backlog - Unlikely to implement
+
+* Overview
+
+MCP (Model Context Protocol) is Anthropic's protocol for connecting LLMs to external tools.
+Uses JSON-RPC 2.0 over stdio. Sage already has its own tool system which works fine.
+
+* Why Bother?
+
+Potential benefits (if ever needed):
+- Access to ecosystem of MCP servers (QR codes, databases, etc.)
+- Compatibility with Claude Desktop tool ecosystem
+- Could expose sage tools as MCP server for other clients
+
+* Minimal Implementation
+
+** Phase 1: MCP Client (~100 lines)
+
+#+begin_src scheme
+;; src/sage/mcp-client.scm
+(define-module (sage mcp-client)
+  #:export (mcp-connect mcp-list-tools mcp-call-tool))
+
+;; Spawn MCP server process, communicate via JSON-RPC over stdio
+(define (mcp-connect command . args) ...)
+(define (mcp-list-tools conn) ...)
+(define (mcp-call-tool conn name arguments) ...)
+#+end_src
+
+** Phase 2: MCP Server (optional)
+
+Expose sage tools via MCP protocol for Claude Desktop, etc.
+
+* Example: QR Code
+
+#+begin_src scheme
+(register-tool
+ "generate_qrcode"
+ "Generate a QR code via MCP"
+ '(("type" . "object")
+   ("properties" . (("content" . (("type" . "string"))))))
+ (lambda (args)
+   (let ((conn (mcp-connect "npx" "@jwalsh/mcp-server-qrcode")))
+     (mcp-call-tool conn "generate-qrcode" args))))
+#+end_src
+
+* Decision: NOT IMPLEMENTING
+
+1. Sage's native tool system works fine
+2. Adds complexity (subprocess management, JSON-RPC)
+3. Most MCP servers are Node.js (dependency bloat)
+4. Can shell out directly if needed
+
+* References
+
+- https://modelcontextprotocol.io/
+- https://github.com/jwalsh/mcp-server-qrcode
