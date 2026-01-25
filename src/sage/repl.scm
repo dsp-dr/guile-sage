@@ -45,7 +45,9 @@
     ("/tools"     . ,cmd-tools)
     ("/workspace" . ,cmd-workspace)
     ("/debug"     . ,cmd-debug)
-    ("/version"   . ,cmd-version)))
+    ("/version"   . ,cmd-version)
+    ("/reload"    . ,cmd-reload)
+    ("/refresh"   . ,cmd-reload)))
 
 ;;; Command Implementations
 
@@ -67,6 +69,7 @@
   (display "  /workspace      - Show workspace directory\n")
   (display "  /debug          - Toggle debug mode\n")
   (display "  /version        - Show version info\n")
+  (display "  /reload         - Hot-reload sage modules\n")
   #t)
 
 (define (cmd-exit args)
@@ -185,6 +188,24 @@
   (display "guile-sage v0.1.0\n")
   (format #t "Guile: ~a~%" (version))
   (format #t "Backend: Ollama (~a)~%" (ollama-host))
+  #t)
+
+(define (cmd-reload args)
+  "Hot-reload sage modules without losing session state."
+  (display "Reloading modules...\n")
+  (catch #t
+    (lambda ()
+      ;; Reload core modules
+      (reload-module (resolve-module '(sage util)))
+      (reload-module (resolve-module '(sage config)))
+      (reload-module (resolve-module '(sage ollama)))
+      (reload-module (resolve-module '(sage tools)))
+      (reload-module (resolve-module '(sage session)))
+      ;; Don't reload repl - we're running in it!
+      (display "Reloaded: util, config, ollama, tools, session\n")
+      (display "Note: repl module requires restart\n"))
+    (lambda (key . args)
+      (format #t "Reload error: ~a ~a~%" key args)))
   #t)
 
 ;;; Command Handler
