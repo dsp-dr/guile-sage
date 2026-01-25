@@ -183,9 +183,9 @@
 
 ;;; ============================================================
 ;;; HTTP Client
-;;; - Uses native Guile (web client) for HTTP
-;;; - Falls back to curl for HTTPS (gnutls not available on FreeBSD)
-;;; - Curl fallback uses temp files and proper escaping for security
+;;; - Uses native Guile (web client) for all HTTP/HTTPS requests
+;;; - gnutls 3.8.11 installed for TLS support
+;;; - No shell/curl dependencies - pure Guile implementation
 ;;; ============================================================
 
 (define (make-temp-file prefix)
@@ -285,35 +285,21 @@
         (cons (string->number code-line)
               (string-join body-lines "\n"))))))
 
-;;; http-get: Unified HTTP GET (auto-selects native or curl)
+;;; http-get: Pure native Guile HTTP GET (gnutls provides TLS)
 (define* (http-get url #:key (headers '()))
   (catch #t
     (lambda ()
-      (if (https? url)
-          (http-get-curl url #:headers headers)
-          (http-get-native url #:headers headers)))
+      (http-get-native url #:headers headers))
     (lambda (key . args)
-      ;; Fall back to curl on any error (e.g., gnutls-not-available)
-      (catch #t
-        (lambda ()
-          (http-get-curl url #:headers headers))
-        (lambda (key2 . args2)
-          (cons 0 (format #f "HTTP error: ~a ~a" key2 args2)))))))
+      (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
 
-;;; http-post: Unified HTTP POST (auto-selects native or curl)
+;;; http-post: Pure native Guile HTTP POST (gnutls provides TLS)
 (define* (http-post url body #:key (headers '()))
   (catch #t
     (lambda ()
-      (if (https? url)
-          (http-post-curl url body #:headers headers)
-          (http-post-native url body #:headers headers)))
+      (http-post-native url body #:headers headers))
     (lambda (key . args)
-      ;; Fall back to curl on any error
-      (catch #t
-        (lambda ()
-          (http-post-curl url body #:headers headers))
-        (lambda (key2 . args2)
-          (cons 0 (format #f "HTTP error: ~a ~a" key2 args2)))))))
+      (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
 
 ;;; ============================================================
 ;;; String Utilities
