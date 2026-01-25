@@ -251,13 +251,102 @@ Output: List of trigger times as Unix timestamps"
      (code-quality . 10))))
 
 ;;; ============================================================
+;;; Problem D: Dependency Graph Resolution
+;;; ============================================================
+
+(define problem-dependency-graph
+  (make-problem
+   'dependency-graph
+   "Dependency Graph Resolution"
+   "Given a dependency graph (as an adjacency list), produce a valid
+topological order (install order) or detect if a cycle exists.
+
+Input: List of (package . dependencies) pairs where dependencies is
+       a list of package names that must be installed first.
+Output: Either a valid installation order (list of package names where
+        all dependencies come before dependents), or #f if a cycle exists.
+
+Example:
+  Input:  ((a . (b c)) (b . (d)) (c . (d)) (d . ()))
+  Output: (d b c a) or (d c b a) - any valid topological order
+
+The problem tests:
+  - Topological sorting algorithm (Kahn's or DFS-based)
+  - Cycle detection
+  - Handling of disconnected components
+  - Edge cases (empty graph, self-loops)"
+
+   "(define (resolve-dependencies graph) ...)"
+
+   ;; Test cases
+   `(;; Simple chain: a -> b -> c -> d
+     ((((a . (b)) (b . (c)) (c . (d)) (d . ())))
+      (d c b a))
+
+     ;; Empty graph
+     ((())
+      ())
+
+     ;; Single node with no dependencies
+     ((((a . ())))
+      (a))
+
+     ;; Self-dependency (cycle)
+     ((((a . (a))))
+      #f)
+
+     ;; Simple cycle: a -> b -> a
+     ((((a . (b)) (b . (a))))
+      #f)
+
+     ;; Diamond pattern: a -> b,c -> d
+     ((((a . (b c)) (b . (d)) (c . (d)) (d . ())))
+      (d b c a))  ; or (d c b a)
+
+     ;; Disconnected components
+     ((((a . ()) (b . ()) (c . ())))
+      (a b c))  ; any order valid
+
+     ;; Multiple roots
+     ((((a . (c)) (b . (c)) (c . ())))
+      (c a b))  ; c must come first
+
+     ;; Complex valid graph
+     ((((app . (lib1 lib2))
+        (lib1 . (core))
+        (lib2 . (core helper))
+        (core . ())
+        (helper . ())))
+      (core helper lib1 lib2 app))  ; any valid order
+
+     ;; Cycle in larger graph
+     ((((a . (b)) (b . (c)) (c . (a)) (d . (e)) (e . (d))))
+      #f)
+
+     ;; Fan-out then fan-in
+     ((((input . ())
+        (proc1 . (input))
+        (proc2 . (input))
+        (proc3 . (input))
+        (output . (proc1 proc2 proc3))))
+      (input proc1 proc2 proc3 output)))
+
+   ;; Rubric
+   '((correctness . 35)
+     (cycle-detection . 25)
+     (edge-cases . 15)
+     (topological-correctness . 15)
+     (code-quality . 10))))
+
+;;; ============================================================
 ;;; Problem Registry
 ;;; ============================================================
 
 (define *problems*
   (list problem-interval-consolidation
         problem-semver-ordering
-        problem-cron-enumeration))
+        problem-cron-enumeration
+        problem-dependency-graph))
 
 (define (get-problem id)
   (find (lambda (p) (eq? (problem-id p) id)) *problems*))
