@@ -55,12 +55,20 @@
 (define (ollama-list-models)
   (let* ((url (string-append (ollama-host) "/api/tags"))
          (result (http-get url #:headers (ollama-auth-headers)))
-         (code (car result))
-         (body (cdr result)))
-    (if (= code 200)
-        (let ((parsed (json-read-string body)))
-          (assoc-ref parsed "models"))
-        (error "Failed to list models" code body))))
+         (code (if (pair? result) (car result) 0))
+         (body (if (pair? result) (cdr result) "")))
+    (cond
+     ((not (number? code))
+      (error "Invalid API response" result))
+     ((= code 200)
+      (catch #t
+        (lambda ()
+          (let ((parsed (json-read-string body)))
+            (or (assoc-ref parsed "models") '())))
+        (lambda (key . args)
+          (error "Failed to parse models response" body))))
+     (else
+      (error "Failed to list models" code body)))))
 
 ;;; ollama-chat: Send chat completion request
 ;;; Arguments:
@@ -75,11 +83,20 @@
                     ("stream" . ,stream)))
          (body (json-write-string request))
          (result (http-post url body #:headers (ollama-auth-headers)))
-         (code (car result))
-         (resp-body (cdr result)))
-    (if (= code 200)
-        (json-read-string resp-body)
-        (error "Chat request failed" code resp-body))))
+         (code (if (pair? result) (car result) 0))
+         (resp-body (if (pair? result) (cdr result) "")))
+    (cond
+     ((not (number? code))
+      (error "Invalid API response" result))
+     ((= code 200)
+      (catch #t
+        (lambda () (json-read-string resp-body))
+        (lambda (key . args)
+          (error "Failed to parse API response" resp-body))))
+     ((= code 0)
+      (error "API connection failed" resp-body))
+     (else
+      (error "Chat request failed" code resp-body)))))
 
 ;;; ollama-format-tool-prompt: Generate system prompt for tool calling
 ;;; Arguments:
@@ -131,6 +148,14 @@
 ;;;   response - Response alist from ollama-chat
 ;;; Returns: Alist with 'prompt_tokens and 'completion_tokens
 (define (ollama-extract-token-usage response)
-  (list
-   (cons 'prompt_tokens (or (assoc-ref response "prompt_eval_count") 0))
-   (cons 'completion_tokens (or (assoc-ref response "eval_count") 0))))
+  (if (and response (list? response))
+      (list
+       (cons 'prompt_tokens
+             (let ((v (assoc-ref response "prompt_eval_count")))
+               (if (number? v) v 0)))
+       (cons 'completion_tokens
+             (let ((v (assoc-ref response "eval_count")))
+               (if (number? v) v 0))))
+      ;; Fallback for invalid response
+      (list (cons 'prompt_tokens 0)
+            (cons 'completion_tokens 0))))
