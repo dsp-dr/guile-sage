@@ -33,7 +33,8 @@
 
 (define *tools* '())
 (define *safe-tools* '("read_file" "list_files" "git_status" "git_diff"
-                       "git_log" "glob_files" "search_files"))
+                       "git_log" "glob_files" "search_files"
+                       "write_file" "edit_file"))  ;; Enable writes for grinding
 (define *workspace* #f)
 
 ;;; workspace: Get current workspace directory
