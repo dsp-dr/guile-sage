@@ -5,11 +5,21 @@ GUILD = guild3
 SRCDIR = src
 TESTDIR = tests
 
+# Installation directories (XDG-compliant user-local install)
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
+DATADIR ?= $(PREFIX)/share
+LIBDIR ?= $(PREFIX)/lib
+
+# Guile-specific install paths
+GUILE_SITE_DIR ?= $(DATADIR)/guile/site/3.0
+GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
+
 # Source files
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run init check-config help docs publish run-yolo check-verbose uat uat-yolo install-hooks version build
+.PHONY: all clean check repl run init check-config help docs publish run-yolo check-verbose uat uat-yolo install-hooks version build install uninstall
 
 all: $(OBJECTS)
 
@@ -38,6 +48,47 @@ check:
 clean:
 	find . -name "*.go" -delete
 	find . -name "*~" -delete
+
+# Installation
+install: build
+	@echo "Installing guile-sage to $(PREFIX)..."
+	@mkdir -p $(BINDIR)
+	@mkdir -p $(GUILE_SITE_DIR)/sage
+	@mkdir -p $(GUILE_CCACHE_DIR)/sage
+	@# Install source files
+	@for f in $(SRCDIR)/sage/*.scm; do \
+		install -m 644 "$$f" $(GUILE_SITE_DIR)/sage/; \
+	done
+	@# Install compiled files
+	@for f in $(SRCDIR)/sage/*.go; do \
+		if [ -f "$$f" ]; then \
+			install -m 644 "$$f" $(GUILE_CCACHE_DIR)/sage/; \
+		fi; \
+	done
+	@# Install resources
+	@mkdir -p $(DATADIR)/sage/prompts
+	@if [ -d resources/prompts ]; then \
+		cp -r resources/prompts/* $(DATADIR)/sage/prompts/ 2>/dev/null || true; \
+	fi
+	@# Create wrapper script
+	@echo '#!/bin/sh' > $(BINDIR)/sage
+	@echo '# guile-sage wrapper script' >> $(BINDIR)/sage
+	@echo 'exec $(GUILE) -L $(GUILE_SITE_DIR) -C $(GUILE_CCACHE_DIR) -c "(use-modules (sage main)) (main (command-line))" "$$@"' >> $(BINDIR)/sage
+	@chmod +x $(BINDIR)/sage
+	@echo "Installed:"
+	@echo "  Binary:  $(BINDIR)/sage"
+	@echo "  Modules: $(GUILE_SITE_DIR)/sage/"
+	@echo "  Cache:   $(GUILE_CCACHE_DIR)/sage/"
+	@echo ""
+	@echo "Ensure $(BINDIR) is in your PATH"
+
+uninstall:
+	@echo "Uninstalling guile-sage from $(PREFIX)..."
+	@rm -f $(BINDIR)/sage
+	@rm -rf $(GUILE_SITE_DIR)/sage
+	@rm -rf $(GUILE_CCACHE_DIR)/sage
+	@rm -rf $(DATADIR)/sage
+	@echo "Uninstalled guile-sage"
 
 # Development helpers
 tags:
@@ -130,6 +181,8 @@ uat-yolo:
 help:
 	@echo "Targets:"
 	@echo "  all/build     - Compile all modules to .go files"
+	@echo "  install       - Install to PREFIX (default: ~/.local)"
+	@echo "  uninstall     - Remove installed files"
 	@echo "  version       - Show version"
 	@echo "  init          - Initialize and validate setup"
 	@echo "  install-hooks - Install git pre-commit hooks"
@@ -144,3 +197,9 @@ help:
 	@echo "  docs          - Build documentation"
 	@echo "  publish       - Build and prepare for publishing"
 	@echo "  clean         - Remove compiled files"
+	@echo ""
+	@echo "Install options:"
+	@echo "  PREFIX=~/.local  - Installation prefix (default)"
+	@echo "  PREFIX=/opt/sage - System-wide install"
+	@echo ""
+	@echo "Example: make build install PREFIX=~/.local"
