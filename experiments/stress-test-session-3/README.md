@@ -70,6 +70,18 @@ For session 3, focus on:
 | +conts | 172,856 | 157 | Continuations explanation (600 words) |
 | +testing | 174,568 | 159 | Testing comparison PBT vs EBT (700 words) |
 | compact | 174,568 | 51 | /compact 50 - removed 109 msgs (106k tokens) |
+| eval-1 | 175,931 | 53 | Lisp history (400w) |
+| eval-2 | 176,962 | 53 | FRP (400w) |
+| eval-3 | 177,978 | 53 | Monads (400w) |
+| eval-4 | 178,676 | 53 | S-expressions (400w) |
+| eval-5 | 179,965 | 53 | GC algorithms (400w) |
+
+## Compaction Behavior Observed
+
+- Compaction keeps last N messages (50 configured)
+- Token count is **cumulative** (total session throughput)
+- Small compacts (3 msgs) after each prompt when already at limit
+- Messages stable at 50-53 while tokens continue accumulating
 
 ## Bug Fixes During Session 3
 
