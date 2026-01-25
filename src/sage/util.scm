@@ -3,14 +3,18 @@
 ;;; Commentary:
 ;;
 ;; Provides HTTP client and JSON utilities for guile-sage.
-;; Uses curl for HTTP and implements simple JSON serialization.
+;; Uses Guile's native (web client) for HTTP - no shell/curl dependencies.
 
 (define-module (sage util)
-  #:use-module (ice-9 popen)
+  #:use-module (web client)
+  #:use-module (web uri)
+  #:use-module (web response)
+  #:use-module (rnrs bytevectors)
   #:use-module (ice-9 textual-ports)
   #:use-module (ice-9 rdelim)
   #:use-module (ice-9 regex)
   #:use-module (ice-9 format)
+  #:use-module (ice-9 receive)
   #:use-module (srfi srfi-1)
   #:export (http-get
             http-post
@@ -178,21 +182,61 @@
     (lambda (port) (json-write obj port))))
 
 ;;; ============================================================
-;;; HTTP Client (using curl with temp files to avoid popen segfault)
+;;; HTTP Client
+;;; - Uses native Guile (web client) for HTTP
+;;; - Falls back to curl for HTTPS (gnutls not available on FreeBSD)
+;;; - Curl fallback uses temp files and proper escaping for security
 ;;; ============================================================
 
 (define (make-temp-file prefix)
   (format #f "/tmp/~a-~a-~a" prefix (getpid) (random 100000)))
 
-(define* (http-get url #:key (headers '()))
+;;; body->string: Convert response body to string
+(define (body->string body)
+  (cond
+   ((string? body) body)
+   ((bytevector? body) (utf8->string body))
+   ((port? body) (get-string-all body))
+   (else "")))
+
+;;; headers->alist: Convert header alist to format expected by http-request
+(define (headers->alist headers)
+  (map (lambda (h)
+         (cons (string->symbol (car h)) (cdr h)))
+       headers))
+
+;;; https?: Check if URL uses HTTPS
+(define (https? url)
+  (string-prefix? "https://" url))
+
+;;; shell-escape: Escape string for safe shell use (single quotes)
+(define (shell-escape str)
+  ;; Replace ' with '\'' (end quote, escaped quote, start quote)
+  (string-replace-substring str "'" "'\\''"))
+
+;;; http-get-native: Native Guile HTTP GET (for non-HTTPS)
+(define* (http-get-native url #:key (headers '()))
+  (receive (response body)
+      (http-request url
+                    #:method 'GET
+                    #:headers (headers->alist headers))
+    (cons (response-code response)
+          (body->string body))))
+
+;;; http-get-curl: Curl fallback for HTTPS
+(define* (http-get-curl url #:key (headers '()))
   (let* ((out-file (make-temp-file "sage-get"))
          (header-args (string-join
                        (map (lambda (h)
-                              (format #f "-H '~a: ~a'" (car h) (cdr h)))
+                              (format #f "-H '~a: ~a'"
+                                      (shell-escape (car h))
+                                      (shell-escape (cdr h))))
                             headers)
                        " "))
-         (cmd (format #f "curl -s -w '\\n%{http_code}' ~a '~a' > ~a"
-                      header-args url out-file)))
+         (cmd (format #f "curl -s -w '\\n%{http_code}' ~a '~a' > '~a'"
+                      header-args
+                      (shell-escape url)
+                      out-file)))
     (system cmd)
     (let ((output (call-with-input-file out-file get-string-all)))
       (delete-file out-file)
@@ -202,7 +246,19 @@
         (cons (string->number code-line)
               (string-join body-lines "\n"))))))
 
-(define* (http-post url body #:key (headers '()))
+;;; http-post-native: Native Guile HTTP POST (for non-HTTPS)
+(define* (http-post-native url body #:key (headers '()))
+  (receive (response response-body)
+      (http-request url
+                    #:method 'POST
+                    #:body body
+                    #:headers (cons '(content-type . "application/json")
+                                    (headers->alist headers)))
+    (cons (response-code response)
+          (body->string response-body))))
+
+;;; http-post-curl: Curl fallback for HTTPS
+(define* (http-post-curl url body #:key (headers '()))
   (let* ((in-file (make-temp-file "sage-post-in"))
          (out-file (make-temp-file "sage-post-out"))
          (dummy (call-with-output-file in-file
@@ -210,11 +266,15 @@
          (header-args (string-join
                        (cons "-H 'Content-Type: application/json'"
                              (map (lambda (h)
-                                    (format #f "-H '~a: ~a'" (car h) (cdr h)))
+                                    (format #f "-H '~a: ~a'"
+                                            (shell-escape (car h))
+                                            (shell-escape (cdr h))))
                                   headers))
                        " "))
-         (cmd (format #f "curl -s -w '\\n%{http_code}' -X POST ~a -d @~a '~a' > ~a"
-                      header-args in-file url out-file)))
+         (cmd (format #f "curl -s -w '\\n%{http_code}' -X POST ~a -d '@~a' '~a' > '~a'"
+                      header-args in-file
+                      (shell-escape url)
+                      out-file)))
     (system cmd)
     (let ((output (call-with-input-file out-file get-string-all)))
       (delete-file in-file)
@@ -224,6 +284,36 @@
              (body-lines (drop-right lines 1)))
         (cons (string->number code-line)
               (string-join body-lines "\n"))))))
+
+;;; http-get: Unified HTTP GET (auto-selects native or curl)
+(define* (http-get url #:key (headers '()))
+  (catch #t
+    (lambda ()
+      (if (https? url)
+          (http-get-curl url #:headers headers)
+          (http-get-native url #:headers headers)))
+    (lambda (key . args)
+      ;; Fall back to curl on any error (e.g., gnutls-not-available)
+      (catch #t
+        (lambda ()
+          (http-get-curl url #:headers headers))
+        (lambda (key2 . args2)
+          (cons 0 (format #f "HTTP error: ~a ~a" key2 args2)))))))
+
+;;; http-post: Unified HTTP POST (auto-selects native or curl)
+(define* (http-post url body #:key (headers '()))
+  (catch #t
+    (lambda ()
+      (if (https? url)
+          (http-post-curl url body #:headers headers)
+          (http-post-native url body #:headers headers)))
+    (lambda (key . args)
+      ;; Fall back to curl on any error
+      (catch #t
+        (lambda ()
+          (http-post-curl url body #:headers headers))
+        (lambda (key2 . args2)
+          (cons 0 (format #f "HTTP error: ~a ~a" key2 args2)))))))
 
 ;;; ============================================================
 ;;; String Utilities
