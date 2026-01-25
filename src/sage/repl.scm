@@ -11,6 +11,7 @@
   #:use-module (sage ollama)
   #:use-module (sage session)
   #:use-module (sage tools)
+  #:use-module (sage version)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 format)
   #:use-module (ice-9 readline)
@@ -228,7 +229,7 @@
   #t)
 
 (define (cmd-version args)
-  (display "guile-sage v0.1.0\n")
+  (format #t "guile-sage v~a~%" (version-string))
   (format #t "Guile: ~a~%" (version))
   (format #t "Backend: Ollama (~a)~%" (ollama-host))
   #t)
@@ -402,10 +403,16 @@
     (session-create)))
 
   ;; Welcome message
-  (let ((yolo? (config-get "YOLO_MODE")))
+  (let* ((yolo? (config-get "YOLO_MODE"))
+         (ver-str (format #f "guile-sage v~a" (version-string)))
+         (pad-len (quotient (- 39 (string-length ver-str)) 2))
+         (ver-line (format #f "║~a~a~a║"
+                           (make-string pad-len #\space)
+                           ver-str
+                           (make-string (- 39 pad-len (string-length ver-str)) #\space))))
     (display "\n")
     (display "╔═══════════════════════════════════════╗\n")
-    (display "║         guile-sage v0.1.0             ║\n")
+    (display ver-line) (newline)
     (display "║   Type /help for commands, /exit to quit  ║\n")
     (display "╚═══════════════════════════════════════╝\n")
     (format #t "Model: ~a~%" (ollama-model))
