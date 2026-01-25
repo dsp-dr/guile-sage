@@ -54,8 +54,10 @@ This experiment demonstrates a recursive structure:
 | After v3.0 Roadmap | 175,000 | 150 | 75 |
 | Interdisciplinary batch 1 | 202,708 | 162 | 81 |
 | Interdisciplinary batch 2 | 214,113 | 168 | 84 |
+| Technical batch (tests/API/elisp) | 230,123 | 176 | 88 |
 
-**Current Progress**: 21.4% toward 1 million token goal
+**Current Progress**: 23.0% toward 1 million token goal
+**Tool Calls**: 20 (including model-initiated read_file)
 
 ## Key Insights from Analyses
 - **Meta-Cognitive Singularity**: Three-layer AI stack creates strange loops of self-observation
