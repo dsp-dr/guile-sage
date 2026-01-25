@@ -110,6 +110,7 @@ Document bugs discovered during testing:
 2. **[Documented]** popen segfault on FreeBSD - workaround uses temp files
 3. **[Pending]** glob_files returns empty results in some cases
 4. **[Pending]** search_files regex escaping issues
+5. **[Pending]** write_file permission denied for /tmp - should allow .tmp and /tmp writes
 
 ## Running a UAT Session
 
