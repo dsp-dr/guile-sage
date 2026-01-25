@@ -139,8 +139,12 @@
   (let ((name (if (and args (not (string-null? args)))
                   args
                   #f)))
-    (display (session-save #:name name))
-    (newline))
+    (catch #t
+      (lambda ()
+        (display (session-save #:name name))
+        (newline))
+      (lambda (key . err-args)
+        (format #t "Save failed: ~a ~a~%" key err-args))))
   #t)
 
 (define (cmd-load args)
