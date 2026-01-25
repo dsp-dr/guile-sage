@@ -285,19 +285,23 @@
         (cons (string->number code-line)
               (string-join body-lines "\n"))))))
 
-;;; http-get: Pure native Guile HTTP GET (gnutls provides TLS)
+;;; http-get: Use curl for HTTPS (gnutls cert issues), native for HTTP
 (define* (http-get url #:key (headers '()))
   (catch #t
     (lambda ()
-      (http-get-native url #:headers headers))
+      (if (https? url)
+          (http-get-curl url #:headers headers)
+          (http-get-native url #:headers headers)))
     (lambda (key . args)
       (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
 
-;;; http-post: Pure native Guile HTTP POST (gnutls provides TLS)
+;;; http-post: Use curl for HTTPS (gnutls cert issues), native for HTTP
 (define* (http-post url body #:key (headers '()))
   (catch #t
     (lambda ()
-      (http-post-native url body #:headers headers))
+      (if (https? url)
+          (http-post-curl url body #:headers headers)
+          (http-post-native url body #:headers headers)))
     (lambda (key . args)
       (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
 
