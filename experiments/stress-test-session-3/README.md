@@ -83,6 +83,15 @@ For session 3, focus on:
 - Small compacts (3 msgs) after each prompt when already at limit
 - Messages stable at 50-53 while tokens continue accumulating
 
+## High-Token Strategy Results
+
+| Prompt Type | Words | Tokens Generated | Efficiency |
+|-------------|-------|------------------|------------|
+| Short essay | 400w | ~1,000-1,500 | baseline |
+| Long essay | 2500w | ~4,362 | 3x better |
+
+Large multi-topic prompts (2500w) generate significantly more tokens per request.
+
 ## Bug Fixes During Session 3
 
 1. **util.scm curl fallback for HTTPS** (`7457133`)
