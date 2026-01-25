@@ -62,7 +62,7 @@
           ;; Get status before
           (let ((status-before (session-status)))
             (format #t "[Before] Tokens: ~a, Messages: ~a~%"
-                    (or (assoc-ref status-before "estimated_tokens") "?")
+                    (or (assoc-ref status-before "total_tokens") "?")
                     (or (assoc-ref status-before "messages") 0)))
 
           ;; Execute the prompt
@@ -103,11 +103,11 @@
           ;; Get status after
           (let ((status-after (session-status)))
             (format #t "[After] Tokens: ~a, Messages: ~a~%"
-                    (or (assoc-ref status-after "estimated_tokens") "?")
+                    (or (assoc-ref status-after "total_tokens") "?")
                     (or (assoc-ref status-after "messages") 0))
 
             ;; Check if compaction needed (80% threshold)
-            (let ((tokens (or (assoc-ref status-after "estimated_tokens") 0))
+            (let ((tokens (or (assoc-ref status-after "total_tokens") 0))
                   (limit (get-token-limit (ollama-model))))
               (when (> (/ tokens limit) 0.8)
                 (format #t "~%[COMPACTION] At ~a% of limit~%"
@@ -126,7 +126,7 @@
       (format #t "Tool calls: ~a~%" tool-calls)
       (format #t "Compactions: ~a~%" compactions)
       (format #t "Errors: ~a~%" (length errors))
-      (format #t "Final tokens: ~a~%" (assoc-ref final-status "estimated_tokens"))
+      (format #t "Final tokens: ~a~%" (assoc-ref final-status "total_tokens"))
       (format #t "Final messages: ~a~%" (assoc-ref final-status "messages"))
 
       ;; Validation

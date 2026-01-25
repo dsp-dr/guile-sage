@@ -135,13 +135,29 @@
    "Read entire codebase and propose plugin system"
    '((repo . "local")
      (focus . "src/sage"))
-   '("Read all the source files in src/sage/ to understand the current architecture."
+   '("List all the files in src/sage/ to understand the project structure."
 
-     "List all exported functions from each module."
+     "Read src/sage/config.scm and explain all the configuration options."
 
-     "How are tools currently registered and discovered?"
+     "Read src/sage/util.scm and explain each utility function."
 
-     "How does the session management work?"
+     "Read src/sage/tools.scm and explain how tools are registered."
+
+     "Read src/sage/session.scm and explain how sessions are managed."
+
+     "Read src/sage/ollama.scm and explain the API client implementation."
+
+     "Read src/sage/compaction.scm and explain the compaction strategies."
+
+     "Read src/sage/repl.scm and explain how the REPL processes commands."
+
+     "Search for 'define-public' across all files to find all exported functions."
+
+     "Search for 'error' across all files to understand error handling patterns."
+
+     "How are tools currently registered and discovered? Show me the code."
+
+     "How does the session management work with token tracking?"
 
      "Propose an architecture for a plugin system that would allow:
       - Third-party tools
@@ -149,13 +165,21 @@
       - Session middleware
       - Output formatters"
 
-     "Show the specific changes needed in each file to support this."
+     "Show the specific changes needed in config.scm to support plugins."
+
+     "Show the specific changes needed in tools.scm to support plugins."
+
+     "Show the specific changes needed in session.scm to support plugins."
 
      "What backwards compatibility concerns exist?"
 
-     "Write a sample plugin that adds a 'weather' tool.")
+     "Write a sample plugin that adds a 'weather' tool."
+
+     "Write a sample plugin that adds a custom output formatter."
+
+     "Summarize everything you've learned about the codebase architecture.")
    '("list_files" "read_file" "search_files" "glob_files")
-   20
+   25
    #t))
 
 (define scenario-documentation-gen
@@ -165,27 +189,57 @@
    "Generate complete API docs for all exports"
    '((repo . "local")
      (focus . "src/sage"))
-   '("List all .scm files in src/sage/."
+   '("List all .scm files in src/sage/ directory."
 
-     "For each module, extract the #:export list."
+     "Read src/sage/config.scm completely."
 
-     "Read config.scm and document every exported function with examples."
+     "Document every function in config.scm with usage examples."
 
-     "Read util.scm and document every exported function with examples."
+     "Read src/sage/util.scm completely."
 
-     "Read tools.scm and document every exported function with examples."
+     "Document every function in util.scm with usage examples."
 
-     "Read session.scm and document every exported function with examples."
+     "Read src/sage/tools.scm completely."
 
-     "Read ollama.scm and document every exported function with examples."
+     "Document every function in tools.scm with usage examples."
 
-     "Read compaction.scm and document every exported function with examples."
+     "Read src/sage/session.scm completely."
 
-     "Read repl.scm and document every exported function with examples."
+     "Document every function in session.scm with usage examples."
 
-     "Compile all documentation into a single API reference.")
-   '("list_files" "read_file" "glob_files")
-   25
+     "Read src/sage/ollama.scm completely."
+
+     "Document every function in ollama.scm with usage examples."
+
+     "Read src/sage/compaction.scm completely."
+
+     "Document every function in compaction.scm with usage examples."
+
+     "Read src/sage/repl.scm completely."
+
+     "Document every function in repl.scm with usage examples."
+
+     "Read src/sage/main.scm completely."
+
+     "Document the main entry point and CLI options."
+
+     "Read src/sage/version.scm completely."
+
+     "Search for all error conditions in the codebase."
+
+     "Search for all #:export declarations to verify we covered all functions."
+
+     "Create a comprehensive API reference document."
+
+     "Create a quick reference card with the most commonly used functions."
+
+     "Create usage examples for tool registration."
+
+     "Create usage examples for session management."
+
+     "Compile all documentation into a final summary.")
+   '("list_files" "read_file" "glob_files" "search_files")
+   30
    #t))
 
 ;;; ============================================================
