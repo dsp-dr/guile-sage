@@ -63,7 +63,16 @@ For session 3, focus on:
 | Time | Tokens | Messages | Notes |
 |------|--------|----------|-------|
 | Start | 164,052 | 146 | Resumed from session 1 |
-| | | | |
+| +fix | 164,171 | 148 | After curl fallback fix, short test |
+| +essay | 167,903 | 150 | Memory essay (2k words) |
+
+## Bug Fixes During Session 3
+
+1. **util.scm curl fallback for HTTPS** (`7457133`)
+   - FreeBSD gnutls has CA certificate issues with ollama.com
+   - Error: `tls-certificate-error (signer-not-found invalid)`
+   - Fix: Use curl for HTTPS, native Guile for HTTP
+   - Now working reliably
 
 ## Captured Content
 
