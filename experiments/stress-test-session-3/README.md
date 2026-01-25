@@ -167,3 +167,38 @@ Any notable outputs will be saved to this directory:
 - `analysis-*.md` - Generated analysis documents
 - `code-*.scm` - Generated code samples
 - `capture.txt` - Raw tmux captures
+
+## Session 3 Continuation (2026-01-25)
+
+### Cloud API Issues
+
+The glm-4.7 cloud API experienced significant instability:
+- Simple prompts (math questions) work consistently
+- 500w+ prompts frequently timeout (~3-5 minutes, no response)
+- REPL crashes intermittently after API timeouts
+
+### Session Data Loss
+
+- Session 3 reached ~250,558 tokens (from 164,052 starting point)
+- Progress was NOT automatically saved
+- When REPL crashed, session reverted to last `/save` checkpoint
+- Lesson: Must manually `/save session-name` after each successful response
+
+### Checkpoints (2026-01-25)
+
+| Time | Tokens | Messages | Notes |
+|------|--------|----------|-------|
+| resume | 164,052 | 146 | Loaded from stress-test-1 |
+| test | 164,166 | 148 | Simple 2+2 test, saved as stress-test-3 |
+
+### Local Ollama Status
+
+- Local Ollama server not running (qwq model unavailable)
+- All requests going through cloud API (ollama.com)
+
+### Recommendations
+
+1. Start local Ollama server for reliability
+2. Save session after every successful response
+3. Use shorter prompts (300-500w) when API is unstable
+4. Consider implementing auto-save in sage REPL
