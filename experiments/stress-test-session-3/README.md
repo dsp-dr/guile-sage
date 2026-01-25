@@ -75,6 +75,17 @@ For session 3, focus on:
 | eval-3 | 177,978 | 53 | Monads (400w) |
 | eval-4 | 178,676 | 53 | S-expressions (400w) |
 | eval-5 | 179,965 | 53 | GC algorithms (400w) |
+| grind-1 | 191,175 | 62 | Type theory (2500w) |
+| grind-2 | 195,500 | 64 | Database internals (2500w) |
+| grind-3 | 199,405 | 66 | Distributed systems (2500w) |
+| grind-4 | 203,624 | 69 | Compiler parsing (1500w) |
+| grind-5 | 206,930 | 71 | Functional patterns (1500w) |
+| grind-6 | 210,236 | 73 | Concurrency models (1500w) |
+| grind-7 | 212,953 | 75 | Language design (1500w) |
+| grind-8 | 215,769 | 77 | Architecture patterns (1500w) |
+| grind-9 | 219,010 | 79 | Testing strategies (1500w) |
+| grind-10 | 222,110 | 81 | API design (1500w) |
+| grind-11 | 225,219 | 83 | Observability (1500w) |
 
 ## Compaction Behavior Observed
 
@@ -99,6 +110,56 @@ Large multi-topic prompts (2500w) generate significantly more tokens per request
    - Error: `tls-certificate-error (signer-not-found invalid)`
    - Fix: Use curl for HTTPS, native Guile for HTTP
    - Now working reliably
+
+## High-Token Prompt Catalog
+
+These prompts consistently generate 4000+ tokens each:
+
+### Type Theory Deep Dive (2500w)
+```
+Write 2500 words on advanced type theory: 1) Simply Typed Lambda Calculus -
+type inference, Hindley-Milner, 2) Dependent Types - Idris, Agda, proof
+assistants, Curry-Howard correspondence, 3) Linear Types - Rust ownership,
+affine types, session types, 4) Effect Systems - algebraic effects, handlers,
+comparison to monads. Include code examples.
+```
+
+### Database Internals (2500w)
+```
+Write 2500 words on database internals: 1) B-tree vs LSM-tree indexing -
+write amplification, read amplification tradeoffs, 2) MVCC (Multi-Version
+Concurrency Control) - snapshot isolation, how Postgres implements it,
+3) Write-Ahead Logging (WAL) - crash recovery, checkpointing, 4) Query
+optimization - cost-based optimization, join algorithms. Include examples
+from Postgres, MySQL, and RocksDB.
+```
+
+### Memory Architecture (2500w)
+```
+Write 2500 words analyzing memory across four domains: 1) Computer
+architecture - cache hierarchies, virtual memory, 2) Cognitive psychology -
+working memory, episodic vs semantic, 3) Philosophy of mind - extended mind
+thesis, 4) Cultural theory - collective memory, archives. Map conceptual
+transfers between domains.
+```
+
+### Distributed Systems (2500w)
+```
+Write 2500 words on distributed systems: 1) Consensus - Paxos, Raft,
+Byzantine fault tolerance, 2) Consistency models - linearizability,
+eventual consistency, CAP theorem, 3) Distributed transactions - 2PC,
+Saga pattern, 4) Leader election - Zookeeper, etcd. Include failure modes
+and real-world examples.
+```
+
+### Compiler Design (2500w)
+```
+Write 2500 words on compiler internals: 1) Parsing - recursive descent,
+parser combinators, PEG, 2) Type checking - bidirectional typing,
+constraint solving, 3) Optimization - SSA form, dead code elimination,
+inlining, 4) Code generation - register allocation, instruction selection.
+Include examples from GCC, LLVM, and V8.
+```
 
 ## Captured Content
 
