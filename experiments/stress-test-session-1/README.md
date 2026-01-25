@@ -29,10 +29,10 @@
 13. Technical white paper (ROI analysis, competitive landscape, 5-year forecast)
 14. Emacs integration package (major-mode, company-mode, org-babel, flycheck)
 
-## Bugs Discovered
-1. `write_file` permission denied for /tmp files
-2. `glob_files` returns empty in some cases
-3. `search_files` regex escaping issues
+## Bugs Discovered (All Fixed in a8c3dd2)
+1. ~~`write_file` permission denied for /tmp files~~ - safe-path? now allows /tmp
+2. ~~`glob_files` returns empty in some cases~~ - splits directory/filename parts
+3. ~~`search_files` regex escaping issues~~ - uses grep -F by default
 
 ## Token Progress
 | Checkpoint | Tokens | Messages | Requests | Tool Calls |
