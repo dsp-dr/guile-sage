@@ -295,13 +295,11 @@
     (lambda (key . args)
       (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
 
-;;; http-post: Use curl for HTTPS (gnutls cert issues), native for HTTP
+;;; http-post: Use curl for all requests (native has header compatibility issues)
 (define* (http-post url body #:key (headers '()))
   (catch #t
     (lambda ()
-      (if (https? url)
-          (http-post-curl url body #:headers headers)
-          (http-post-native url body #:headers headers)))
+      (http-post-curl url body #:headers headers))
     (lambda (key . args)
       (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
 
