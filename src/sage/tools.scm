@@ -8,6 +8,7 @@
 (define-module (sage tools)
   #:use-module (sage config)
   #:use-module (sage util)
+  #:use-module (sage logging)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -35,7 +36,8 @@
 (define *safe-tools* '("read_file" "list_files" "git_status" "git_diff"
                        "git_log" "glob_files" "search_files"
                        "write_file" "edit_file"
-                       "git_commit" "git_add_note"))  ;; Full dev workflow
+                       "git_commit" "git_add_note"
+                       "read_logs" "search_logs"))  ;; Full dev workflow + self-inspection
 (define *workspace* #f)
 
 ;;; workspace: Get current workspace directory
@@ -83,7 +85,9 @@
               (filter (lambda (t) (not (equal? (assoc-ref t "name") name)))
                       *tools*)))
   (when safe
-    (set! *safe-tools* (cons name *safe-tools*))))
+    (set! *safe-tools* (cons name *safe-tools*)))
+  (log-debug "tools" (format #f "Registered tool: ~a" name)
+             `(("safe" . ,(if safe "yes" "no")))))
 
 ;;; register-safe-tool: Register a safe tool
 (define (register-safe-tool name description parameters execute-fn)
@@ -121,13 +125,28 @@
   (let ((tool (get-tool name)))
     (if tool
         (if (check-permission name args)
-            (catch #t
-              (lambda ()
-                ((assoc-ref tool "execute") args))
-              (lambda (key . rest)
-                (format #f "Tool error: ~a ~a" key rest)))
-            (format #f "Permission denied for tool: ~a" name))
-        (format #f "Unknown tool: ~a" name))))
+            (begin
+              (log-tool-call name args)
+              (let ((start-time (get-internal-real-time)))
+                (catch #t
+                  (lambda ()
+                    (let* ((result ((assoc-ref tool "execute") args))
+                           (end-time (get-internal-real-time))
+                           (duration-ms (/ (- end-time start-time)
+                                           (/ internal-time-units-per-second 1000))))
+                      (log-tool-call name args #:result result #:duration duration-ms)
+                      result))
+                  (lambda (key . rest)
+                    (log-error "tools" (format #f "Tool execution failed: ~a" name)
+                               `(("error" . ,(format #f "~a ~a" key rest))))
+                    (format #f "Tool error: ~a ~a" key rest)))))
+            (begin
+              (log-warn "tools" (format #f "Permission denied: ~a" name)
+                        `(("tool" . ,name)))
+              (format #f "Permission denied for tool: ~a" name)))
+        (begin
+          (log-warn "tools" (format #f "Unknown tool: ~a" name))
+          (format #f "Unknown tool: ~a" name)))))
 
 ;;; tools-to-schema: Convert tools to JSON schema for LLM
 (define (tools-to-schema)
@@ -462,4 +481,44 @@
                            fn)
              (format #f "Created tool: ~a" name)))
          (lambda (key . rest)
-           (format #f "Error creating tool: ~a ~a" key rest)))))))
+           (format #f "Error creating tool: ~a ~a" key rest))))))
+
+  ;; ============================================================
+  ;; Self-Inspection Tools (Logging)
+  ;; ============================================================
+
+  ;; read_logs - Read recent log entries
+  (register-tool
+   "read_logs"
+   "Read recent log entries for self-inspection and debugging"
+   '(("type" . "object")
+     ("properties" . (("lines" . (("type" . "integer")
+                                  ("description" . "Number of lines to read (default 50)")))
+                      ("level" . (("type" . "string")
+                                  ("description" . "Filter by level: debug|info|warn|error")))))
+     ("required" . #()))
+   (lambda (args)
+     (let ((lines (or (assoc-ref args "lines") 50))
+           (level (assoc-ref args "level")))
+       (read-recent-logs #:lines lines
+                         #:level (and level (string->symbol level))))))
+
+  ;; search_logs - Search logs for pattern
+  (register-tool
+   "search_logs"
+   "Search logs for a pattern to diagnose issues"
+   '(("type" . "object")
+     ("properties" . (("pattern" . (("type" . "string")
+                                    ("description" . "Search pattern (case-insensitive)")))
+                      ("level" . (("type" . "string")
+                                  ("description" . "Filter by level: debug|info|warn|error")))
+                      ("limit" . (("type" . "integer")
+                                  ("description" . "Max results (default 100)")))))
+     ("required" . #("pattern")))
+   (lambda (args)
+     (let ((pattern (assoc-ref args "pattern"))
+           (level (assoc-ref args "level"))
+           (limit (or (assoc-ref args "limit") 100)))
+       (search-logs pattern
+                    #:level (and level (string->symbol level))
+                    #:limit limit)))))

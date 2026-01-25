@@ -8,6 +8,7 @@
 (define-module (sage ollama)
   #:use-module (sage config)
   #:use-module (sage util)
+  #:use-module (sage logging)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -81,22 +82,36 @@
          (request `(("model" . ,model)
                     ("messages" . ,(list->vector messages))
                     ("stream" . ,stream)))
-         (body (json-write-string request))
-         (result (http-post url body #:headers (ollama-auth-headers)))
-         (code (if (pair? result) (car result) 0))
-         (resp-body (if (pair? result) (cdr result) "")))
-    (cond
-     ((not (number? code))
-      (error "Invalid API response" result))
-     ((= code 200)
-      (catch #t
-        (lambda () (json-read-string resp-body))
-        (lambda (key . args)
-          (error "Failed to parse API response" resp-body))))
-     ((= code 0)
-      (error "API connection failed" resp-body))
-     (else
-      (error "Chat request failed" code resp-body)))))
+         (body (json-write-string request)))
+
+    ;; Log the API request
+    (log-api-request model "/api/chat" #:tokens (length messages))
+
+    (let* ((result (http-post url body #:headers (ollama-auth-headers)))
+           (code (if (pair? result) (car result) 0))
+           (resp-body (if (pair? result) (cdr result) "")))
+      (cond
+       ((not (number? code))
+        (log-error "ollama" "Invalid API response" `(("result" . ,(format #f "~a" result))))
+        (error "Invalid API response" result))
+       ((= code 200)
+        (catch #t
+          (lambda ()
+            (let ((parsed (json-read-string resp-body)))
+              (let ((usage (ollama-extract-token-usage parsed)))
+                (log-api-response code #:tokens (+ (assoc-ref usage 'prompt_tokens)
+                                                   (assoc-ref usage 'completion_tokens))))
+              parsed))
+          (lambda (key . args)
+            (log-error "ollama" "Failed to parse API response"
+                       `(("body_preview" . ,(substring resp-body 0 (min 200 (string-length resp-body))))))
+            (error "Failed to parse API response" resp-body))))
+       ((= code 0)
+        (log-error "ollama" "API connection failed" `(("error" . ,resp-body)))
+        (error "API connection failed" resp-body))
+       (else
+        (log-error "ollama" "Chat request failed" `(("code" . ,code) ("error" . ,resp-body)))
+        (error "Chat request failed" code resp-body))))))
 
 ;;; ollama-format-tool-prompt: Generate system prompt for tool calling
 ;;; Arguments:
@@ -139,15 +154,28 @@
                (json-end (string-contains content "```" json-start)))
           (if json-end
               (let ((json-str (substring content json-start json-end)))
+                (log-debug "ollama" "Parsing tool call"
+                           `(("json_preview" . ,(substring json-str 0 (min 100 (string-length json-str))))))
                 (catch #t
                   (lambda ()
-                    (json-read-string (string-trim-both json-str)))
+                    (let ((parsed (json-read-string (string-trim-both json-str))))
+                      (log-info "ollama" "Tool call parsed successfully"
+                                `(("tool" . ,(assoc-ref parsed "name"))))
+                      parsed))
                   (lambda (key . args)
+                    (log-warn "ollama" "Malformed tool call JSON"
+                              `(("json" . ,(string-trim-both json-str))
+                                ("error" . ,(format #f "~a ~a" key args))))
                     (format (current-error-port)
                             "Warning: Malformed tool call JSON: ~a~%"
                             (string-trim-both json-str))
                     #f)))
-              #f))
+              (begin
+                (log-warn "ollama" "Tool call block not closed"
+                          `(("content_preview" . ,(substring content match-start
+                                                             (min (+ match-start 100)
+                                                                  (string-length content))))))
+                #f)))
         #f)))
 
 ;;; ollama-extract-token-usage: Extract token usage from Ollama response
