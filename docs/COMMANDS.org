@@ -1,0 +1,161 @@
+#+TITLE: guile-sage Command Synergy
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-24
+
+* Design Principle
+
+Every feature accessible three ways:
+1. *CLI flag* - =sage --flag= (for scripts, one-shot)
+2. *Slash command* - =/command= (interactive REPL)
+3. *Scheme API* - =(sage-function)= (programmatic)
+
+* Command Matrix
+
+| Feature          | CLI Flag           | Slash Command    | Scheme API              | Status |
+|------------------+--------------------+------------------+-------------------------+--------|
+| *Session*        |                    |                  |                         |        |
+| Continue session | =-c, --continue=   | (auto)           | =session-load=          | v0.1 ✓ |
+| Resume by ID     | =-r, --resume ID=  | =/load ID=       | =session-load=          | v0.1 ✓ |
+| Save session     | (auto)             | =/save [name]=   | =session-save=          | v0.1 ✓ |
+| List sessions    |                    | =/sessions=      | =session-list=          | v0.1 ✓ |
+| Clear history    |                    | =/reset=         | =session-clear!=        | v0.1 ✓ |
+|------------------+--------------------+------------------+-------------------------+--------|
+| *Mode*           |                    |                  |                         |        |
+| YOLO mode        | =-y, --yolo=       | =/yolo=          | =*yolo-mode*=           | v0.1 ✓ |
+| Debug mode       | =-d, --debug=      | =/debug=         | =*debug*=               | v0.1 ✓ |
+| Plan mode        | =--mode=plan=      | =/plan=          | =plan-mode-start=       | v0.5   |
+| Ask mode         | =--mode=ask=       | =/ask=           | =ask-mode-start=        | v0.5   |
+| Headless         | =-p, --prompt=     | N/A              | =headless-query=        | v0.2   |
+|------------------+--------------------+------------------+-------------------------+--------|
+| *Model*          |                    |                  |                         |        |
+| Set model        | =--model NAME=     | =/model NAME=    | =ollama-set-model=      | v0.1 ✓ |
+| List models      | =--list-models=    | =/models=        | =ollama-list-models=    | v0.1 ✓ |
+| Model info       |                    | =/model=         | =ollama-model-info=     | v0.2   |
+|------------------+--------------------+------------------+-------------------------+--------|
+| *Context*        |                    |                  |                         |        |
+| Add directory    | =--add-dir PATH=   | =/add-dir PATH=  | =context-add-dir=       | v0.3   |
+| Show context     |                    | =/context=       | =session-get-context=   | v0.1 ✓ |
+| Compact          |                    | =/compact [n]=   | =session-compact!=      | v0.1 ✓ |
+| Stats/tokens     |                    | =/stats=         | =session-stats=         | v0.1 ✓ |
+| Pin message      |                    | =/pin=           | =context-pin=           | v0.3   |
+|------------------+--------------------+------------------+-------------------------+--------|
+| *Tools*          |                    |                  |                         |        |
+| List tools       |                    | =/tools=         | =list-tools=            | v0.1 ✓ |
+| Tool permissions | =--allowed-tools=  | =/allowed-tools= | =tool-allow=            | v0.2   |
+| MCP servers      | =--mcp=            | =/mcp=           | =mcp-list=              | v0.4   |
+|------------------+--------------------+------------------+-------------------------+--------|
+| *Output*         |                    |                  |                         |        |
+| JSON output      | =--output-format=  | N/A              | =*output-format*=       | v0.2   |
+| Verbose          | =-v, --verbose=    | (via /debug)     | =*verbose*=             | v0.1 ✓ |
+| Clear screen     |                    | =/clear=         | =repl-clear=            | v0.1 ✓ |
+| Copy last        |                    | =/copy=          | =copy-to-clipboard=     | v0.3   |
+|------------------+--------------------+------------------+-------------------------+--------|
+| *Files*          |                    |                  |                         |        |
+| @file reference  | N/A                | =@./path/file=   | =context-add-file=      | v0.3   |
+| Workspace        |                    | =/workspace=     | =workspace=             | v0.1 ✓ |
+|------------------+--------------------+------------------+-------------------------+--------|
+| *Meta*           |                    |                  |                         |        |
+| Help             | =--help, -h=       | =/help=          | =cmd-help=              | v0.1 ✓ |
+| Version          | =--version, -V=    | =/version=       | =version-string=        | v0.1 ✓ |
+| Exit             | N/A                | =/exit, /quit=   | =repl-exit=             | v0.1 ✓ |
+| Config           | =--config=         | =/config=        | =config-edit=           | v0.2   |
+
+* Priority: v0.2 Additions
+
+These commands need CLI flag equivalents:
+
+#+begin_src scheme
+;; Missing CLI flags to add
+--output-format json|stream-json|text  ; for headless mode
+--allowed-tools PATTERN                 ; restrict tools
+--config                                ; show/edit config
+--list-models                           ; list available models
+#+end_src
+
+* Custom Slash Commands (v0.3)
+
+Like Gemini CLI, support custom commands in:
+- =~/.config/sage/commands/*.scm= (user scope)
+- =.sage/commands/*.scm= (project scope)
+
+#+begin_src scheme
+;; Example: .sage/commands/test.scm
+(define-command test
+  #:description "Run project tests"
+  #:args '((pattern "Test pattern" #:optional))
+  (lambda (args)
+    (execute-tool "run_tests" args)))
+#+end_src
+
+Becomes =/test pattern= in REPL.
+
+* @ File References (v0.3)
+
+Shorthand for adding files to context:
+
+| Syntax               | Meaning                     |
+|----------------------+-----------------------------|
+| =@./src/foo.scm=     | Add single file             |
+| =@./src/=            | Add directory (recursive)   |
+| =@./src/**/*.scm=    | Glob pattern                |
+| =@https://url=       | Fetch and add URL           |
+
+* Keyboard Shortcuts (v0.3)
+
+| Shortcut     | Action                |
+|--------------+-----------------------|
+| =Ctrl+C=     | Cancel current        |
+| =Ctrl+D=     | Exit (like /exit)     |
+| =Ctrl+L=     | Clear (like /clear)   |
+| =Ctrl+R=     | Search history        |
+| =Ctrl+T=     | Toggle thinking       |
+| =Tab=        | Autocomplete paths    |
+
+* Implementation Plan
+
+** Phase 1: Parity (v0.2)
+- [ ] Add missing CLI flags (--output-format, --list-models, --config)
+- [ ] Standardize flag names with slash commands
+- [ ] Add /yolo command (toggle during session)
+- [ ] Add /config command
+
+** Phase 2: Context (v0.3)
+- [ ] @ file reference parsing
+- [ ] Custom slash commands from .sage/commands/
+- [ ] /copy command (clipboard)
+- [ ] /add-dir command
+- [ ] Keyboard shortcuts
+
+** Phase 3: Modes (v0.5)
+- [ ] /plan mode
+- [ ] /ask mode
+- [ ] Background execution (&prefix)
+
+* Command Implementation Pattern
+
+#+begin_src scheme
+;;; Standard pattern for dual CLI/REPL commands
+
+;; 1. Core function (Scheme API)
+(define* (feature-function #:key (option default))
+  "Documentation."
+  ...)
+
+;; 2. Slash command wrapper
+(define (cmd-feature args)
+  "Slash command /feature."
+  (feature-function #:option (parse-args args))
+  #t)
+
+;; 3. Register command
+(define *commands*
+  `(("/feature" . ,cmd-feature)
+    ...))
+
+;; 4. CLI flag handling in main.scm
+(define (process-args args)
+  (cond
+   ((member "--feature" args)
+    (feature-function #:option (get-flag-value args "--feature")))
+   ...))
+#+end_src
