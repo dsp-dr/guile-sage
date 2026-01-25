@@ -108,9 +108,9 @@ Document bugs discovered during testing:
 
 1. **[Fixed]** Token key mismatch: `estimated_tokens` vs `total_tokens`
 2. **[Documented]** popen segfault on FreeBSD - workaround uses temp files
-3. **[Pending]** glob_files returns empty results in some cases
-4. **[Pending]** search_files regex escaping issues
-5. **[Pending]** write_file permission denied for /tmp - should allow .tmp and /tmp writes
+3. **[Fixed]** glob_files returns empty results - now splits directory/filename parts (a8c3dd2)
+4. **[Fixed]** search_files regex escaping - uses grep -F by default (a8c3dd2)
+5. **[Fixed]** write_file permission denied for /tmp - safe-path? now allows /tmp (a8c3dd2)
 
 ## Running a UAT Session
 
