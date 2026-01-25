@@ -5,7 +5,8 @@
 ;; Defines scenarios for v0.2 cloud stress testing.
 ;; Each scenario is designed to push context limits and trigger compaction.
 
-(define-module (stress scenarios)
+(define-module (tests stress scenarios)
+  #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-9)
   #:export (make-scenario
             scenario?

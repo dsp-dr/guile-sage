@@ -3,7 +3,7 @@
 ;;; run-scenarios.scm --- Execute cloud stress test scenarios
 
 (add-to-load-path "src")
-(add-to-load-path "tests/stress")
+(add-to-load-path ".")
 
 (use-modules (sage config)
              (sage session)
@@ -11,7 +11,7 @@
              (sage util)
              (sage ollama)
              (sage repl)
-             (stress scenarios)
+             (tests stress scenarios)
              (srfi srfi-1)
              (ice-9 format)
              (ice-9 getopt-long))
@@ -186,7 +186,7 @@
          (help? (option-ref options 'help #f))
          (list? (option-ref options 'list #f))
          (all? (option-ref options 'all #f))
-         (scenario-id (option-ref options 'scenario #f)))
+         (run-scenario-id (option-ref options 'scenario #f)))
 
     (cond
      (help?
@@ -204,11 +204,11 @@
                           (scenario-name s)))
                 *scenarios*))
 
-     (scenario-id
-      (let ((scenario (get-scenario (string->symbol scenario-id))))
+     (run-scenario-id
+      (let ((scenario (get-scenario (string->symbol run-scenario-id))))
         (if scenario
             (run-scenario scenario)
-            (format #t "Unknown scenario: ~a~%" scenario-id))))
+            (format #t "Unknown scenario: ~a~%" run-scenario-id))))
 
      (all?
       (let ((results (map run-scenario *scenarios*)))
