@@ -1,0 +1,167 @@
+#+TITLE: guile-sage: CTO Technical Briefing
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-25
+
+* Executive Summary
+
+guile-sage is an AI-powered REPL built in Guile Scheme with tool calling capabilities. It provides a Claude Code-like experience for local and cloud LLM providers.
+
+* Key Questions & Answers
+
+** 1. Security Model
+
+*** Q: How is the sandbox implemented?
+- *Path Safety*: All file operations check against workspace boundaries
+- *Sensitive Files*: Blocks .env, .git/, .ssh/, .gnupg/ access
+- *Command Injection*: Shell metacharacters filtered in tool parameters
+- *Permission System*: Safe vs Unsafe tools with YOLO mode override
+- *34 adversarial security tests* pass against common attack vectors
+
+*** Q: What are the attack surfaces?
+| Surface | Mitigation |
+|---------+------------|
+| Path traversal | Canonicalization + prefix check |
+| Command injection | Parameterized commands, shell escaping |
+| Sensitive file exposure | Regex blocklist for .env, credentials |
+| Temp file races | PID-namespaced temp files, immediate cleanup |
+| Eval injection | YOLO mode required, not default |
+
+*** Q: What's NOT protected?
+- No OS-level sandboxing (no containers, no seccomp)
+- TOCTOU races possible (time-of-check to time-of-use)
+- YOLO mode intentionally bypasses all restrictions
+
+** 2. System Prompt / Context
+
+*** Q: How is context managed?
+- Sessions stored per-project in XDG directories
+- Claude-style path encoding: ~/project → -home-user-project
+- AGENTS.md support for project-specific instructions
+- 5 compaction strategies with quality evaluation
+
+*** Q: What are the token limits?
+| Provider | Default Limit |
+|----------+---------------|
+| Local (mac.lan) | 8,000 tokens |
+| Cloud | 4,000 tokens |
+| qwen3-coder | 32,000 tokens |
+
+*** Q: How does compaction work?
+#+begin_example
+Strategy        Info Retention  Score
+truncate        84%            89.5 (best)
+importance      78%            63.0
+token-limit     49%            57.6
+summarize       41%            54.3
+intent          39%            53.5
+#+end_example
+
+** 3. Features
+
+*** Core Capabilities
+- [X] Interactive REPL with LLM backend
+- [X] Tool calling (15 built-in tools)
+- [X] Session management with persistence
+- [X] XDG Base Directory compliance
+- [X] AGENTS.md project instructions
+- [X] YOLO mode for unrestricted access
+- [X] CLI flags (-c/--continue, -y/--yolo, -p/--prompt)
+
+*** Tool Categories
+| Safe (Always Allowed) | Unsafe (YOLO Required) |
+|-----------------------+------------------------|
+| read_file | write_file |
+| list_files | edit_file |
+| git_status | git_commit |
+| git_diff | eval_scheme |
+| git_log | create_tool |
+| search_files | reload_module |
+| glob_files | run_tests |
+
+** 4. Cost & Infrastructure
+
+*** Q: What's the cost model?
+- *Local*: Free (runs on local Ollama)
+- *Cloud*: Pay per token to cloud provider
+- No SaaS dependencies
+- No telemetry or data collection
+
+*** Q: What infrastructure is required?
+| Component | Requirement |
+|-----------+-------------|
+| Runtime | Guile 3.0+ |
+| LLM Backend | Ollama (local or cloud) |
+| Dependencies | curl (HTTP), standard POSIX |
+| Storage | XDG directories (~/.local/share/sage) |
+
+*** Q: How does it compare to alternatives?
+| Feature | guile-sage | Claude Code | Cursor |
+|---------+------------+-------------+--------|
+| Self-hosted | Yes | No | No |
+| Open source | Yes | No | No |
+| Data privacy | Full control | Anthropic | Microsoft |
+| Cost | $0 + LLM | Subscription | Subscription |
+| Extensibility | Scheme macros | Limited | Plugins |
+
+** 5. Testing & Quality
+
+*** Test Coverage
+| Category | Tests |
+|----------+-------|
+| Unit tests | 60+ |
+| Security tests | 34 |
+| Compaction tests | 13 |
+| UAT tests | 35 |
+
+*** CI/CD
+- GitHub Actions on push/PR
+- Lint + test pipeline
+- Pre-commit hooks for local dev
+
+** 6. Roadmap / Limitations
+
+*** Current Limitations
+- Single LLM provider at a time
+- No streaming responses
+- No multi-modal (images, etc.)
+- No IDE integration yet
+
+*** Future Work
+1. MCP Protocol support
+2. Multi-provider backends
+3. Streaming responses
+4. IDE/Editor integration
+5. Agent orchestration
+
+** 7. Compliance & Licensing
+
+*** Q: What's the license?
+- Open source (to be determined - likely MIT/Apache)
+
+*** Q: Any compliance concerns?
+- No PII collection
+- No telemetry
+- User controls all data
+- Suitable for air-gapped environments
+
+* Quick Start for Evaluation
+
+#+begin_src bash
+# Clone and install
+git clone https://github.com/dsp-dr/guile-sage
+cd guile-sage
+make build install
+
+# Run with local Ollama
+export OLLAMA_HOST=http://mac.lan:11434
+sage --yolo -p "List files in src/"
+
+# Run tests
+make check
+make check-verbose
+#+end_src
+
+* Contact
+
+- Repository: https://github.com/dsp-dr/guile-sage
+- Author: dsp-dr

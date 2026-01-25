@@ -38,13 +38,31 @@
             ensure-project-dirs
             ;; AGENTS.md support
             find-agents-md
-            load-agents-md))
+            load-agents-md
+            ;; Token limits
+            *token-limits*
+            get-token-limit
+            is-local-provider?))
 
 ;;; Constants
 
 (define *default-provider* 'ollama)
 (define *default-ollama-host* "http://localhost:11434")
 (define *default-model* #f)  ; Use provider default
+
+;;; Token limits by provider/model
+;;; Conservative defaults to avoid hitting limits
+(define *token-limits*
+  '(;; Local Ollama (mac.lan) - typically 8K-32K context
+    ("local" . 8000)
+    ;; Cloud providers - varies by model
+    ("cloud" . 4000)
+    ;; Specific models
+    ("qwen3-coder" . 32000)
+    ("llama3" . 8000)
+    ("mistral" . 8000)
+    ("gpt-4" . 8000)
+    ("claude" . 100000)))
 
 ;;; Internal state
 
@@ -241,3 +259,40 @@
                         (call-with-input-file f get-string-all)))
               files)
          "\n\n"))))
+
+;;; ============================================================
+;;; Token Limit Management
+;;; ============================================================
+
+;;; is-local-provider?: Check if using local Ollama instance
+(define (is-local-provider?)
+  (let ((host (or (config-get "OLLAMA_HOST") *default-ollama-host*)))
+    (or (string-contains host "localhost")
+        (string-contains host "127.0.0.1")
+        (string-contains host "mac.lan")
+        (string-contains host ".local"))))
+
+;;; get-token-limit: Get appropriate token limit for current config
+;;; Arguments:
+;;;   model - Optional model name to check specific limits
+;;; Returns: Token limit integer
+(define* (get-token-limit #:optional (model #f))
+  (or
+   ;; Explicit configuration
+   (let ((explicit (config-get "TOKEN_LIMIT")))
+     (and explicit (string->number explicit)))
+   ;; Model-specific limit
+   (and model
+        (let loop ((limits *token-limits*))
+          (if (null? limits)
+              #f
+              (if (string-contains (string-downcase model)
+                                   (car (car limits)))
+                  (cdr (car limits))
+                  (loop (cdr limits))))))
+   ;; Provider-based default
+   (if (is-local-provider?)
+       (assoc-ref *token-limits* "local")
+       (assoc-ref *token-limits* "cloud"))
+   ;; Ultimate fallback
+   4000))
