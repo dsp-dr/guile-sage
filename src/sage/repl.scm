@@ -51,19 +51,45 @@
    ((< tokens 1000000) (format #f "~,1fk" (/ tokens 1000.0)))
    (else (format #f "~,1fM" (/ tokens 1000000.0)))))
 
+(define (extract-repo-name path)
+  "Extract repo name from ghq-style path (github.com/owner/repo)."
+  (let ((gh-match (string-contains path "github.com/")))
+    (if gh-match
+        (let* ((start (+ gh-match 11))  ; length of "github.com/"
+               (rest (substring path start))
+               (parts (string-split rest #\/)))
+          (if (>= (length parts) 2)
+              (format #f "~a/~a" (car parts) (cadr parts))
+              #f))
+        #f)))
+
+(define (short-hostname)
+  "Get short hostname (before first dot)."
+  (let* ((full (gethostname))
+         (dot (string-index full #\.)))
+    (if dot (substring full 0 dot) full)))
+
 (define (make-prompt)
-  "Generate dynamic prompt with model, endpoint, and token count."
-  (let* ((model (ollama-model))
-         (host (ollama-host))
-         (label (endpoint-label host))
+  "Generate dynamic prompt with user, host, repo, model, endpoint, and tokens."
+  (let* ((user (or (getenv "USER") (passwd:name (getpwuid (getuid)))))
+         (host (short-hostname))
+         (ws (workspace))
+         (repo (and ws (extract-repo-name ws)))
+         (model (ollama-model))
+         (api-host (ollama-host))
+         (label (endpoint-label api-host))
          (status (session-status))
          (tokens (or (assoc-ref status "total_tokens") 0))
          ;; Extract short model name (before colon if present)
          (short-model (let ((idx (string-index model #\:)))
-                        (if idx (substring model 0 idx) model))))
+                        (if idx (substring model 0 idx) model)))
+         ;; Build context string
+         (context (if repo
+                      (format #f "~a@~a:~a" user host repo)
+                      (format #f "~a@~a" user host))))
     (if (> tokens 0)
-        (format #f "sage[~a@~a|~a]> " short-model label (format-tokens tokens))
-        (format #f "sage[~a@~a]> " short-model label))))
+        (format #f "~a sage[~a@~a|~a]> " context short-model label (format-tokens tokens))
+        (format #f "~a sage[~a@~a]> " context short-model label))))
 
 ;;; Slash Commands
 
