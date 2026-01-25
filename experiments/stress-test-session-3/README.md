@@ -65,6 +65,9 @@ For session 3, focus on:
 | Start | 164,052 | 146 | Resumed from session 1 |
 | +fix | 164,171 | 148 | After curl fallback fix, short test |
 | +essay | 167,903 | 150 | Memory essay (2k words) |
+| +scoping | 169,447 | 153 | Lexical scoping explanation |
+| +errors | 171,382 | 155 | Error handling comparison (800 words) |
+| +conts | 172,856 | 157 | Continuations explanation (600 words) |
 
 ## Bug Fixes During Session 3
 
