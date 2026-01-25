@@ -69,6 +69,7 @@ For session 3, focus on:
 | +errors | 171,382 | 155 | Error handling comparison (800 words) |
 | +conts | 172,856 | 157 | Continuations explanation (600 words) |
 | +testing | 174,568 | 159 | Testing comparison PBT vs EBT (700 words) |
+| compact | 174,568 | 51 | /compact 50 - removed 109 msgs (106k tokens) |
 
 ## Bug Fixes During Session 3
 
