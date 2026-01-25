@@ -225,12 +225,24 @@
       (format #t "[DEBUG] Messages: ~a~%" (length messages))
       (format #t "[DEBUG] Tools: ~a~%" (length tools)))
 
+    ;; Display token usage in debug mode (after response)
+    (define (debug-tokens prompt-toks completion-toks)
+      (when *debug*
+        (format #t "[DEBUG] Tokens - prompt: ~a, completion: ~a~%"
+                prompt-toks completion-toks)))
+
     ;; Call Ollama with tools
     (catch #t
       (lambda ()
         (let* ((response (ollama-chat-with-tools model messages tools))
                (message (assoc-ref response "message"))
-               (content (assoc-ref message "content")))
+               (content (assoc-ref message "content"))
+               (usage (ollama-extract-token-usage response))
+               (prompt-tokens (assoc-ref usage 'prompt_tokens))
+               (completion-tokens (assoc-ref usage 'completion_tokens)))
+
+          ;; Debug token usage
+          (debug-tokens prompt-tokens completion-tokens)
 
           ;; Check for tool calls
           (let ((tool-call (ollama-parse-tool-call content)))
@@ -244,8 +256,10 @@
                       (format #t "[DEBUG] Tool: ~a~%" tool-name)
                       (format #t "[DEBUG] Args: ~a~%" tool-args))
 
-                    ;; Add assistant message with tool call
-                    (session-add-message "assistant" content #:tool-call #t)
+                    ;; Add assistant message with tool call (with actual token count)
+                    (session-add-message "assistant" content
+                                         #:tokens completion-tokens
+                                         #:tool-call #t)
 
                     ;; Display tool execution
                     (format #t "~a~%" content)
@@ -260,13 +274,19 @@
                     ;; Get follow-up response
                     (let* ((follow-up (ollama-chat model (session-get-context)))
                            (follow-msg (assoc-ref follow-up "message"))
-                           (follow-content (assoc-ref follow-msg "content")))
-                      (session-add-message "assistant" follow-content)
+                           (follow-content (assoc-ref follow-msg "content"))
+                           (follow-usage (ollama-extract-token-usage follow-up))
+                           (follow-completion (assoc-ref follow-usage 'completion_tokens)))
+                      (debug-tokens (assoc-ref follow-usage 'prompt_tokens)
+                                    follow-completion)
+                      (session-add-message "assistant" follow-content
+                                           #:tokens follow-completion)
                       (format #t "~%~a~%" follow-content))))
 
                 ;; No tool call, just display response
                 (begin
-                  (session-add-message "assistant" content)
+                  (session-add-message "assistant" content
+                                       #:tokens completion-tokens)
                   (format #t "~a~%" content))))))
 
       (lambda (key . args)
