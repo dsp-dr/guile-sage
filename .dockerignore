@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+*.go
+*~
+
+# Environment files (never include in container)
+.env
+.env.*
+!.env.template
+
+# Editor files
+\#*\#
+.\#*
+
+# Documentation (not needed in runtime)
+docs/
+*.org
+*.md
+!README.md
+
+# Tests (not needed in runtime)
+tests/
+
+# Development
+.direnv/
+.envrc*
+.beads/
+
+# CI/CD configs (not needed in container)
+.github/

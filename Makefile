@@ -19,7 +19,7 @@ GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run init check-config help docs publish run-yolo check-verbose uat uat-yolo install-hooks version build install uninstall
+.PHONY: all clean check repl run init check-config help docs publish run-yolo check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push
 
 all: $(OBJECTS)
 
@@ -169,6 +169,61 @@ check-verbose:
 	echo ""; \
 	echo "=== TOTAL: $$passed/$$total tests passed ==="
 
+# Version bumping (semantic versioning)
+patch:
+	@sh scripts/bump-version.sh patch
+
+minor:
+	@sh scripts/bump-version.sh minor
+
+major:
+	@sh scripts/bump-version.sh major
+
+# Get current version as variable
+VERSION = $(shell $(GUILE) -L $(SRCDIR) -c '(use-modules (sage version)) (display (version-string))')
+
+# Create and push git tag
+tag:
+	@echo "Creating tag v$(VERSION)..."
+	@git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
+	@echo "Created tag v$(VERSION)"
+	@echo "Push with: git push origin v$(VERSION)"
+
+# GitHub release (requires gh CLI)
+release: build
+	@echo "Creating GitHub release v$(VERSION)..."
+	@if ! command -v gh >/dev/null 2>&1; then \
+		echo "Error: gh CLI not installed. Install with: pkg install gh"; \
+		exit 1; \
+	fi
+	@if ! git tag | grep -q "^v$(VERSION)$$"; then \
+		echo "Tag v$(VERSION) not found. Creating..."; \
+		git tag -a "v$(VERSION)" -m "Release v$(VERSION)"; \
+	fi
+	@git push origin "v$(VERSION)" 2>/dev/null || true
+	@gh release create "v$(VERSION)" \
+		--title "guile-sage v$(VERSION)" \
+		--generate-notes \
+		|| echo "Release may already exist"
+	@echo "Release v$(VERSION) created: https://github.com/dsp-dr/guile-sage/releases/tag/v$(VERSION)"
+
+# Docker
+DOCKER_IMAGE = ghcr.io/dsp-dr/guile-sage
+
+docker:
+	@echo "Building Docker image..."
+	docker build -t $(DOCKER_IMAGE):$(VERSION) -t $(DOCKER_IMAGE):latest .
+	@echo "Built: $(DOCKER_IMAGE):$(VERSION)"
+
+docker-run:
+	docker run --rm -it -v $(PWD):/workspace $(DOCKER_IMAGE):latest
+
+docker-push: docker
+	@echo "Pushing to GitHub Container Registry..."
+	docker push $(DOCKER_IMAGE):$(VERSION)
+	docker push $(DOCKER_IMAGE):latest
+	@echo "Pushed: $(DOCKER_IMAGE):$(VERSION)"
+
 # UAT tests
 uat:
 	@echo "Running UAT tests..."
@@ -198,8 +253,25 @@ help:
 	@echo "  publish       - Build and prepare for publishing"
 	@echo "  clean         - Remove compiled files"
 	@echo ""
+	@echo "Version & Release:"
+	@echo "  patch         - Bump patch version (0.1.0 -> 0.1.1)"
+	@echo "  minor         - Bump minor version (0.1.0 -> 0.2.0)"
+	@echo "  major         - Bump major version (0.1.0 -> 1.0.0)"
+	@echo "  tag           - Create git tag for current version"
+	@echo "  release       - Create GitHub release (requires gh CLI)"
+	@echo ""
 	@echo "Install options:"
 	@echo "  PREFIX=~/.local  - Installation prefix (default)"
 	@echo "  PREFIX=/opt/sage - System-wide install"
 	@echo ""
-	@echo "Example: make build install PREFIX=~/.local"
+	@echo "Docker:"
+	@echo "  docker        - Build Docker image"
+	@echo "  docker-run    - Run sage in container with current dir mounted"
+	@echo "  docker-push   - Push to GitHub Container Registry"
+	@echo ""
+	@echo "Release workflow:"
+	@echo "  1. make patch              # bump version"
+	@echo "  2. git add -A && git commit -m 'chore: bump to vX.Y.Z'"
+	@echo "  3. make tag                # create git tag"
+	@echo "  4. git push && git push --tags"
+	@echo "  5. make release            # create GitHub release"
