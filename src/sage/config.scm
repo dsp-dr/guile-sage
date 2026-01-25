@@ -52,17 +52,30 @@
 
 ;;; Token limits by provider/model
 ;;; Conservative defaults to avoid hitting limits
+;;; Sources:
+;;;   - https://docs.ollama.com/context-length
+;;;   - https://ollama.com/library/glm-4.7:cloud
+;;;   - https://unsloth.ai/docs/models/glm-4.7
 (define *token-limits*
-  '(;; Local Ollama (host.lan) - typically 8K-32K context
-    ("local" . 8000)
-    ;; Cloud providers - varies by model
-    ("cloud" . 4000)
-    ;; Specific models
+  '(;; GLM-4.x family (Ollama Cloud) - check specific first
+    ("glm-4.7" . 128000)   ; 128K context window
+    ("glm-4.6" . 200000)   ; 200K context window
+    ;; Qwen models
     ("qwen3-coder" . 32000)
+    ("qwen" . 32000)
+    ;; Llama models
     ("llama3" . 8000)
+    ("llama" . 4096)
+    ;; Other models
     ("mistral" . 8000)
+    ("deepseek" . 64000)
+    ;; Cloud API providers (check gpt-4o before gpt-4)
+    ("gpt-4o" . 128000)
     ("gpt-4" . 8000)
-    ("claude" . 100000)))
+    ("claude" . 200000)
+    ;; Fallback categories (checked last)
+    ("local" . 8000)
+    ("cloud" . 64000)))
 
 ;;; Internal state
 
