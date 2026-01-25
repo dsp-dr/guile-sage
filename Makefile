@@ -48,6 +48,7 @@ check:
 clean:
 	find . -name "*.go" -delete
 	find . -name "*~" -delete
+	rm -rf ~/.cache/guile/ccache
 
 # Installation
 install: build
