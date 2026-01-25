@@ -15,11 +15,11 @@
 
 ;;; Version components
 (define *version-major* 0)
-(define *version-minor* 1)
+(define *version-minor* 2)
 (define *version-patch* 0)
 
 ;;; Combined version string
-(define *version* "0.1.0")
+(define *version* "0.2.0")
 
 ;;; version-string: Get version as string
 (define (version-string)
