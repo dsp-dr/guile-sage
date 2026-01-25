@@ -1,0 +1,221 @@
+#+TITLE: guile-sage Roadmap
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-24
+
+* Version Roadmap
+
+Feature research based on: Claude Code, GitHub Copilot CLI, Gemini CLI, Aider, Cursor CLI, Continue.dev
+
+** v0.1.0 - Foundation [RELEASED]
+
+- [X] Interactive REPL with LLM backend
+- [X] Tool calling (15 built-in tools)
+- [X] Session management with persistence
+- [X] XDG Base Directory compliance
+- [X] AGENTS.md project instructions
+- [X] YOLO mode for unrestricted access
+- [X] CLI flags (-c/--continue, -y/--yolo, -p/--prompt)
+- [X] 5 compaction strategies with evaluation
+- [X] Security sandbox with 34 adversarial tests
+- [X] Docker container and GitHub releases
+
+** v0.2.0 - Robustness & Streaming
+
+Target: API reliability and real-time output
+
+*** Features
+- [ ] Retry logic with exponential backoff (429, 503, network errors)
+- [ ] Respect Retry-After header from rate limits
+- [ ] Streaming responses (newline-delimited JSON)
+- [ ] Auto-compaction at 95% token limit
+- [ ] Improved error messages with suggestions
+- [ ] Connection health checks
+- [ ] Request timeout configuration
+
+*** Research Sources
+- Ollama API: streaming via ={"stream": true}=
+- Claude Code: auto-compaction at 95%
+- Copilot CLI: timeline messages for compaction status
+
+** v0.3.0 - Context & Memory
+
+Target: Smarter context management
+
+*** Features
+- [ ] Conversation search (find previous discussions)
+- [ ] Project memory (persistent facts across sessions)
+- [ ] Web fetch tool with URL allowlist/denylist
+- [ ] @-mentions for files (@src/foo.scm)
+- [ ] Codebase mapping (understand project structure)
+- [ ] Import external AGENTS.md files
+- [ ] Context pinning (keep important messages)
+
+*** Research Sources
+- Aider: automatic codebase mapping
+- Gemini CLI: 1M token context window
+- Copilot CLI: web_fetch tool with URL controls
+- Claude Code: external CLAUDE.md imports
+
+** v0.4.0 - MCP Protocol
+
+Target: Extensible tool ecosystem
+
+*** Features
+- [ ] MCP client implementation (connect to servers)
+- [ ] MCP server mode (expose sage tools)
+- [ ] Dynamic tool discovery (list_changed notifications)
+- [ ] Configuration scopes (local, project, user)
+- [ ] Built-in MCP servers: GitHub, filesystem, databases
+- [ ] Tool approval UI
+- [ ] /mcp command (list, enable, disable)
+
+*** Research Sources
+- Claude Code: dual MCP functionality (client + server)
+- Gemini CLI: MCP in ~/.gemini/settings.json
+- Cursor: /mcp list interactive menu
+- Continue.dev: MCP integration
+
+** v0.5.0 - Agent Modes
+
+Target: Specialized interaction patterns
+
+*** Features
+- [ ] Plan mode (design before coding, ask clarifying questions)
+- [ ] Ask mode (explore code without making changes)
+- [ ] Background agents (async execution)
+- [ ] Agent orchestration (task delegation)
+- [ ] Headless mode improvements for CI/CD
+- [ ] Non-interactive JSON output
+- [ ] Pre-commit hook integration
+
+*** Research Sources
+- Cursor: /plan and /ask modes
+- Claude Code: headless mode with -p flag
+- Copilot CLI: Explore and Task agents
+- Continue.dev: pause/resume sessions
+
+** v0.6.0 - Multi-Model & Providers
+
+Target: Model flexibility
+
+*** Features
+- [ ] Multi-provider support (OpenAI, Anthropic, Gemini, local)
+- [ ] Model switching (/model command)
+- [ ] Auto-routing (simple vs complex tasks)
+- [ ] Model comparison mode
+- [ ] Cost tracking and limits
+- [ ] Provider fallback chains
+
+*** Research Sources
+- Aider: supports GPT-4, Claude, local Llama, any OpenAI-compatible
+- Gemini CLI: auto-routing between Flash and Pro
+- Cursor: models from OpenAI, Anthropic, Gemini, xAI
+- Copilot CLI: /model command
+
+** v0.7.0 - IDE & Editor Integration
+
+Target: Beyond the terminal
+
+*** Features
+- [ ] Emacs integration (sage.el)
+- [ ] VSCode extension
+- [ ] Comment-based requests (@ai fix this)
+- [ ] Inline diff preview
+- [ ] Jump to file:line references
+- [ ] Editor-aware context
+
+*** Research Sources
+- Aider: IDE integration via comments
+- Gemini CLI: VS Code Agent Mode
+- Continue.dev: VS Code and JetBrains extensions
+
+** v0.8.0 - Testing & Quality
+
+Target: Automated code quality
+
+*** Features
+- [ ] Auto-lint after changes
+- [ ] Auto-test after changes
+- [ ] Fix linter errors automatically
+- [ ] Test generation
+- [ ] Coverage analysis
+- [ ] Security scanning
+
+*** Research Sources
+- Aider: automatic lint and test on changes
+- Gemini CLI: 78% SWE-bench score
+- Continue.dev: pre-commit hooks
+
+** v0.9.0 - Collaboration & Cloud
+
+Target: Team features
+
+*** Features
+- [ ] Cloud agent sync (continue on web/mobile)
+- [ ] Shareable sessions
+- [ ] Team configurations
+- [ ] Audit logging
+- [ ] Usage analytics (local)
+
+*** Research Sources
+- Cursor: push to Cloud Agent with &
+- Continue.dev: shareable, remixable agents
+- Gemini CLI: GitHub Actions integration
+
+** v1.0.0 - Production Ready
+
+Target: Stable, documented, polished
+
+*** Features
+- [ ] Comprehensive documentation
+- [ ] Stable API
+- [ ] Performance optimization
+- [ ] Accessibility improvements
+- [ ] Voice input support
+- [ ] i18n support
+
+*** Research Sources
+- Aider: voice support
+- All tools: stability and documentation
+
+* Feature Matrix
+
+| Feature                  | Claude | Copilot | Gemini | Aider | Cursor | Continue |
+|--------------------------+--------+---------+--------+-------+--------+----------|
+| Streaming                | Yes    | Yes     | Yes    | Yes   | Yes    | Yes      |
+| MCP Support              | Yes    | Yes     | Yes    | -     | Yes    | Yes      |
+| Plan Mode                | -      | -       | -      | -     | Yes    | -        |
+| Ask Mode                 | -      | -       | -      | -     | Yes    | -        |
+| Background Agents        | -      | Yes     | -      | -     | Yes    | Yes      |
+| Auto-compaction          | Yes    | Yes     | -      | -     | -      | -        |
+| Voice Input              | -      | -       | -      | Yes   | -      | -        |
+| Multi-model              | Yes    | Yes     | Yes    | Yes   | Yes    | Yes      |
+| Codebase Mapping         | -      | -       | -      | Yes   | -      | -        |
+| Git Integration          | Yes    | Yes     | Yes    | Yes   | Yes    | Yes      |
+| IDE Integration          | Yes    | -       | Yes    | Yes   | Yes    | Yes      |
+| CI/CD Support            | Yes    | -       | Yes    | -     | Yes    | Yes      |
+| Open Source              | No     | No      | Yes    | Yes   | No     | Yes      |
+| Local Models             | No     | No      | -      | Yes   | -      | Yes      |
+| Free Tier                | No     | No      | Yes    | Yes*  | No     | Yes      |
+
+*Aider is free but requires LLM API access
+
+* Priority Order
+
+Based on user needs and implementation complexity:
+
+1. *v0.2 Streaming/Retry* - Critical for cloud reliability
+2. *v0.3 Context* - High value, moderate effort
+3. *v0.4 MCP* - Ecosystem integration
+4. *v0.5 Modes* - Power user features
+5. *v0.6 Multi-model* - Flexibility
+6. *v0.7+ IDE/Cloud* - Extended reach
+
+* Sources
+
+- [[https://code.claude.com/docs/en/mcp][Claude Code MCP Docs]]
+- [[https://github.blog/changelog/2026-01-14-github-copilot-cli-enhanced-agents-context-management-and-new-ways-to-install/][GitHub Copilot CLI Changelog]]
+- [[https://github.com/google-gemini/gemini-cli][Gemini CLI GitHub]]
+- [[https://aider.chat/][Aider Documentation]]
+- [[https://cursor.com/cli][Cursor CLI]]
+- [[https://docs.continue.dev/][Continue.dev Docs]]
