@@ -187,11 +187,17 @@
   "Session cleared.")
 
 ;;; session-save: Save session to file
+;;; If name contains a path separator or ends in .json, treat as filepath
 (define* (session-save #:key (name #f))
   (unless *session*
     (error "No active session"))
   (let* ((session-name (or name (assoc-ref *session* "name")))
-         (filename (string-append (session-dir) "/" session-name ".json"))
+         (filename (if (or (string-contains session-name "/")
+                           (string-suffix? ".json" session-name))
+                       (if (string-suffix? ".json" session-name)
+                           session-name
+                           (string-append session-name ".json"))
+                       (string-append (session-dir) "/" session-name ".json")))
          (json (json-write-string *session*)))
     (call-with-output-file filename
       (lambda (port) (display json port)))
