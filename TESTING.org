@@ -1,167 +1,172 @@
-#+TITLE: Testing Procedures for guile-sage
-#+AUTHOR: guile-sage team
-#+DATE: 2026-01-24
+#+TITLE: Sage Pre-Release Testing Checklist
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-25
 
-* Overview
+* Pre-Release Testing Process
 
-guile-sage uses a simple test framework with explicit assertions.
-Tests are located in the =tests/= directory.
+This document describes the testing process for guile-sage releases.
 
-* Running Tests
+** Quick Smoke Test
 
-** All Tests
+Run the full test suite:
 #+begin_src bash
 make check
 #+end_src
 
-Or manually:
+Expected: All tests pass (some security tests may show expected failures
+for safe tools like write_file, edit_file, git_commit).
+
+** Manual REPL Testing
+
+*** 1. Start Session
 #+begin_src bash
-guile3 -L src tests/test-ollama.scm
-guile3 -L src tests/test-session.scm
-guile3 -L src tests/test-tools.scm
+cd /path/to/guile-sage
+make repl
 #+end_src
 
-** Individual Test Files
-#+begin_src bash
-guile3 -L src tests/test-<module>.scm
+Verify:
+- [ ] Welcome banner shows correct version
+- [ ] Model and host are displayed
+- [ ] Prompt shows user@host:repo format
+
+*** 2. Basic Commands
+#+begin_src
+/help      - Verify all commands listed
+/version   - Verify version matches release
+/status    - Verify session stats display
+/workspace - Verify workspace path
+/tools     - Verify all tools listed (should include read_logs, search_logs)
 #+end_src
 
-* Test File Structure
-
-Each test file follows this pattern:
-
-#+begin_src scheme
-#!/usr/bin/env guile3
-!#
-;;; test-<module>.scm --- Tests for <module>
-
-(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
-
-(use-modules (sage <module>)
-             (ice-9 format))
-
-;;; Test helpers
-(define *tests-run* 0)
-(define *tests-passed* 0)
-
-(define (run-test name thunk)
-  (set! *tests-run* (1+ *tests-run*))
-  (catch #t
-    (lambda ()
-      (thunk)
-      (set! *tests-passed* (1+ *tests-passed*))
-      (format #t "PASS: ~a~%" name))
-    (lambda (key . args)
-      (format #t "FAIL: ~a - ~a: ~a~%" name key args))))
-
-;;; Test cases
-(run-test "test description"
-  (lambda ()
-    (unless (expected-condition)
-      (error "error message"))))
-
-;;; Summary
-(format #t "Tests: ~a/~a passed~%" *tests-passed* *tests-run*)
-(exit (if (= *tests-passed* *tests-run*) 0 1))
+*** 3. Logging (v0.3.0+)
+#+begin_src
+/logs      - Verify recent log entries displayed
+/logs 10   - Verify line limit works
 #+end_src
 
-* Test Suites
+Also verify .logs/sage.log exists and contains entries.
 
-** test-ollama.scm (17 tests)
-- Configuration tests: host, model, API key
-- Model listing tests
-- Response parsing tests
-- Tool call formatting and parsing
-
-** test-session.scm (14 tests)
-- Token estimation
-- Session creation
-- Message management
-- Context management
-- Session clear/compact
-- Status reporting
-
-** test-tools.scm (25 tests)
-- Tool registration
-- Permission checking
-- Path safety validation
-- Tool execution
-- Schema generation
-- Custom tool registration
-
-* Manual Testing
-
-** Starting the REPL
-#+begin_src bash
-make run
+*** 4. Tool Execution
+Test that tools work correctly:
+#+begin_src
+What files are in the src directory?
 #+end_src
 
-Or:
-#+begin_src bash
-guile3 -L src -c '(use-modules (sage repl)) (repl-start)'
+Sage should use list_files or glob_files tool and return results.
+
+*** 5. Git Tools
+#+begin_src
+What's the git status?
+Show me the recent commits.
 #+end_src
 
-** Test Commands
-| Command    | Expected Result                   |
-|------------+-----------------------------------|
-| /help      | Show available commands           |
-| /status    | Show session statistics           |
-| /tools     | List registered tools             |
-| /models    | List available Ollama models      |
-| /version   | Show version information          |
-| /workspace | Show workspace directory          |
-| /debug     | Toggle debug mode                 |
-| /clear     | Clear screen                      |
-| /reset     | Clear conversation history        |
-| /compact   | Compact conversation history      |
+Verify git_status and git_log tools execute and return results.
 
-** Testing Chat
-#+begin_example
-sage> Hello, what can you do?
-#+end_example
+*** 6. Session Management
+#+begin_src
+/save test-session
+/sessions
+/load test-session
+#+end_src
 
-Should receive response from Ollama model.
+*** 7. Self-Inspection (v0.3.0+)
+Ask sage to debug itself:
+#+begin_src
+Can you check the logs to see what tools were called recently?
+#+end_src
 
-** Testing Tool Calls
-#+begin_example
-sage> List the files in the src directory
-#+end_example
+Sage should use read_logs tool and show recent activity.
 
-Should invoke list_files tool and return results.
+*** 8. Error Recovery
+Trigger an intentional error and verify logging:
+#+begin_src
+/reload
+/logs 20 error
+#+end_src
 
-* Adding New Tests
+*** 9. Exit
+#+begin_src
+/exit
+#+end_src
 
-1. Create a new test file in =tests/= following the pattern
-2. Import the module to test
-3. Write test cases using =run-test=
-4. Add summary and exit code at the end
-5. Run with =guile3 -L src tests/test-<module>.scm=
+** Automated Test Script
 
-* Configuration for Tests
-
-Tests use environment variables or =.env= file:
+For CI/CD, use the following test script:
 
 #+begin_src bash
-# .env
-SAGE_OLLAMA_HOST=http://host.lan:11434
-SAGE_MODEL=qwen3-coder:latest
+#!/bin/bash
+# tests/smoke-test.sh
+
+set -e
+
+echo "=== Sage Smoke Test ==="
+
+# 1. Run unit tests
+make check
+
+# 2. Verify logging module loads
+guile3 -L src -c "(use-modules (sage logging)) (init-logging) (log-info \"test\" \"smoke test\")"
+
+# 3. Verify log file created
+if [ -f .logs/sage.log ]; then
+    echo "PASS: Log file created"
+else
+    echo "FAIL: Log file not created"
+    exit 1
+fi
+
+# 4. Verify log content
+if grep -q "smoke test" .logs/sage.log; then
+    echo "PASS: Log entry written"
+else
+    echo "FAIL: Log entry not found"
+    exit 1
+fi
+
+# 5. Clean up
+rm -f .logs/sage.log
+
+echo "=== All Smoke Tests Passed ==="
 #+end_src
 
-Check configuration:
-#+begin_src bash
-make check-config
-#+end_src
+** Version-Specific Tests
 
-* Troubleshooting
+*** v0.3.0 - Logging Infrastructure
 
-** FreeBSD popen segfault
-guile3's =open-input-pipe= causes segfault on FreeBSD 14.3.
-Workaround: use =system()= with temp files (already implemented in util.scm).
+New features to test:
+1. [ ] src/sage/logging.scm module loads
+2. [ ] init-logging creates .logs/ directory
+3. [ ] log-info/log-warn/log-error write to file
+4. [ ] /logs command shows recent entries
+5. [ ] read_logs tool works via LLM
+6. [ ] search_logs tool works via LLM
+7. [ ] Tool calls are logged with duration
+8. [ ] API requests/responses are logged
+9. [ ] Malformed JSON tool calls are logged as warnings
+10. [ ] Session create/load/save events are logged
 
-** Missing JSON module
-guile-json not available on FreeBSD.
-Workaround: custom JSON parser in util.scm.
+** Regression Tests
 
-** Compilation Warnings
-Check for forward references in module definitions.
-Ensure functions are defined before use in same file.
+Always verify:
+- [ ] Existing unit tests pass
+- [ ] REPL starts without errors
+- [ ] Basic chat works
+- [ ] Tool calling works
+- [ ] Session persistence works
+- [ ] /reload hot-reload works
+
+** Known Issues
+
+- Security tests for write_file, edit_file, git_commit show as "failed"
+  because these are intentionally in *safe-tools* for the dev workflow.
+  This is expected behavior, not a bug.
+
+** Release Checklist
+
+1. [ ] Update version in src/sage/version.scm
+2. [ ] Run `make check`
+3. [ ] Run manual REPL testing
+4. [ ] Update CHANGELOG (if exists)
+5. [ ] Commit with `chore: Release vX.Y.Z`
+6. [ ] Tag release: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
+7. [ ] Push: `git push && git push --tags`
