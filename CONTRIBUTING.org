@@ -32,6 +32,36 @@ Format: =<type>(<scope>): <description>=
 
 Types: =feat=, =fix=, =docs=, =test=, =refactor=, =chore=
 
+* Commit Identity Conventions
+
+This project has three commit identities:
+
+| Identity | Role | Email |
+|----------|------|-------|
+| Human (dsp-dr) | Primary author | dpascal@defrecord.com |
+| Claude | AI pair programmer | noreply@anthropic.com |
+| guile-sage | Autonomous agent | sage@noreply.defrecord.com |
+
+** Human + Claude (typical workflow)
+#+begin_src
+git commit -m "feat(repl): Add /status command
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"
+#+end_src
+
+** Autonomous sage commits
+When guile-sage runs autonomously (e.g., auto-fixes, scheduled tasks):
+#+begin_src bash
+./scripts/sage-commit.sh "fix(session): Auto-compact on threshold"
+#+end_src
+
+Or with environment variables:
+#+begin_src bash
+GIT_AUTHOR_NAME="guile-sage" \
+GIT_AUTHOR_EMAIL="sage@noreply.defrecord.com" \
+git commit -m "message"
+#+end_src
+
 * Testing
 
 Run tests with =make check= or individual tests with:
