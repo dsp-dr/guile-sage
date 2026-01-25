@@ -19,7 +19,8 @@
             ollama-chat
             ollama-chat-with-tools
             ollama-format-tool-prompt
-            ollama-parse-tool-call))
+            ollama-parse-tool-call
+            ollama-extract-token-usage))
 
 ;;; ollama-host: Get configured Ollama host
 ;;; Returns: Host URL string
@@ -124,3 +125,12 @@
                 (json-read-string (string-trim-both json-str)))
               #f))
         #f)))
+
+;;; ollama-extract-token-usage: Extract token usage from Ollama response
+;;; Arguments:
+;;;   response - Response alist from ollama-chat
+;;; Returns: Alist with 'prompt_tokens and 'completion_tokens
+(define (ollama-extract-token-usage response)
+  (list
+   (cons 'prompt_tokens (or (assoc-ref response "prompt_eval_count") 0))
+   (cons 'completion_tokens (or (assoc-ref response "eval_count") 0))))
