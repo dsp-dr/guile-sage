@@ -1,0 +1,149 @@
+#+TITLE: Sage Tool Building Guide
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-25
+
+* Overview
+
+Sage provides native Scheme tool building. No MCP, no proxies, no subprocess overhead.
+Tools are first-class functions with JSON schemas.
+
+* MCP Reference (NOT SUPPORTED)
+
+MCP (Model Context Protocol) uses JSON-RPC 2.0 over stdio:
+
+#+begin_src json
+// Tool definition
+{
+  "name": "generate-qrcode",
+  "description": "Generate QR code",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "content": {"type": "string"},
+      "format": {"type": "string", "enum": ["png", "ascii"]}
+    }
+  }
+}
+
+// Tool call
+{"jsonrpc": "2.0", "method": "tools/call", "params": {...}, "id": 1}
+#+end_src
+
+*Why sage doesn't use MCP:* Subprocess overhead, JSON serialization, extra dependencies.
+
+* Native Tool Building
+
+** Basic Registration
+
+#+begin_src scheme
+(register-tool
+ "tool_name"
+ "Description"
+ '(("type" . "object")
+   ("properties" . (("arg1" . (("type" . "string")))))
+   ("required" . #("arg1")))
+ (lambda (args)
+   (format #f "Result: ~a" (assoc-ref args "arg1"))))
+#+end_src
+
+** Structured Responses
+
+#+begin_src scheme
+(register-tool
+ "get_contact"
+ "Get contact as JSON"
+ '(("type" . "object")
+   ("properties" . (("name" . (("type" . "string"))))))
+ (lambda (args)
+   (json-write-string
+    `(("name" . ,(assoc-ref args "name"))
+      ("email" . "user@example.com")
+      ("type" . "contact")))))
+#+end_src
+
+** vCard Generation
+
+#+begin_src scheme
+(register-tool
+ "create_vcard"
+ "Create vCard contact"
+ '(("type" . "object")
+   ("properties" . (("name" . (("type" . "string")))
+                    ("email" . (("type" . "string")))
+                    ("phone" . (("type" . "string")))
+                    ("org" . (("type" . "string")))))
+   ("required" . #("name")))
+ (lambda (args)
+   (format #f "BEGIN:VCARD
+VERSION:3.0
+FN:~a
+EMAIL:~a
+TEL:~a
+ORG:~a
+END:VCARD"
+           (assoc-ref args "name")
+           (or (assoc-ref args "email") "")
+           (or (assoc-ref args "phone") "")
+           (or (assoc-ref args "org") ""))))
+#+end_src
+
+** QR Code (No MCP Needed)
+
+#+begin_src scheme
+(register-tool
+ "qrcode"
+ "Generate QR code ASCII art"
+ '(("type" . "object")
+   ("properties" . (("text" . (("type" . "string"))))))
+ (lambda (args)
+   (let* ((text (assoc-ref args "text"))
+          (tmp (format #f "/tmp/sage-qr-~a" (getpid))))
+     (system (format #f "qrencode -t UTF8 '~a' > ~a" text tmp))
+     (let ((result (call-with-input-file tmp get-string-all)))
+       (delete-file tmp)
+       result))))
+#+end_src
+
+** Dynamic Tool Creation
+
+#+begin_src scheme
+;; At runtime via create_tool
+(execute-tool "create_tool"
+  '(("name" . "greet")
+    ("description" . "Say hello")
+    ("code" . "(lambda (args) (format #f \"Hello, ~a!\" (assoc-ref args \"name\")))")))
+#+end_src
+
+* Tool Patterns
+
+** File Operations
+#+begin_src scheme
+(if (safe-path? path)
+    (call-with-input-file (string-append (workspace) "/" path) get-string-all)
+    "Unsafe path")
+#+end_src
+
+** Shell Commands
+#+begin_src scheme
+(let ((tmp (format #f "/tmp/sage-~a" (getpid))))
+  (system (format #f "cmd > ~a 2>&1" tmp))
+  (let ((r (call-with-input-file tmp get-string-all)))
+    (delete-file tmp) r))
+#+end_src
+
+** HTTP Requests
+#+begin_src scheme
+(let ((result (http-get url)))
+  (if (= (car result) 200) (cdr result) "Error"))
+#+end_src
+
+* MCP vs Native
+
+| Aspect | MCP | Sage Native |
+|--------|-----|-------------|
+| Latency | Subprocess + JSON-RPC | In-process |
+| Dependencies | Node.js | Pure Scheme |
+| Debugging | External logs | /logs |
+| Extensibility | New server | Lambda |
+
+*MCP not supported.* Use native tools.
