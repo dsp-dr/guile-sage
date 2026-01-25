@@ -19,18 +19,52 @@ Feature research based on: Claude Code, GitHub Copilot CLI, Gemini CLI, Aider, C
 - [X] Security sandbox with 34 adversarial tests
 - [X] Docker container and GitHub releases
 
-** v0.2.0 - Robustness & Streaming
+** v0.2.0 - Hardening Essentials
 
-Target: API reliability and real-time output
+Target: Reliable core experience - every feature reinforces the others
 
-*** Features
-- [ ] Retry logic with exponential backoff (429, 503, network errors)
-- [ ] Respect Retry-After header from rate limits
-- [ ] Streaming responses (newline-delimited JSON)
-- [ ] Auto-compaction at 95% token limit
-- [ ] Improved error messages with suggestions
-- [ ] Connection health checks
-- [ ] Request timeout configuration
+*** Design: Synergy Triangle
+#+begin_example
+         ┌─────────────────┐
+         │   /status       │  ← Shows token usage, triggers...
+         └────────┬────────┘
+                  │
+    ┌─────────────▼─────────────┐
+    │     Auto-Compaction       │  ← When near limit, uses...
+    └─────────────┬─────────────┘
+                  │
+         ┌────────▼────────┐
+         │  Retry + Stream │  ← Reliable delivery, shows...
+         └────────┬────────┘
+                  │
+         ┌────────▼────────┐
+         │   /status       │  ← Progress & token count
+         └─────────────────┘
+#+end_example
+
+*** Features (Synergistic)
+| Feature | CLI Flag | Slash Cmd | Reinforces |
+|---------+----------+-----------+------------|
+| Retry w/ backoff | (auto) | N/A | All API calls |
+| Streaming | --stream | /stream | Real-time feedback |
+| Auto-compact | --compact-at N | /compact auto | Token management |
+| /status enhanced | --status | /status | Shows all state |
+| Error recovery | (auto) | N/A | User trust |
+| Timeout config | --timeout N | /config timeout | Reliability |
+
+*** Implementation Order
+1. *Retry logic* - foundation for all API calls
+2. *Error messages* - user understands what happened
+3. */status enhanced* - shows tokens, model, connection
+4. *Auto-compact* - uses /status data, prevents failures
+5. *Streaming* - visual feedback during long responses
+6. *Timeout config* - prevents hanging, ties into retry
+
+*** Why This Order
+- Each feature builds on previous
+- /status becomes the "dashboard"
+- Retry enables auto-compact recovery
+- Streaming shows compaction happening
 
 *** Research Sources
 - Ollama API: streaming via ={"stream": true}=
