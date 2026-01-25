@@ -25,6 +25,45 @@
 (define *running* #t)
 (define *debug* #f)
 
+;;; Dynamic Prompt
+
+(define (endpoint-label host)
+  "Convert host URL to short label."
+  (cond
+   ((string-contains host "ollama.com") "cloud")
+   ((string-contains host "localhost") "local")
+   ((string-contains host "127.0.0.1") "local")
+   (else
+    ;; Extract hostname from URL
+    (let ((start (if (string-contains host "://")
+                     (+ 3 (string-contains host "://"))
+                     0)))
+      (let ((end (or (string-index host #\: start)
+                     (string-index host #\/ start)
+                     (string-length host))))
+        (substring host start end))))))
+
+(define (format-tokens tokens)
+  "Format token count for display (e.g., 12345 -> 12.3k)."
+  (cond
+   ((< tokens 1000) (number->string tokens))
+   ((< tokens 1000000) (format #f "~,1fk" (/ tokens 1000.0)))
+   (else (format #f "~,1fM" (/ tokens 1000000.0)))))
+
+(define (make-prompt)
+  "Generate dynamic prompt with model, endpoint, and token count."
+  (let* ((model (ollama-model))
+         (host (ollama-host))
+         (label (endpoint-label host))
+         (status (session-status))
+         (tokens (or (assoc-ref status "total_tokens") 0))
+         ;; Extract short model name (before colon if present)
+         (short-model (let ((idx (string-index model #\:)))
+                        (if idx (substring model 0 idx) model))))
+    (if (> tokens 0)
+        (format #f "sage[~a@~a|~a]> " short-model label (format-tokens tokens))
+        (format #f "sage[~a@~a]> " short-model label))))
+
 ;;; Slash Commands
 
 (define *commands*
@@ -379,14 +418,13 @@
 
   ;; Process initial prompt if provided
   (when initial-prompt
-    (format #t "sage> ~a~%" initial-prompt)
+    (format #t "~a~a~%" (make-prompt) initial-prompt)
     (repl-eval initial-prompt))
 
   ;; Activate readline if available
   (catch #t
     (lambda ()
-      (activate-readline)
-      (set-readline-prompt! "sage> "))
+      (activate-readline))
     (lambda args #f))
 
   ;; Main loop
@@ -394,7 +432,7 @@
   (while *running*
     (catch #t
       (lambda ()
-        (let ((input (readline "sage> ")))
+        (let ((input (readline (make-prompt))))
           (if (eof-object? input)
               (cmd-exit "")
               (begin
