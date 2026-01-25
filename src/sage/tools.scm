@@ -9,6 +9,7 @@
   #:use-module (sage config)
   #:use-module (sage util)
   #:use-module (sage logging)
+  #:use-module (sage agent)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -37,7 +38,9 @@
                        "git_log" "glob_files" "search_files"
                        "write_file" "edit_file"
                        "git_commit" "git_add_note"
-                       "read_logs" "search_logs"))  ;; Full dev workflow + self-inspection
+                       "read_logs" "search_logs"
+                       "sage_task_create" "sage_task_complete"
+                       "sage_task_list" "sage_task_status"))  ;; Full dev + agent
 (define *workspace* #f)
 
 ;;; workspace: Get current workspace directory
@@ -521,4 +524,68 @@
            (limit (or (assoc-ref args "limit") 100)))
        (search-logs pattern
                     #:level (and level (string->symbol level))
-                    #:limit limit)))))
+                    #:limit limit))))
+
+  ;; ============================================================
+  ;; Agent Task Tools
+  ;; ============================================================
+
+  ;; sage_task_create - Create a task for the agent
+  (register-tool
+   "sage_task_create"
+   "Create a task for the sage agent to work on. Use this to break down complex requests into manageable steps."
+   '(("type" . "object")
+     ("properties" . (("title" . (("type" . "string")
+                                  ("description" . "Brief task title")))
+                      ("description" . (("type" . "string")
+                                        ("description" . "Detailed task description")))))
+     ("required" . #("title" "description")))
+   (lambda (args)
+     (let ((title (assoc-ref args "title"))
+           (desc (assoc-ref args "description")))
+       (let ((id (task-create title desc)))
+         (if id
+             (format #f "Task created: ~a - ~a" id title)
+             "Failed to create task (is beads available?)")))))
+
+  ;; sage_task_complete - Mark current task complete
+  (register-tool
+   "sage_task_complete"
+   "Mark the current task as complete with a result note"
+   '(("type" . "object")
+     ("properties" . (("result" . (("type" . "string")
+                                   ("description" . "Result or completion note")))))
+     ("required" . #("result")))
+   (lambda (args)
+     (let ((result (assoc-ref args "result")))
+       (let ((id (task-complete result)))
+         (if id
+             (format #f "Task completed: ~a" id)
+             "No current task to complete")))))
+
+  ;; sage_task_list - List pending tasks
+  (register-tool
+   "sage_task_list"
+   "List all pending sage agent tasks"
+   '(("type" . "object")
+     ("properties" . ())
+     ("required" . #()))
+   (lambda (args)
+     (let ((tasks (task-list)))
+       (if (null? tasks)
+           "No pending tasks"
+           (string-join
+            (map (lambda (t)
+                   (format #f "~a: ~a" (car t) (cdr t)))
+                 tasks)
+            "\n")))))
+
+  ;; sage_task_status - Get agent status
+  (register-tool
+   "sage_task_status"
+   "Get current agent status including mode, tasks, and iteration count"
+   '(("type" . "object")
+     ("properties" . ())
+     ("required" . #()))
+   (lambda (args)
+     (format-task-status))))
