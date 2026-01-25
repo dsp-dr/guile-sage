@@ -53,9 +53,11 @@
         (expanded (if (string-prefix? "/" path)
                       path
                       (string-append (workspace) "/" path))))
-    (and (not (string-contains path ".."))
-         (string-prefix? ws (canonicalize-path-safe expanded))
-         (not (regexp-exec (make-regexp "(\\.env|\\.git/|\\.ssh|\\.gnupg)") path)))))
+    ;; Allow /tmp for temporary files, otherwise check workspace containment
+    (or (string-prefix? "/tmp/" expanded)
+        (and (not (string-contains path ".."))
+             (string-prefix? ws (canonicalize-path-safe expanded))
+             (not (regexp-exec (make-regexp "(\\.env|\\.git/|\\.ssh|\\.gnupg)") path))))))
 
 ;;; canonicalize-path-safe: Safe path canonicalization
 (define (canonicalize-path-safe path)
@@ -256,15 +258,20 @@
    "Search for pattern in files"
    '(("type" . "object")
      ("properties" . (("pattern" . (("type" . "string")
-                                    ("description" . "Search pattern (regex)")))
+                                    ("description" . "Search pattern (literal string)")))
                       ("file_pattern" . (("type" . "string")
-                                        ("description" . "File glob pattern")))))
+                                        ("description" . "File glob pattern")))
+                      ("regex" . (("type" . "boolean")
+                                  ("description" . "Treat pattern as regex (default: false)")))))
      ("required" . #("pattern")))
    (lambda (args)
      (let* ((pattern (assoc-ref args "pattern"))
             (file-pattern (or (assoc-ref args "file_pattern") "*"))
-            (cmd (format #f "cd ~a && grep -r '~a' --include='~a' . 2>&1 | head -50"
-                         (workspace) pattern file-pattern)))
+            (use-regex (assoc-ref args "regex"))
+            ;; Use -F for fixed strings by default to avoid escaping issues
+            (grep-flag (if use-regex "-r" "-rF"))
+            (cmd (format #f "cd ~a && grep ~a '~a' --include='~a' . 2>&1 | head -50"
+                         (workspace) grep-flag pattern file-pattern)))
        (let* ((tmp (format #f "/tmp/sage-grep-~a" (getpid))))
          (system (string-append cmd " > " tmp))
          (let ((result (call-with-input-file tmp get-string-all)))
@@ -281,8 +288,13 @@
      ("required" . #("pattern")))
    (lambda (args)
      (let* ((pattern (assoc-ref args "pattern"))
-            (cmd (format #f "cd ~a && find . -name '~a' 2>&1 | head -100"
-                         (workspace) pattern)))
+            ;; Split pattern into directory and filename parts for find
+            ;; This fixes issues where patterns like "src/*.scm" fail
+            (dir-part (dirname pattern))
+            (name-part (basename pattern))
+            (search-path (if (equal? dir-part ".") "." dir-part))
+            (cmd (format #f "cd ~a && find ~a -name '~a' 2>&1 | head -100"
+                         (workspace) search-path name-part)))
        (let* ((tmp (format #f "/tmp/sage-find-~a" (getpid))))
          (system (string-append cmd " > " tmp))
          (let ((result (call-with-input-file tmp get-string-all)))
