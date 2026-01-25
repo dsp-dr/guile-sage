@@ -13,6 +13,7 @@
   #:use-module (sage session)
   #:use-module (sage tools)
   #:use-module (sage version)
+  #:use-module (sage agent)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 format)
   #:use-module (ice-9 readline)
@@ -115,7 +116,11 @@
     ("/version"   . ,cmd-version)
     ("/reload"    . ,cmd-reload)
     ("/refresh"   . ,cmd-reload)
-    ("/logs"      . ,cmd-logs)))
+    ("/logs"      . ,cmd-logs)
+    ("/agent"     . ,cmd-agent)
+    ("/tasks"     . ,cmd-tasks)
+    ("/pause"     . ,cmd-pause)
+    ("/continue"  . ,cmd-continue)))
 
 ;;; Command Implementations
 
@@ -139,6 +144,11 @@
   (display "  /version        - Show version info\n")
   (display "  /reload         - Hot-reload sage modules\n")
   (display "  /logs [n] [lvl] - Show recent log entries\n")
+  (display "\nAgent commands:\n")
+  (display "  /agent [mode]   - Show/set agent mode (interactive|autonomous|yolo)\n")
+  (display "  /tasks          - List pending agent tasks\n")
+  (display "  /pause          - Pause agent loop\n")
+  (display "  /continue       - Continue agent loop\n")
   #t)
 
 (define (cmd-exit args)
@@ -296,6 +306,86 @@
                                #:level level))
     (newline))
   #t)
+
+(define (cmd-agent args)
+  "Show or set agent mode."
+  (if (string-null? (string-trim-both args))
+      ;; Show current mode
+      (begin
+        (display (format-task-status))
+        (newline))
+      ;; Set mode
+      (let ((mode (string->symbol (string-trim-both args))))
+        (if (set-agent-mode! mode)
+            (format #t "Agent mode set to: ~a~%" mode)
+            (display "Invalid mode. Use: interactive, autonomous, or yolo\n"))))
+  #t)
+
+(define (cmd-tasks args)
+  "List pending agent tasks."
+  (let ((tasks (task-list)))
+    (if (null? tasks)
+        (display "No pending tasks.\n")
+        (begin
+          (display "Pending tasks:\n")
+          (for-each
+           (lambda (t)
+             (format #t "  ~a: ~a~%" (car t) (cdr t)))
+           tasks))))
+  #t)
+
+(define (cmd-pause args)
+  "Pause agent loop."
+  (agent-pause)
+  (display "Agent paused.\n")
+  #t)
+
+(define (cmd-continue args)
+  "Continue agent loop."
+  (agent-continue)
+  (if (has-pending-tasks?)
+      (begin
+        (display "Continuing with pending tasks...\n")
+        (run-agent-loop))
+      (display "No pending tasks to continue.\n"))
+  #t)
+
+;;; Agent Loop
+
+(define (run-agent-loop)
+  "Run the agent loop to process pending tasks."
+  (agent-start)
+  (let loop ()
+    (let ((status (agent-status)))
+      (when (and (assoc-ref status "running")
+                 (has-pending-tasks?)
+                 (< (assoc-ref status "iteration") (assoc-ref status "max_iterations")))
+        (let ((task-id (task-next)))
+          (when task-id
+            (let ((task (task-get task-id)))
+              (format #t "~%[sage] Working on: ~a~%"
+                      (or (and task (assoc-ref task "title")) task-id))
+              ;; Send continuation prompt to model
+              (handle-task-continuation task-id task)
+              ;; Increment iteration
+              (agent-increment-iteration!)
+              ;; Check if we should pause (interactive mode)
+              (when (eq? (agent-mode) 'interactive)
+                (display "[sage] Task step complete. Type /continue to proceed or send new input.\n")
+                (agent-pause))
+              (loop)))))))
+  (unless (has-pending-tasks?)
+    (display "[sage] All tasks complete.\n")))
+
+(define (handle-task-continuation task-id task)
+  "Send a continuation prompt to the model for the given task."
+  (let* ((title (and task (assoc-ref task "title")))
+         (desc (and task (assoc-ref task "description")))
+         (prompt (format #f "Continue working on task ~a: ~a~%~%Description: ~a~%~%Use sage_task_complete when done, or sage_task_create for subtasks."
+                         task-id
+                         (or title "unknown")
+                         (or desc "No description"))))
+    (handle-chat prompt)))
 
 ;;; Command Handler
 
