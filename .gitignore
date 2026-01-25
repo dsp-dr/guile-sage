@@ -12,3 +12,6 @@
 # Local development
 .direnv/
 .envrc.local
+
+# Test output (keep in repo, not /tmp)
+.stress-test.log
