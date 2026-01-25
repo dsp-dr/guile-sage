@@ -139,7 +139,14 @@
                (json-end (string-contains content "```" json-start)))
           (if json-end
               (let ((json-str (substring content json-start json-end)))
-                (json-read-string (string-trim-both json-str)))
+                (catch #t
+                  (lambda ()
+                    (json-read-string (string-trim-both json-str)))
+                  (lambda (key . args)
+                    (format (current-error-port)
+                            "Warning: Malformed tool call JSON: ~a~%"
+                            (string-trim-both json-str))
+                    #f)))
               #f))
         #f)))
 
