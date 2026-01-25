@@ -1,0 +1,322 @@
+#+TITLE: v0.2 Cloud Stress Test Methodology
+#+AUTHOR: dsp-dr
+#+DATE: 2026-01-24
+
+* Objective
+
+Push the cloud Ollama implementation to its limits with real-world complex tasks:
+- Deep codebase understanding
+- Multi-turn conversations that exhaust context
+- Heavy tool usage (read, search, explore)
+- Trigger compaction and recovery
+- Validate retry logic under load
+
+* Test Philosophy
+
+#+begin_quote
+"Grind until we compact, then grind some more."
+#+end_quote
+
+Each scenario should:
+1. Start with a complex, open-ended question
+2. Require extensive tool use (10+ calls)
+3. Build context over multiple turns
+4. Hit token limits naturally
+5. Continue after compaction to verify state preservation
+
+* Scenario Categories
+
+** Category A: E-Commerce State Machine Analysis
+
+Deep dive into e-commerce platforms to extract formal state machines.
+
+*** A1: Solidus (Ruby)
+#+begin_src markdown
+Task: "Analyze the Solidus e-commerce platform and extract a TLA+
+specification for the order lifecycle state machine. Include all
+transitions, guards, and edge cases."
+
+Expected tool usage:
+- git clone solidus/solidus
+- read_file for order.rb, state_machine.rb
+- search_files for "state_machine", "transition", "event"
+- Multiple exploration rounds
+
+Success criteria:
+- Identifies Order states (cart, address, delivery, payment, confirm, complete)
+- Finds all transitions with guards
+- Produces valid TLA+ or state diagram
+- Conversation survives compaction
+#+end_src
+
+*** A2: Saleor (Python/Django)
+#+begin_src markdown
+Task: "Map the Saleor checkout flow as a formal state machine.
+Identify all possible states, transitions, and failure modes."
+
+Expected:
+- Clone saleor/saleor
+- Explore checkout/, order/, payment/
+- Heavy search for state transitions
+- Cross-reference with GraphQL schema
+#+end_src
+
+*** A3: Spree Commerce (Ruby)
+#+begin_src markdown
+Task: "Compare Spree's order state machine with Solidus.
+Document the architectural differences in TLA+ notation."
+
+Expected:
+- Clone spree/spree
+- Read state machine definitions
+- Compare with previous Solidus analysis
+- Test context preservation across topics
+#+end_src
+
+** Category B: Protocol Analysis
+
+Understand complex protocols by reading implementations.
+
+*** B1: HTTP/2 Implementation
+#+begin_src markdown
+Task: "Analyze an HTTP/2 implementation and extract the
+frame processing state machine. Focus on stream states."
+
+Target: Any HTTP/2 library (h2, nghttp2, hyper)
+#+end_src
+
+*** B2: Raft Consensus
+#+begin_src markdown
+Task: "Read a Raft implementation and produce a TLA+ spec
+for leader election. Compare with the canonical TLA+ spec."
+
+Target: etcd/raft, hashicorp/raft
+#+end_src
+
+** Category C: Compaction Stress
+
+Designed specifically to exhaust context.
+
+*** C1: Multi-File Refactoring
+#+begin_src markdown
+Task: "Read all files in src/sage/, understand the architecture,
+then propose a refactoring to add plugin support. Show the
+changes needed in each file."
+
+Expected:
+- Read 10+ files
+- Build mental model
+- Propose coordinated changes
+- Hit compaction mid-task
+#+end_src
+
+*** C2: Documentation Generation
+#+begin_src markdown
+Task: "Generate comprehensive API documentation for every
+exported function in guile-sage. Include examples."
+
+Expected:
+- Exhaustive file reading
+- Example generation per function
+- Very long output
+- Multiple compaction cycles
+#+end_src
+
+* Metrics to Capture
+
+| Metric | Target | How to Measure |
+|--------+--------+----------------|
+| API calls before failure | >50 | Count in session |
+| Token usage at compaction | ~80% | /status before compact |
+| Recovery success rate | 100% | Task completion after compact |
+| Tool calls per scenario | 10-30 | Session stats |
+| Total conversation turns | 20+ | Message count |
+| Error rate (429/503) | <5% | Log analysis |
+| Retry success rate | >95% | After implementing retry |
+
+* Test Execution Protocol
+
+** Phase 1: Baseline (No Retry)
+1. Run scenarios against cloud
+2. Document all failures
+3. Capture error types and frequencies
+4. Establish baseline metrics
+
+** Phase 2: With Retry Logic
+1. Implement retry with exponential backoff
+2. Re-run same scenarios
+3. Compare failure rates
+4. Validate Retry-After header handling
+
+** Phase 3: With Auto-Compaction
+1. Enable auto-compaction at 80%
+2. Run long scenarios
+3. Verify context preservation
+4. Measure information retention
+
+** Phase 4: Full Stack
+1. Retry + Streaming + Auto-Compaction
+2. All scenarios
+3. End-to-end validation
+4. Performance benchmarks
+
+* Test Harness Structure
+
+#+begin_src scheme
+;; tests/stress/scenario-runner.scm
+
+(define-scenario "solidus-state-machine"
+  #:description "Extract TLA+ spec from Solidus order lifecycle"
+  #:setup (lambda ()
+            (ensure-repo "solidus/solidus"))
+  #:prompts '("Clone and analyze Solidus order state machine"
+              "Find all order states and transitions"
+              "What guards protect each transition?"
+              "Write a TLA+ specification for this"
+              "What edge cases could cause invalid states?")
+  #:expected-tools '(git_clone read_file search_files list_files)
+  #:min-tool-calls 15
+  #:expect-compaction #t)
+
+(define (run-scenario scenario)
+  (let ((session (session-create #:name (scenario-name scenario))))
+    (for-each (lambda (prompt)
+                (format #t "~%>>> ~a~%" prompt)
+                (handle-chat prompt)
+                (display (format-session-status))
+                (when (> (token-usage-percent) 80)
+                  (format #t "~%[COMPACTION TRIGGERED]~%")
+                  (session-compact!)))
+              (scenario-prompts scenario))
+    (validate-scenario scenario session)))
+#+end_src
+
+* Sample Test Session
+
+#+begin_example
+$ sage --cloud --model glm-4.7 --debug
+
+sage> Analyze Solidus e-commerce order state machine
+
+[Tool: git_clone] Cloning solidus/solidus...
+[Tool: list_files] Listing core/app/models/spree/
+[Tool: read_file] Reading order.rb (2,341 lines)
+[Tool: search_files] Searching for "state_machine"...
+
+Found: Order uses state_machine gem with states:
+  :cart → :address → :delivery → :payment → :confirm → :complete
+
+Transitions found:
+  - next: advances through checkout flow
+  - cancel: any state → canceled (with guard: allow_cancel?)
+  - return: complete → returned
+  ...
+
+[/status]
+Tokens: 12,847 / 128,000 (10%)
+Messages: 8
+Tool calls: 6
+
+sage> What guards protect each transition?
+
+[Tool: search_files] Searching "def allow_"...
+[Tool: read_file] Reading checkout_controller.rb
+[Tool: read_file] Reading order/checkout.rb
+...
+
+[/status]
+Tokens: 31,402 / 128,000 (24%)
+Messages: 14
+Tool calls: 12
+
+sage> Write a TLA+ specification for this
+
+Based on my analysis, here's the TLA+ specification:
+
+---------------------------- MODULE OrderLifecycle ----------------------------
+EXTENDS Naturals, Sequences
+
+CONSTANTS States, Events
+
+VARIABLES state, cart, payment
+
+Init == state = "cart" /\ cart = {} /\ payment = "none"
+
+Next(s) ==
+  CASE s = "cart" -> state' = "address"
+    [] s = "address" -> state' = "delivery"
+    [] s = "delivery" -> state' = "payment"
+    [] s = "payment" /\ PaymentValid -> state' = "confirm"
+    [] s = "confirm" -> state' = "complete"
+
+Cancel == state # "complete" /\ AllowCancel /\ state' = "canceled"
+...
+#+end_example
+
+* Cloud Provider Limits
+
+| Provider | Model | Context | Rate Limit | Notes |
+|----------+-------+---------+------------+-------|
+| Ollama Cloud | glm-4.7 | 128K | Hourly cap | Primary test target |
+| Ollama Cloud | glm-4.6 | 200K | Hourly cap | Extended context tests |
+| Local | qwen3-coder | 32K | None | Baseline comparison |
+
+* Failure Injection
+
+To validate retry logic, simulate failures:
+
+#+begin_src scheme
+;; Wrap http-post with failure injection
+(define *failure-rate* 0.1)  ; 10% failure rate
+
+(define (http-post-with-failures url body . args)
+  (if (< (random:uniform) *failure-rate*)
+      (cons 429 "Rate limited")
+      (apply http-post url body args)))
+#+end_src
+
+* Success Criteria for v0.2
+
+| Criterion | Threshold | Validation |
+|-----------+-----------+------------|
+| Complete Solidus scenario | Yes | TLA+ spec produced |
+| Survive 3+ compactions | Yes | Context preserved |
+| Zero data loss after retry | Yes | Response matches |
+| Token tracking accurate | ±5% | Compare with API |
+| Streaming visible | Yes | Tokens appear incrementally |
+| Error messages helpful | Yes | User understands failure |
+
+* Running the Tests
+
+#+begin_src bash
+# Baseline (no retry, will fail often)
+SAGE_PROVIDER=ollama \
+SAGE_OLLAMA_HOST=https://ollama.com \
+OLLAMA_API_KEY=... \
+SAGE_MODEL=glm-4.7 \
+guile3 -L src tests/stress/run-scenarios.scm
+
+# With retry logic (after implementing)
+SAGE_RETRY_ENABLED=1 \
+SAGE_RETRY_MAX=3 \
+guile3 -L src tests/stress/run-scenarios.scm
+
+# Full stack
+SAGE_RETRY_ENABLED=1 \
+SAGE_AUTO_COMPACT=1 \
+SAGE_STREAM=1 \
+guile3 -L src tests/stress/run-scenarios.scm
+#+end_src
+
+* Next Steps
+
+1. [ ] Create =tests/stress/= directory
+2. [ ] Implement scenario runner
+3. [ ] Clone target repos to fixtures
+4. [ ] Run baseline tests
+5. [ ] Document failure patterns
+6. [ ] Implement retry logic
+7. [ ] Re-test and compare
+8. [ ] Add streaming
+9. [ ] Add auto-compaction
+10. [ ] Final validation
