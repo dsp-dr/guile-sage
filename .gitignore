@@ -15,3 +15,4 @@
 
 # Test output (keep in repo, not /tmp)
 .stress-test.log
+.logs/
