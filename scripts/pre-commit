@@ -5,7 +5,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+# Use git to find project root (works from scripts/ or .git/hooks/)
+PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_DIR"
 

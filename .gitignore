@@ -1,18 +1,16 @@
-# Environment files with secrets
+# Core dumps
+*.core
+
+# Environment (contains secrets)
 .env
+
+# Logs
+.logs/
 
 # Guile compiled files
 *.go
+
+# Emacs
 *~
-
-# Editor backups
 \#*\#
-.\#*
-
-# Local development
-.direnv/
-.envrc.local
-
-# Test output (keep in repo, not /tmp)
-.stress-test.log
-.logs/
+.#*
