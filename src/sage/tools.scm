@@ -37,7 +37,7 @@
 (define *safe-tools* '("read_file" "list_files" "git_status" "git_diff"
                        "git_log" "glob_files" "search_files"
                        "write_file" "edit_file"
-                       "git_commit" "git_add_note"
+                       "git_commit" "git_add_note" "git_push"
                        "read_logs" "search_logs"
                        "sage_task_create" "sage_task_complete"
                        "sage_task_list" "sage_task_status"))  ;; Full dev + agent
@@ -420,6 +420,32 @@
          (delete-file tmp)
          (if (string-null? (string-trim-both result))
              "Note added successfully"
+             result)))))
+
+  ;; git_push - Push commits to remote
+  (register-tool
+   "git_push"
+   "Push commits to the remote repository"
+   '(("type" . "object")
+     ("properties" . (("remote" . (("type" . "string")
+                                   ("description" . "Remote name (default: origin)")))
+                      ("branch" . (("type" . "string")
+                                   ("description" . "Branch to push (default: current branch)")))))
+     ("required" . #()))
+   (lambda (args)
+     (let* ((remote (or (assoc-ref args "remote") "origin"))
+            (branch (assoc-ref args "branch"))
+            (tmp (format #f "/tmp/sage-push-~a" (getpid)))
+            (cmd (if branch
+                     (format #f "cd ~a && git push ~a ~a"
+                             (workspace) remote branch)
+                     (format #f "cd ~a && git push ~a"
+                             (workspace) remote))))
+       (system (string-append cmd " > " tmp " 2>&1"))
+       (let ((result (call-with-input-file tmp get-string-all)))
+         (delete-file tmp)
+         (if (string-null? (string-trim-both result))
+             "Push completed (no output)"
              result)))))
 
   ;; eval_scheme - Evaluate scheme code dynamically
