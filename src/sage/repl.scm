@@ -81,22 +81,8 @@
 
 (define (get-open-epic-count)
   "Get count of open epics from beads (cached for 60 seconds)."
-  (let ((now (current-time)))
-    (when (> (- (time-second now) *epic-cache-time*) 60)
-      ;; Cache expired, refresh
-      (catch #t
-        (lambda ()
-          (let* ((port (open-input-pipe "bd list --status open --type epic --json 2>/dev/null"))
-                 (output (get-string-all port)))
-            (close-pipe port)
-            (if (string-null? (string-trim-both output))
-                (set! *cached-epic-count* 0)
-                (let ((tasks (json-read-string output)))
-                  (set! *cached-epic-count* (if (list? tasks) (length tasks) 0))))
-            (set! *epic-cache-time* (time-second now))))
-        (lambda (key . args)
-          (set! *cached-epic-count* 0))))
-    *cached-epic-count*))
+  ;; Temporarily disabled - pipe handling causing segfaults on some systems
+  0)
 
 (define (make-prompt)
   "Generate dynamic prompt with user, host, repo, model, endpoint, tokens, and epics."
