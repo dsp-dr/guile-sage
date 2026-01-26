@@ -9,7 +9,9 @@
   #:use-module (sage config)
   #:use-module (sage logging)
   #:use-module (sage session)
+  #:use-module (sage util)
   #:use-module (ice-9 textual-ports)
+  #:use-module (ice-9 popen)
   #:use-module (ice-9 format)
   #:export (*context-files*
             load-context-files
@@ -28,6 +30,7 @@
 
 ;; Loaded context cache
 (define *loaded-context* '())
+(define *loaded-tasks* '())
 
 ;;; file-exists-in-workspace?: Check if file exists in workspace
 (define (file-exists-in-workspace? filename)
@@ -73,6 +76,11 @@
                        loaded-content)))))
      *context-files*)
 
+    ;; Try to load beads tasks
+    (let ((tasks-content (load-beads-tasks)))
+      (when tasks-content
+        (set! loaded-content (cons tasks-content loaded-content))))
+
     ;; Add combined context as system message if anything loaded
     (when (not (null? loaded-content))
       (let ((combined (string-join (reverse loaded-content) "\n")))
@@ -82,6 +90,7 @@
                               combined))
         (log-info "context" "Context added to session"
                   `(("files" . ,(length *loaded-context*))
+                    ("tasks" . ,(length *loaded-tasks*))
                     ("chars" . ,(string-length combined))))))))
 
 ;;; prefetch-context: Alias for load-context-files
@@ -89,14 +98,50 @@
   "Prefetch context files into session. Alias for load-context-files."
   (load-context-files))
 
+;;; load-beads-tasks: Load open tasks from beads
+(define (load-beads-tasks)
+  "Load open tasks from beads and return formatted string."
+  (catch #t
+    (lambda ()
+      (let* ((port (open-input-pipe "bd list --status open --json 2>/dev/null"))
+             (output (get-string-all port)))
+        (close-pipe port)
+        (if (string-null? (string-trim-both output))
+            #f
+            (let ((tasks (json-read-string output)))
+              (if (and tasks (list? tasks) (not (null? tasks)))
+                  (begin
+                    (set! *loaded-tasks* tasks)
+                    (log-info "context" "Loaded beads tasks"
+                              `(("count" . ,(length tasks))))
+                    (format #f "=== Open Tasks (beads) ===\n~a\n"
+                            (string-join
+                             (map (lambda (t)
+                                    (format #f "- [~a] ~a (~a)"
+                                            (or (assoc-ref t "id") "?")
+                                            (or (assoc-ref t "title") "untitled")
+                                            (or (assoc-ref t "issue_type") "task")))
+                                  tasks)
+                             "\n")))
+                  #f)))))
+    (lambda (key . args)
+      (log-debug "context" "No beads tasks or bd not available"
+                 `(("error" . ,(format #f "~a" key))))
+      #f)))
+
 ;;; context-status: Show what context files are loaded
 (define (context-status)
   "Return status of loaded context files."
-  (if (null? *loaded-context*)
-      "No context files loaded."
-      (string-append
-       "Loaded context files:\n"
-       (string-join
-        (map (lambda (f) (format #f "  - ~a" f))
-             (reverse *loaded-context*))
-        "\n"))))
+  (string-append
+   (if (null? *loaded-context*)
+       "No context files loaded.\n"
+       (string-append
+        "Loaded context files:\n"
+        (string-join
+         (map (lambda (f) (format #f "  - ~a" f))
+              (reverse *loaded-context*))
+         "\n")
+        "\n"))
+   (if (null? *loaded-tasks*)
+       ""
+       (format #f "\nOpen beads tasks: ~a\n" (length *loaded-tasks*)))))

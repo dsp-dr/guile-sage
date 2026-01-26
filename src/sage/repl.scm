@@ -15,6 +15,9 @@
   #:use-module (sage version)
   #:use-module (sage agent)
   #:use-module (sage context)
+  #:use-module (ice-9 popen)
+  #:use-module (ice-9 textual-ports)
+  #:use-module (srfi srfi-19)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 format)
   #:use-module (ice-9 readline)
@@ -72,8 +75,31 @@
          (dot (string-index full #\.)))
     (if dot (substring full 0 dot) full)))
 
+;; Cache for open epics to avoid calling bd on every prompt
+(define *cached-epic-count* 0)
+(define *epic-cache-time* 0)
+
+(define (get-open-epic-count)
+  "Get count of open epics from beads (cached for 60 seconds)."
+  (let ((now (current-time)))
+    (when (> (- (time-second now) *epic-cache-time*) 60)
+      ;; Cache expired, refresh
+      (catch #t
+        (lambda ()
+          (let* ((port (open-input-pipe "bd list --status open --type epic --json 2>/dev/null"))
+                 (output (get-string-all port)))
+            (close-pipe port)
+            (if (string-null? (string-trim-both output))
+                (set! *cached-epic-count* 0)
+                (let ((tasks (json-read-string output)))
+                  (set! *cached-epic-count* (if (list? tasks) (length tasks) 0))))
+            (set! *epic-cache-time* (time-second now))))
+        (lambda (key . args)
+          (set! *cached-epic-count* 0))))
+    *cached-epic-count*))
+
 (define (make-prompt)
-  "Generate dynamic prompt with user, host, repo, model, endpoint, and tokens."
+  "Generate dynamic prompt with user, host, repo, model, endpoint, tokens, and epics."
   (let* ((user (or (getenv "USER") (passwd:name (getpwuid (getuid)))))
          (host (short-hostname))
          (ws (workspace))
@@ -83,16 +109,24 @@
          (label (endpoint-label api-host))
          (status (session-status))
          (tokens (or (assoc-ref status "total_tokens") 0))
+         (epics (get-open-epic-count))
          ;; Extract short model name (before colon if present)
          (short-model (let ((idx (string-index model #\:)))
                         (if idx (substring model 0 idx) model)))
          ;; Build context string
          (context (if repo
                       (format #f "~a@~a:~a" user host repo)
-                      (format #f "~a@~a" user host))))
-    (if (> tokens 0)
-        (format #f "~a sage[~a@~a|~a]> " context short-model label (format-tokens tokens))
-        (format #f "~a sage[~a@~a]> " context short-model label))))
+                      (format #f "~a@~a" user host)))
+         ;; Build info section: model@endpoint, optionally tokens and epics
+         (info-parts (list (format #f "~a@~a" short-model label)))
+         (info-parts (if (> tokens 0)
+                         (append info-parts (list (format-tokens tokens)))
+                         info-parts))
+         (info-parts (if (> epics 0)
+                         (append info-parts (list (format #f "~aE" epics)))
+                         info-parts))
+         (info (string-join info-parts "|")))
+    (format #f "~a sage[~a]> " context info)))
 
 ;;; Slash Commands
 
