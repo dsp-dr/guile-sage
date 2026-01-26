@@ -94,36 +94,6 @@
         (format #f "~a sage[~a@~a|~a]> " context short-model label (format-tokens tokens))
         (format #f "~a sage[~a@~a]> " context short-model label))))
 
-;;; Slash Commands
-
-(define *commands*
-  `(("/help"      . ,cmd-help)
-    ("/exit"      . ,cmd-exit)
-    ("/quit"      . ,cmd-exit)
-    ("/clear"     . ,cmd-clear)
-    ("/reset"     . ,cmd-reset)
-    ("/status"    . ,cmd-status)
-    ("/stats"     . ,cmd-status)
-    ("/compact"   . ,cmd-compact)
-    ("/context"   . ,cmd-context)
-    ("/model"     . ,cmd-model)
-    ("/models"    . ,cmd-models)
-    ("/save"      . ,cmd-save)
-    ("/load"      . ,cmd-load)
-    ("/sessions"  . ,cmd-sessions)
-    ("/tools"     . ,cmd-tools)
-    ("/workspace" . ,cmd-workspace)
-    ("/debug"     . ,cmd-debug)
-    ("/version"   . ,cmd-version)
-    ("/reload"    . ,cmd-reload)
-    ("/refresh"   . ,cmd-reload)
-    ("/logs"      . ,cmd-logs)
-    ("/agent"     . ,cmd-agent)
-    ("/tasks"     . ,cmd-tasks)
-    ("/pause"     . ,cmd-pause)
-    ("/continue"  . ,cmd-continue)
-    ("/prefetch"  . ,cmd-prefetch)))
-
 ;;; Command Implementations
 
 (define (cmd-help args)
@@ -362,6 +332,36 @@
       (display (context-status)))
   (newline)
   #t)
+
+;;; Slash Commands (defined after all cmd-* functions to avoid forward references)
+
+(define *commands*
+  `(("/help"      . ,cmd-help)
+    ("/exit"      . ,cmd-exit)
+    ("/quit"      . ,cmd-exit)
+    ("/clear"     . ,cmd-clear)
+    ("/reset"     . ,cmd-reset)
+    ("/status"    . ,cmd-status)
+    ("/stats"     . ,cmd-status)
+    ("/compact"   . ,cmd-compact)
+    ("/context"   . ,cmd-context)
+    ("/model"     . ,cmd-model)
+    ("/models"    . ,cmd-models)
+    ("/save"      . ,cmd-save)
+    ("/load"      . ,cmd-load)
+    ("/sessions"  . ,cmd-sessions)
+    ("/tools"     . ,cmd-tools)
+    ("/workspace" . ,cmd-workspace)
+    ("/debug"     . ,cmd-debug)
+    ("/version"   . ,cmd-version)
+    ("/reload"    . ,cmd-reload)
+    ("/refresh"   . ,cmd-reload)
+    ("/logs"      . ,cmd-logs)
+    ("/agent"     . ,cmd-agent)
+    ("/tasks"     . ,cmd-tasks)
+    ("/pause"     . ,cmd-pause)
+    ("/continue"  . ,cmd-continue)
+    ("/prefetch"  . ,cmd-prefetch)))
 
 ;;; Agent Loop
 
