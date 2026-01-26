@@ -83,10 +83,15 @@
     (unless (check-permission "git_status" '())
       (error "git_status should be safe"))))
 
-(run-test "write_file is unsafe"
+(run-test "write_file is safe (dev mode)"
   (lambda ()
-    (when (check-permission "write_file" '())
-      (error "write_file should be unsafe"))))
+    (unless (check-permission "write_file" '())
+      (error "write_file should be safe in dev mode"))))
+
+(run-test "eval_scheme is unsafe"
+  (lambda ()
+    (when (check-permission "eval_scheme" '())
+      (error "eval_scheme should be unsafe"))))
 
 ;;; Path Safety Tests
 
