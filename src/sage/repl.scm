@@ -14,6 +14,7 @@
   #:use-module (sage tools)
   #:use-module (sage version)
   #:use-module (sage agent)
+  #:use-module (sage context)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 format)
   #:use-module (ice-9 readline)
@@ -120,7 +121,8 @@
     ("/agent"     . ,cmd-agent)
     ("/tasks"     . ,cmd-tasks)
     ("/pause"     . ,cmd-pause)
-    ("/continue"  . ,cmd-continue)))
+    ("/continue"  . ,cmd-continue)
+    ("/prefetch"  . ,cmd-prefetch)))
 
 ;;; Command Implementations
 
@@ -149,6 +151,7 @@
   (display "  /tasks          - List pending agent tasks\n")
   (display "  /pause          - Pause agent loop\n")
   (display "  /continue       - Continue agent loop\n")
+  (display "  /prefetch       - Show loaded context files (AGENTS.md, etc.)\n")
   #t)
 
 (define (cmd-exit args)
@@ -350,6 +353,16 @@
       (display "No pending tasks to continue.\n"))
   #t)
 
+(define (cmd-prefetch args)
+  "Show or reload prefetched context files."
+  (if (string=? (string-trim-both args) "reload")
+      (begin
+        (load-context-files)
+        (display "Context files reloaded.\n"))
+      (display (context-status)))
+  (newline)
+  #t)
+
 ;;; Agent Loop
 
 (define (run-agent-loop)
@@ -547,6 +560,9 @@
     (session-load session-name))
    (else
     (session-create)))
+
+  ;; Load context files (AGENTS.md, etc.) into session
+  (load-context-files)
 
   ;; Welcome message
   (let* ((yolo? (config-get "YOLO_MODE"))
