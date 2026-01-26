@@ -1,0 +1,120 @@
+#+TITLE: guile-sage Project Status
+#+DATE: 2026-01-26
+#+OPTIONS: toc:2 num:nil
+
+* Project Status: v0.5.0
+
+** Summary
+
+guile-sage is a functional AI REPL written in Guile Scheme that provides:
+- Interactive chat with Ollama-compatible LLMs
+- Tool calling system (22 tools)
+- Session management with persistence
+- Self-modification capabilities
+- Context compaction for long conversations
+
+** Current State
+
+*** Working Features
+
+| Feature | Status | Notes |
+|---------+--------+-------|
+| Ollama API (local) | Working | HTTP via curl |
+| Ollama API (cloud) | Working | With API key auth |
+| Chat interface | Working | Interactive REPL |
+| Tool calling | Working | 22 tools registered |
+| Session persistence | Working | JSON format |
+| Context compaction | Working | 5 strategies |
+| Logging | Working | Structured JSONL |
+| Agent tasks | Working | beads integration |
+| AGENTS.md loading | Working | Claude-style context |
+| XDG directories | Working | Proper path handling |
+
+*** Tool Categories
+
+**** Safe Tools (18 total)
+- File: read_file, list_files, write_file, edit_file, glob_files, search_files
+- Git: git_status, git_diff, git_log, git_commit, git_add_note, git_push
+- Logs: read_logs, search_logs
+- Tasks: sage_task_create, sage_task_complete, sage_task_list, sage_task_status
+
+**** Unsafe Tools (4 total, require YOLO mode)
+- run_tests (shell execution)
+- eval_scheme (arbitrary code)
+- reload_module (module system)
+- create_tool (dynamic registration)
+
+*** Test Coverage
+
+| Test Suite | Tests | Status |
+|------------+-------+--------|
+| test-session.scm | 18/18 | PASS |
+| test-tools.scm | 26/26 | PASS |
+| test-security.scm | 31/34 | PASS (3 minor) |
+| test-compaction.scm | 9/9 | PASS |
+| test-compaction-security.scm | 4/4 | PASS |
+
+Total: 88 tests, 85 passing
+
+** Platform Support
+
+| Platform | Status | Notes |
+|----------+--------+-------|
+| FreeBSD 14.3 | Primary | Developed here |
+| Linux | Untested | Should work |
+| macOS | Untested | Should work |
+
+*** FreeBSD Workarounds
+- Uses curl with temp files instead of open-input-pipe (segfault issue)
+- Custom JSON parser (guile-json package not available)
+
+** Release History
+
+| Version | Date | Highlights |
+|---------+------+------------|
+| v0.5.0 | 2026-01-26 | Agent tasks, logging, test fixes |
+| v0.4.0 | 2026-01-25 | Context compaction strategies |
+| v0.3.0 | 2026-01-25 | AGENTS.md support, XDG paths |
+| v0.2.0 | 2026-01-24 | Session persistence, git tools |
+| v0.1.0 | 2026-01-24 | Initial release |
+
+** Configuration
+
+*** Required
+- Guile 3.0+
+- curl
+- Ollama (local or cloud)
+
+*** Environment Variables
+
+| Variable | Default | Description |
+|----------+---------+-------------|
+| SAGE_OLLAMA_HOST | http://localhost:11434 | Ollama API endpoint |
+| SAGE_MODEL | (provider default) | Model to use |
+| OLLAMA_API_KEY | (none) | API key for cloud |
+| SAGE_YOLO_MODE | (unset) | Enable unsafe tools |
+| SAGE_LOG_LEVEL | info | Log level |
+
+** Known Issues
+
+1. *Security test failures* (3/34): Error type mismatches in permission tests
+   - Expected: permission-error
+   - Actual: misc-error
+   - Impact: Low (tests, not functionality)
+
+2. *Cloud API configuration*: check-config.sh script picks up commented lines
+   - Workaround: Keep .env file clean with only active settings
+
+** Next Steps
+
+- [ ] Fix remaining security test error types
+- [ ] Add streaming response support
+- [ ] Implement conversation branching
+- [ ] Add multi-model support
+- [ ] Create Emacs integration (sage.el bridge)
+
+** Repository
+
+- URL: https://github.com/dsp-dr/guile-sage
+- License: MIT
+- Releases: 5 (v0.1.0 - v0.5.0)

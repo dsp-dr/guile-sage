@@ -27,23 +27,53 @@ guile-sage is an interactive AI assistant REPL written in Guile3 Scheme. It prov
 - Debug mode for development
 
 *** Tool System
+
+Tools are classified as /safe/ (always allowed) or /unsafe/ (require YOLO mode).
+The default configuration enables most development tools as safe for interactive use.
+
+**** File Operations
 | Tool | Description | Safe |
 |------+-------------+------|
 | =read_file= | Read file contents | Yes |
 | =list_files= | List directory contents | Yes |
-| =write_file= | Write content to file | No |
-| =edit_file= | Search/replace in file | No |
+| =write_file= | Write content to file | Yes |
+| =edit_file= | Search/replace in file | Yes |
+| =glob_files= | Find files by pattern | Yes |
+| =search_files= | Grep for patterns | Yes |
+
+**** Git Operations
+| Tool | Description | Safe |
+|------+-------------+------|
 | =git_status= | Show git status | Yes |
 | =git_diff= | Show git diff | Yes |
 | =git_log= | Show git history | Yes |
-| =git_commit= | Create commits | No |
-| =git_add_note= | Add git notes | No |
-| =search_files= | Grep for patterns | Yes |
-| =glob_files= | Find files by pattern | Yes |
+| =git_commit= | Stage files and commit | Yes |
+| =git_add_note= | Add git notes | Yes |
+| =git_push= | Push to remote | Yes |
+
+**** Self-Inspection (Logging)
+| Tool | Description | Safe |
+|------+-------------+------|
+| =read_logs= | Read recent log entries | Yes |
+| =search_logs= | Search logs for patterns | Yes |
+
+**** Agent Tasks
+| Tool | Description | Safe |
+|------+-------------+------|
+| =sage_task_create= | Create agent task | Yes |
+| =sage_task_complete= | Mark task complete | Yes |
+| =sage_task_list= | List pending tasks | Yes |
+| =sage_task_status= | Get agent status | Yes |
+
+**** Meta/Unsafe (require YOLO mode)
+| Tool | Description | Safe |
+|------+-------------+------|
 | =run_tests= | Execute test suite | No |
 | =eval_scheme= | Evaluate Scheme code | No |
 | =reload_module= | Hot-reload modules | No |
 | =create_tool= | Register new tools | No |
+
+Enable YOLO mode for unsafe tools: =SAGE_YOLO_MODE=1 make run= or =make run-yolo=
 
 *** Session Management
 - Conversation history with token tracking
@@ -173,12 +203,12 @@ guile3 -L src -c '(use-modules (sage repl)) (repl-start)'
 *** Example Session
 
 #+begin_example
-╔═══════════════════════════════════════╗
-║         guile-sage v0.1.0             ║
-║   Type /help for commands, /exit to quit  ║
-╚═══════════════════════════════════════╝
-Model: qwen3-coder:latest
-Host: http://host.lan:11434
+╔════════════════════════════════════════════╗
+║             guile-sage v0.5.0              ║
+║   Type /help for commands, /exit to quit   ║
+╚════════════════════════════════════════════╝
+Model: glm-4.7:cloud
+Host: https://api.ollama.com
 
 sage> What files are in the src directory?
 
@@ -215,25 +245,36 @@ Goodbye!
 #+begin_example
 guile-sage/
 ├── src/sage/
-│   ├── config.scm    # Configuration and .env loading
-│   ├── util.scm      # HTTP/JSON utilities
-│   ├── ollama.scm    # Ollama API client
-│   ├── tools.scm     # Tool registration system
-│   ├── session.scm   # Session management
-│   ├── repl.scm      # Interactive REPL
-│   └── main.scm      # CLI entry point
+│   ├── config.scm      # Configuration, XDG paths, .env loading
+│   ├── util.scm        # HTTP/JSON utilities
+│   ├── ollama.scm      # Ollama API client
+│   ├── tools.scm       # Tool registration and execution
+│   ├── session.scm     # Session management
+│   ├── repl.scm        # Interactive REPL
+│   ├── main.scm        # CLI entry point
+│   ├── version.scm     # Version info
+│   ├── status.scm      # Status reporting
+│   ├── context.scm     # Context/AGENTS.md loading
+│   ├── logging.scm     # Structured logging
+│   ├── compaction.scm  # Context compaction strategies
+│   └── agent.scm       # Agent task management
 ├── tests/
-│   ├── test-ollama.scm
 │   ├── test-session.scm
-│   └── test-tools.scm
+│   ├── test-tools.scm
+│   ├── test-ollama.scm
+│   ├── test-security.scm
+│   ├── test-compaction.scm
+│   └── test-compaction-security.scm
 ├── scripts/
 │   ├── init.sh
-│   └── check-config.sh
+│   ├── check-config.sh
+│   ├── pre-commit
+│   └── bump-version.sh
+├── docs/
+│   └── *.org           # Documentation (org-mode)
 ├── .env.template
 ├── Makefile
-├── TESTING.org
-├── CONTRIBUTING.org
-└── REQUIREMENTS.org
+└── AGENTS.md           # Project conventions
 #+end_example
 
 *** Running Tests
@@ -250,13 +291,22 @@ guile3 -L src tests/test-tools.scm
 
 | Target | Description |
 |--------+-------------|
-| =all= | Compile all modules |
+| =all= / =build= | Compile all modules to .go files |
+| =install= | Install to ~/.local (user-local) |
+| =uninstall= | Remove installed files |
 | =init= | Initialize and validate setup |
 | =check-config= | Check configuration |
-| =repl= | Start interactive REPL |
+| =repl= | Start interactive Guile REPL |
 | =run= | Run sage CLI |
+| =run-yolo= | Run with all tools enabled |
 | =check= | Run tests |
+| =check-verbose= | Run tests with metrics |
 | =clean= | Remove compiled files |
+| =version= | Show version |
+| =patch= / =minor= / =major= | Bump version |
+| =tag= | Create git tag |
+| =release= | Create GitHub release |
+| =docker= | Build Docker image |
 
 ** Architecture
 
