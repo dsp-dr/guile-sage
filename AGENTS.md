@@ -2,6 +2,17 @@
 
 This file is automatically loaded into sage's context on startup.
 
+## Project Conventions
+
+- **Documentation**: Org-mode (`.org`), not Markdown
+  - `README.org`, `CONTRIBUTING.org`, `docs/*.org`
+  - Exception: `AGENTS.md` (this file) for tool compatibility
+- **Language**: Guile Scheme (guile3)
+- **Testing**: `make check`
+- **REPL**: `make run` or `guile3 -L src`
+
+---
+
 ## Core Philosophy: Tools Over Memory
 
 **Sage uses tools, not in-memory state.**
