@@ -15,9 +15,6 @@
   #:use-module (sage version)
   #:use-module (sage agent)
   #:use-module (sage context)
-  #:use-module (ice-9 popen)
-  #:use-module (ice-9 textual-ports)
-  #:use-module (srfi srfi-19)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 format)
   #:use-module (ice-9 readline)
@@ -75,17 +72,8 @@
          (dot (string-index full #\.)))
     (if dot (substring full 0 dot) full)))
 
-;; Cache for open epics to avoid calling bd on every prompt
-(define *cached-epic-count* 0)
-(define *epic-cache-time* 0)
-
-(define (get-open-epic-count)
-  "Get count of open epics from beads (cached for 60 seconds)."
-  ;; Temporarily disabled - pipe handling causing segfaults on some systems
-  0)
-
 (define (make-prompt)
-  "Generate dynamic prompt with user, host, repo, model, endpoint, tokens, and epics."
+  "Generate dynamic prompt with user, host, repo, model, endpoint, and tokens."
   (let* ((user (or (getenv "USER") (passwd:name (getpwuid (getuid)))))
          (host (short-hostname))
          (ws (workspace))
@@ -95,24 +83,16 @@
          (label (endpoint-label api-host))
          (status (session-status))
          (tokens (or (assoc-ref status "total_tokens") 0))
-         (epics (get-open-epic-count))
          ;; Extract short model name (before colon if present)
          (short-model (let ((idx (string-index model #\:)))
                         (if idx (substring model 0 idx) model)))
          ;; Build context string
          (context (if repo
                       (format #f "~a@~a:~a" user host repo)
-                      (format #f "~a@~a" user host)))
-         ;; Build info section: model@endpoint, optionally tokens and epics
-         (info-parts (list (format #f "~a@~a" short-model label)))
-         (info-parts (if (> tokens 0)
-                         (append info-parts (list (format-tokens tokens)))
-                         info-parts))
-         (info-parts (if (> epics 0)
-                         (append info-parts (list (format #f "~aE" epics)))
-                         info-parts))
-         (info (string-join info-parts "|")))
-    (format #f "~a sage[~a]> " context info)))
+                      (format #f "~a@~a" user host))))
+    (if (> tokens 0)
+        (format #f "~a sage[~a@~a|~a]> " context short-model label (format-tokens tokens))
+        (format #f "~a sage[~a@~a]> " context short-model label))))
 
 ;;; Slash Commands
 
@@ -171,7 +151,7 @@
   (display "  /tasks          - List pending agent tasks\n")
   (display "  /pause          - Pause agent loop\n")
   (display "  /continue       - Continue agent loop\n")
-  (display "  /prefetch       - Show loaded context files (AGENTS.md, etc.)\n")
+  (display "  /prefetch       - Show/reload AGENTS.md context\n")
   #t)
 
 (define (cmd-exit args)
@@ -374,11 +354,11 @@
   #t)
 
 (define (cmd-prefetch args)
-  "Show or reload prefetched context files."
+  "Show or reload AGENTS.md context."
   (if (string=? (string-trim-both args) "reload")
       (begin
-        (load-context-files)
-        (display "Context files reloaded.\n"))
+        (load-agents-context)
+        (display "AGENTS.md reloaded.\n"))
       (display (context-status)))
   (newline)
   #t)
@@ -581,8 +561,8 @@
    (else
     (session-create)))
 
-  ;; Load context files (AGENTS.md, etc.) into session
-  (load-context-files)
+  ;; Load AGENTS.md into session context
+  (load-agents-context)
 
   ;; Welcome message
   (let* ((yolo? (config-get "YOLO_MODE"))
