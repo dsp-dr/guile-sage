@@ -1,0 +1,198 @@
+#+TITLE: Sage Architecture
+#+AUTHOR: guile-sage
+#+OPTIONS: toc:2
+
+* Startup State Machine
+
+#+BEGIN_SRC
+┌─────────────────────────────────────────────────────────────┐
+│                      REPL START                             │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+                ┌───────────────────────┐
+                │  config-load-dotenv   │  Load .env files
+                └───────────────────────┘
+                            │
+                            ▼
+                ┌───────────────────────┐
+                │  ensure-sage-dirs     │  Create ~/.config/sage, etc.
+                └───────────────────────┘
+                            │
+                            ▼
+                ┌───────────────────────┐
+                │  init-logging         │  Setup .logs/ directory
+                └───────────────────────┘
+                            │
+                            ▼
+                ┌───────────────────────┐
+                │  init-default-tools   │  Register all tools
+                └───────────────────────┘
+                            │
+                            ▼
+                ┌───────────────────────┐
+                │  session-create       │  New session or load existing
+                └───────────────────────┘
+                            │
+                            ▼
+                ┌───────────────────────┐
+                │  load-agents-context  │  Read AGENTS.md → system msg
+                └───────────────────────┘
+                            │
+                            ▼
+                ┌───────────────────────┐
+                │  Display banner       │  Show version, model, host
+                └───────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      MAIN LOOP                              │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  readline(prompt) → input                            │   │
+│  │       │                                              │   │
+│  │       ▼                                              │   │
+│  │  ┌─────────┐    ┌─────────────┐    ┌────────────┐   │   │
+│  │  │ /cmd?   │───▶│ handle-cmd  │    │ handle-chat│   │   │
+│  │  └─────────┘    └─────────────┘    └────────────┘   │   │
+│  │       │ no            │                   │          │   │
+│  │       └───────────────┴───────────────────┘          │   │
+│  │                       │                              │   │
+│  │                       ▼                              │   │
+│  │              ┌─────────────────┐                     │   │
+│  │              │  ollama-chat    │                     │   │
+│  │              │  with tools     │                     │   │
+│  │              └─────────────────┘                     │   │
+│  │                       │                              │   │
+│  │                       ▼                              │   │
+│  │              ┌─────────────────┐                     │   │
+│  │              │ parse-tool-call │                     │   │
+│  │              └─────────────────┘                     │   │
+│  │                   │       │                          │   │
+│  │            tool?  ▼       ▼ no tool                  │   │
+│  │              ┌─────────┐  ┌─────────┐                │   │
+│  │              │ execute │  │ display │                │   │
+│  │              │  tool   │  │ response│                │   │
+│  │              └─────────┘  └─────────┘                │   │
+│  │                   │                                  │   │
+│  │                   ▼                                  │   │
+│  │              ┌─────────────────┐                     │   │
+│  │              │ follow-up chat  │ (with tool result)  │   │
+│  │              └─────────────────┘                     │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+#+END_SRC
+
+* Design Philosophy: Tools Over Memory
+
+Sage is NOT tool-agnostic. It explicitly uses file-based tools rather than
+in-memory state.
+
+** Why Tools, Not Memory
+
+| In-Memory (BAD)              | File-Based Tools (GOOD)           |
+|------------------------------|-----------------------------------|
+| TODO list in session state   | bd create/list/close              |
+| Notes stored in variables    | git notes, write_file             |
+| Context in conversation only | AGENTS.md loaded at startup       |
+| Lost on restart              | Persisted in filesystem           |
+
+** Core Tool Categories
+
+*** File Operations (Pure Guile)
+- =read_file= - Read file content
+- =write_file= - Write/create files
+- =edit_file= - Modify existing files
+- =list_files= - Directory listing
+- =glob_files= - Pattern matching
+- =search_files= - Content search
+
+*** Git Operations (Shell, TODO: libgit2)
+- =git_status= - Working tree state
+- =git_diff= - Show changes
+- =git_log= - Commit history
+- =git_commit= - Create commits
+- =git_push= - Push to remote
+- =git_add_note= - Attach notes to commits
+
+*** Self-Inspection (Pure Guile)
+- =read_logs= - Read sage's own logs
+- =search_logs= - Search log patterns
+
+*** Agent Tasks (Beads via shell, TODO: native)
+- =sage_task_create= - Create task in beads
+- =sage_task_complete= - Mark task done
+- =sage_task_list= - List pending tasks
+- =sage_task_status= - Agent loop status
+
+** The AGENTS.md Contract
+
+On startup, sage reads =AGENTS.md= and injects it as a system message.
+This file tells the model:
+
+1. How to use sage's task system
+2. Project-specific workflows
+3. Beads issue tracking conventions
+4. Landing the plane (commit + push) protocol
+
+The model should follow AGENTS.md instructions, using tools to:
+- Track work in beads (not memory)
+- Persist changes to files (not conversation)
+- Commit and push (not just "ready when you are")
+
+* Module Dependencies
+
+#+BEGIN_SRC
+                    ┌─────────┐
+                    │  repl   │
+                    └────┬────┘
+           ┌────────────┼────────────┬───────────┐
+           ▼            ▼            ▼           ▼
+      ┌─────────┐  ┌─────────┐  ┌─────────┐ ┌─────────┐
+      │ session │  │  tools  │  │ ollama  │ │ context │
+      └────┬────┘  └────┬────┘  └────┬────┘ └────┬────┘
+           │            │            │           │
+           ▼            ▼            ▼           ▼
+      ┌─────────┐  ┌─────────┐  ┌─────────┐ ┌─────────┐
+      │ config  │  │  agent  │  │ status  │ │ logging │
+      └────┬────┘  └─────────┘  └─────────┘ └─────────┘
+           │
+           ▼
+      ┌─────────┐
+      │  util   │  (HTTP, JSON - pure Guile)
+      └─────────┘
+#+END_SRC
+
+* Shell Code Smell Tracking
+
+Goal: Replace all shell calls with pure Guile or native bindings.
+
+| Module     | Shell Usage              | Status      | Alternative          |
+|------------|--------------------------|-------------|----------------------|
+| util.scm   | curl for HTTPS POST      | TODO        | (web client) + gnutls|
+| tools.scm  | git commands             | TODO        | libgit2 bindings     |
+| tools.scm  | grep, find               | TODO        | pure Guile search    |
+| agent.scm  | bd commands              | TODO        | beads Guile API      |
+| context.scm| (none - pure Guile)      | DONE        | -                    |
+
+* Session State
+
+Sessions are saved as JSON files in =.sage/sessions/=:
+
+#+BEGIN_SRC json
+{
+  "name": "session-1234567890",
+  "model": "qwen3-coder:latest",
+  "created": "1234567890",
+  "updated": "1234567899",
+  "messages": [...],
+  "stats": {
+    "total_tokens": 5000,
+    "input_tokens": 2000,
+    "output_tokens": 3000,
+    "request_count": 10,
+    "tool_calls": 5
+  }
+}
+#+END_SRC
+
+This is file-based persistence, not in-memory.

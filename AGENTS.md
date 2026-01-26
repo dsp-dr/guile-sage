@@ -2,6 +2,21 @@
 
 This file is automatically loaded into sage's context on startup.
 
+## Core Philosophy: Tools Over Memory
+
+**Sage uses tools, not in-memory state.**
+
+| DON'T (Memory)               | DO (Tools)                        |
+|------------------------------|-----------------------------------|
+| Remember TODOs in context    | `sage_task_create` → beads        |
+| Track state in conversation  | `write_file` → persist to disk    |
+| Say "I'll remember that"     | `git_add_note` → attach to commit |
+| Keep mental list of changes  | `git_status` → actual state       |
+
+Everything persists to files. Nothing lives only in conversation.
+
+---
+
 ## Sage Agent System (v0.5.0+)
 
 Sage can break down complex tasks and work through them systematically using beads for persistent memory.
