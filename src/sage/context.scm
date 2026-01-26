@@ -99,35 +99,11 @@
   (load-context-files))
 
 ;;; load-beads-tasks: Load open tasks from beads
+;;; Note: Currently disabled due to segfault issues with pipes
 (define (load-beads-tasks)
   "Load open tasks from beads and return formatted string."
-  (catch #t
-    (lambda ()
-      (let* ((port (open-input-pipe "bd list --status open --json 2>/dev/null"))
-             (output (get-string-all port)))
-        (close-pipe port)
-        (if (string-null? (string-trim-both output))
-            #f
-            (let ((tasks (json-read-string output)))
-              (if (and tasks (list? tasks) (not (null? tasks)))
-                  (begin
-                    (set! *loaded-tasks* tasks)
-                    (log-info "context" "Loaded beads tasks"
-                              `(("count" . ,(length tasks))))
-                    (format #f "=== Open Tasks (beads) ===\n~a\n"
-                            (string-join
-                             (map (lambda (t)
-                                    (format #f "- [~a] ~a (~a)"
-                                            (or (assoc-ref t "id") "?")
-                                            (or (assoc-ref t "title") "untitled")
-                                            (or (assoc-ref t "issue_type") "task")))
-                                  tasks)
-                             "\n")))
-                  #f)))))
-    (lambda (key . args)
-      (log-debug "context" "No beads tasks or bd not available"
-                 `(("error" . ,(format #f "~a" key))))
-      #f)))
+  ;; Temporarily disabled - pipe handling causing segfaults
+  #f)
 
 ;;; context-status: Show what context files are loaded
 (define (context-status)
