@@ -5,7 +5,7 @@
 [[https://www.gnu.org/software/guile/][file:https://img.shields.io/badge/Guile-3.0-blue.svg]]
 [[https://ollama.ai][file:https://img.shields.io/badge/Ollama-supported-green.svg]]
 [[https://github.com/dsp-dr/guile-sage/blob/main/LICENSE][file:https://img.shields.io/badge/license-MIT-blue.svg]]
-[[https://freebsd.org][file:https://img.shields.io/badge/FreeBSD-14.3-red.svg]]
+[[https://freebsd.org][file:https://img.shields.io/badge/FreeBSD-15.0-red.svg]]
 
 *AI REPL with tool calling for Guile Scheme*
 
