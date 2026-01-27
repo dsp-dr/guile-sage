@@ -108,6 +108,25 @@ Cross-validation confirmed both integration paths function correctly:
 | #sage-tasks | Task status updates |
 | #sage-debug | Debug and monitoring |
 
+## Self-Modification Path
+
+The `irc_send` tool was added as hardcoded source during this session with assistance from Claude Code. However, Sage has the capability to self-modify without external intervention:
+
+| Tool | Purpose |
+|------|---------|
+| `create_tool` | Register new tools at runtime |
+| `reload_module` | Hot-reload modified Guile modules |
+| `write_file` | Modify source files |
+| `eval_scheme` | Execute arbitrary Scheme code |
+
+Future tool additions could follow a self-modification pattern:
+
+1. Sage identifies need for new capability
+2. Uses `create_tool` to register tool dynamically, or
+3. Uses `write_file` to add tool to source, then `reload_module`
+
+This contrasts with MCP servers which require external processes. Native tools run in-process and can be created, modified, and reloaded by the agent itself.
+
 ## Related Issues
 
 - guile-sage-eqx: IRC message queue (closed)
