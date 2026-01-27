@@ -395,7 +395,7 @@
                            (string-join files " ")
                            files))
             (tmp (format #f "/tmp/sage-commit-~a" (getpid)))
-            (cmd (format #f "cd ~a && git add ~a && git commit -m '~a\n\nCo-Authored-By: Claude <noreply@anthropic.com>'"
+            (cmd (format #f "cd ~a && git add ~a && git commit -m '~a\n\nCo-Authored-By: SageBot <sage@host.lan>'"
                          (workspace) file-list message)))
        (system (string-append cmd " > " tmp " 2>&1"))
        (let ((result (call-with-input-file tmp get-string-all)))
@@ -614,4 +614,26 @@
      ("properties" . ())
      ("required" . #()))
    (lambda (args)
-     (format-task-status))))
+     (format-task-status)))
+
+  ;; ============================================================
+  ;; Identity Tools
+  ;; ============================================================
+
+  ;; whoami - Agent identity introspection
+  (register-safe-tool
+   "whoami"
+   "Return agent identity and capabilities for self-awareness"
+   '(("type" . "object")
+     ("properties" . ())
+     ("required" . #()))
+   (lambda (args)
+     (string-append
+      "Name: SageBot\n"
+      "System: guile-sage (Guile Scheme AI agent framework)\n"
+      "Role: Autonomous software engineering agent\n"
+      "Contact: sage@host.lan\n"
+      "IRC: SageNet (#sage-agents, #sage-tasks, #sage-debug)\n"
+      "Workspace: " (workspace) "\n"
+      "Tools: " (number->string (length *tools*)) " registered\n"
+      "Mode: " (symbol->string (agent-mode))))))
