@@ -10,6 +10,7 @@
   #:use-module (sage util)
   #:use-module (sage logging)
   #:use-module (sage agent)
+  #:use-module (sage irc)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -636,4 +637,23 @@
       "IRC: SageNet (#sage-agents, #sage-tasks, #sage-debug)\n"
       "Workspace: " (workspace) "\n"
       "Tools: " (number->string (length *tools*)) " registered\n"
-      "Mode: " (symbol->string (agent-mode))))))
+      "Mode: " (symbol->string (agent-mode)))))
+
+  ;; irc_send - Send message to IRC channel
+  (register-safe-tool
+   "irc_send"
+   "Send a message to an IRC channel on SageNet"
+   '(("type" . "object")
+     ("properties" . (("channel" . (("type" . "string")
+                                    ("description" . "Channel name (e.g. #sage-agents)")))
+                      ("message" . (("type" . "string")
+                                    ("description" . "Message to send")))))
+     ("required" . #("channel" "message")))
+   (lambda (args)
+     (let ((channel (assoc-ref args "channel"))
+           (message (assoc-ref args "message")))
+       (if (not (irc-connected?))
+           "Not connected to IRC. Use SAGE_IRC_ENABLED=1 to enable."
+           (begin
+             (irc-send channel message)
+             (format #f "Sent to ~a: ~a" channel message)))))))
