@@ -9,6 +9,7 @@
   #:use-module (sage config)
   #:use-module (sage logging)
   #:use-module (sage util)
+  #:use-module (sage irc)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 format)
   #:use-module (ice-9 popen)
@@ -146,11 +147,17 @@
 
 ;;; Task Management API
 
+(define (notify-task-event event-type task-id message)
+  "Send task event to IRC if connected."
+  (when (irc-connected?)
+    (irc-log-task task-id (format #f "~a: ~a" event-type message))))
+
 (define (task-create title description)
   "Create a new task. Returns task ID."
   (let ((id (beads-create-task title description)))
     (when id
-      (set! *agent-tasks* (append *agent-tasks* (list id))))
+      (set! *agent-tasks* (append *agent-tasks* (list id)))
+      (notify-task-event "created" id title))
     id))
 
 (define (task-complete result-note)
@@ -163,6 +170,7 @@
         (beads-close-task id result-note)
         (set! *agent-tasks* (delete id *agent-tasks* equal?))
         (set! *agent-current-task* #f)
+        (notify-task-event "completed" id result-note)
         id)))
 
 (define (task-list)
@@ -184,10 +192,12 @@
         (begin
           (set! *agent-current-task* #f)
           #f)
-        (let ((next-id (caar tasks)))
+        (let ((next-id (caar tasks))
+              (title (cdar tasks)))
           (set! *agent-current-task* next-id)
           (log-info "agent" "Starting task" `(("id" . ,next-id)
-                                              ("title" . ,(cdar tasks))))
+                                              ("title" . ,title)))
+          (notify-task-event "started" next-id title)
           next-id))))
 
 (define (has-pending-tasks?)
