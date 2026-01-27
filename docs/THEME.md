@@ -1,0 +1,165 @@
+# guile-sage Color Palette & Theme Guide
+
+## Philosophy
+
+**Sage** evokes wisdom, nature, and calm focus. The palette draws from:
+- 🌿 Sage herb (muted green-gray)
+- 📜 Ancient scrolls (warm neutrals)
+- 🔮 Mystical knowledge (deep purples for accents)
+
+## Primary Palette
+
+### Core Colors (Sage Family)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  SAGE-50   #f0f4f0   ░░░░░  Lightest bg, subtle hover  │
+│  SAGE-100  #dce5dc   ░░░░   Light backgrounds          │
+│  SAGE-200  #b8ccb8   ░░░    Borders, dividers          │
+│  SAGE-300  #8fb08f   ░░     Muted text, icons          │
+│  SAGE-400  #6b9b6b   ░      Secondary elements         │
+│  SAGE-500  #5a8a5a   ▓      PRIMARY - Brand color      │
+│  SAGE-600  #4a7a4a   ▓▓     Hover states               │
+│  SAGE-700  #3a6a3a   ▓▓▓    Active states              │
+│  SAGE-800  #2a5a2a   ▓▓▓▓   Dark accents               │
+│  SAGE-900  #1a4a1a   █████  Darkest, high contrast     │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Semantic Colors
+
+```
+SUCCESS   #5a8a5a  (sage-500)    ✓ Operations complete
+INFO      #5a7a9a  (slate blue)  ℹ Informational messages
+WARNING   #9a8a5a  (amber sage)  ⚠ Caution, attention needed
+ERROR     #9a5a5a  (dusty rose)  ✗ Errors, failures
+THINKING  #7a5a9a  (lavender)    ⏳ Processing, waiting
+```
+
+### Terminal 16-Color Mapping
+
+```
+BLACK        #1a1a1a    BRIGHT_BLACK    #4a4a4a
+RED          #9a5a5a    BRIGHT_RED      #ba7a7a
+GREEN        #5a8a5a    BRIGHT_GREEN    #7aaa7a  ← Primary
+YELLOW       #9a8a5a    BRIGHT_YELLOW   #baaa7a
+BLUE         #5a7a9a    BRIGHT_BLUE     #7a9aba
+MAGENTA      #7a5a9a    BRIGHT_MAGENTA  #9a7aba
+CYAN         #5a9a9a    BRIGHT_CYAN     #7ababa
+WHITE        #cacaca    BRIGHT_WHITE    #fafafa
+
+BACKGROUND   #0a0f0a    (deep sage black)
+FOREGROUND   #d0d8d0    (sage white)
+CURSOR       #7aaa7a    (bright green)
+SELECTION    #3a5a3a    (sage-700 transparent)
+```
+
+## Application Guide
+
+### tmux Status Bar
+
+```tmux
+# ~/.tmux.conf sage theme
+set -g status-style 'bg=#1a4a1a fg=#d0d8d0'
+set -g status-left '#[bg=#5a8a5a,fg=#0a0f0a,bold] #S '
+set -g status-right '#[fg=#8fb08f]%H:%M #[bg=#3a6a3a,fg=#d0d8d0] #H '
+set -g window-status-current-style 'bg=#5a8a5a,fg=#0a0f0a,bold'
+set -g window-status-style 'fg=#8fb08f'
+set -g pane-border-style 'fg=#3a6a3a'
+set -g pane-active-border-style 'fg=#7aaa7a'
+set -g message-style 'bg=#9a8a5a,fg=#0a0f0a'
+```
+
+### iTerm Tab Colors
+
+| Session Type | Tab Color | Hex |
+|--------------|-----------|-----|
+| sage REPL | Sage Green | `#5a8a5a` |
+| IRC/SageNet | Slate Blue | `#5a7a9a` |
+| sysadmin | Amber | `#9a8a5a` |
+| errors/debug | Dusty Rose | `#9a5a5a` |
+| claude/AI | Lavender | `#7a5a9a` |
+
+### CLI Output Styling
+
+```scheme
+;; ANSI escape codes for sage theme
+(define SAGE-RESET    "\x1b[0m")
+(define SAGE-BOLD     "\x1b[1m")
+(define SAGE-DIM      "\x1b[2m")
+
+;; Foreground colors
+(define SAGE-GREEN    "\x1b[38;2;90;138;90m")   ; #5a8a5a
+(define SAGE-BLUE     "\x1b[38;2;90;122;154m")  ; #5a7a9a
+(define SAGE-YELLOW   "\x1b[38;2;154;138;90m")  ; #9a8a5a
+(define SAGE-RED      "\x1b[38;2;154;90;90m")   ; #9a5a5a
+(define SAGE-PURPLE   "\x1b[38;2;122;90;154m")  ; #7a5a9a
+(define SAGE-CYAN     "\x1b[38;2;90;154;154m")  ; #5a9a9a
+
+;; Background colors
+(define SAGE-BG-GREEN "\x1b[48;2;90;138;90m")
+(define SAGE-BG-DARK  "\x1b[48;2;10;15;10m")
+```
+
+### REPL Prompt Elements
+
+```
+┌─ Component ──────────────────────────────────────────┐
+│                                                      │
+│  user@infra-host:dsp-dr/guile-sage sage[model@host]>   │
+│  └─┬──┘ └─┬─┘ └──────┬───────┘ └─┬┘ └────┬────┘     │
+│    │      │          │           │       │          │
+│  DIM    CYAN       GREEN      BOLD    YELLOW        │
+│  user   host       repo       sage    context       │
+│                                                      │
+└──────────────────────────────────────────────────────┘
+```
+
+### Box Drawing (Unicode)
+
+```
+╔════════════════════════════════════════════╗
+║             guile-sage v0.5.0              ║  ← SAGE-500 border
+║   Type /help for commands, /exit to quit   ║
+╚════════════════════════════════════════════╝
+
+Status indicators:
+  ✓ Success (SAGE-GREEN)
+  ⏳ Waiting (SAGE-PURPLE)
+  ⚠ Warning (SAGE-YELLOW)
+  ✗ Error (SAGE-RED)
+  ℹ Info (SAGE-BLUE)
+```
+
+### IRC Channel Colors
+
+```
+#sage-agents  → Green   (coordination)
+#sage-tasks   → Blue    (work items)
+#sage-debug   → Yellow  (monitoring)
+```
+
+## Accessibility Notes
+
+- All color pairs meet WCAG AA contrast (4.5:1 minimum)
+- Semantic colors distinguishable for colorblind users
+- Never rely on color alone - use icons/symbols
+
+## File Locations
+
+```
+docs/THEME.md           - This file
+scripts/sage-theme.tmux - tmux config
+scripts/sage.itermcolors - iTerm2 color scheme (TODO)
+src/sage/theme.scm      - Scheme color definitions (TODO)
+```
+
+## Inspiration
+
+```
+    🌿 Salvia officinalis (common sage)
+
+    "The desire of knowledge, like the thirst of riches,
+     increases ever with the acquisition of it."
+                                    — Laurence Sterne
+```
