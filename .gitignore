@@ -1,3 +1,6 @@
+# Temporary build artifacts
+.tmp/
+
 # Core dumps
 *.core
 
