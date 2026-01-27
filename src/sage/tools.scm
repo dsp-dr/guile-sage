@@ -395,7 +395,7 @@
                            (string-join files " ")
                            files))
             (tmp (format #f "/tmp/sage-commit-~a" (getpid)))
-            (cmd (format #f "cd ~a && git add ~a && git commit -m '~a\n\nCo-Authored-By: SageBot <sage@host.lan>'"
+            (cmd (format #f "cd ~a && git add ~a && git commit -m '~a\n\nCo-Authored-By: Sage <sage@host.lan>'"
                          (workspace) file-list message)))
        (system (string-append cmd " > " tmp " 2>&1"))
        (let ((result (call-with-input-file tmp get-string-all)))
@@ -629,7 +629,7 @@
      ("required" . #()))
    (lambda (args)
      (string-append
-      "Name: SageBot\n"
+      "Name: Sage\n"
       "System: guile-sage (Guile Scheme AI agent framework)\n"
       "Role: Autonomous software engineering agent\n"
       "Contact: sage@host.lan\n"
