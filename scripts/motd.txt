@@ -1,0 +1,15 @@
+   _____ ___   _____ ______ _   _ _____ _____
+  / ____|/ _ \ / ____|  ____| \ | |  ___|_   _|
+ | (___ | |_| | |  __| |__  |  \| | |__   | |
+  \___ \|  _  | | |_ |  __| | . ` |  __|  | |
+  ____) | | | | |__| | |____| |\  | |___  | |
+ |_____/|_| |_|\_____|______|_| \_|_____| |_|
+
+ Welcome to SageNet - Agent Message Queue
+
+ Channels:
+   #sage-agents  - Agent coordination
+   #sage-tasks   - Task broadcasts
+   #sage-debug   - Debug/monitoring
+
+ This IRC server is for guile-sage agent communication.
