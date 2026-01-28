@@ -73,6 +73,43 @@ Set mode: `/agent autonomous`
 
 ---
 
+## IRC Communication
+
+Sage agents can communicate over IRC on SageNet for coordination.
+
+### Channels
+
+| Channel | Purpose |
+|---------|---------|
+| `#sage-agents` | Agent coordination and status |
+| `#sage-tasks` | Task updates and progress |
+| `#sage-debug` | Debug logging and troubleshooting |
+
+### Enable IRC
+
+```bash
+# In .env
+SAGE_IRC_ENABLED=1
+SAGE_IRC_SERVER=localhost
+SAGE_IRC_PORT=6667
+SAGE_IRC_NICK=sage-001
+```
+
+### IRC Tools
+
+- `irc_send` - Send message to a channel
+- `whoami` - Get agent identity (includes IRC info)
+
+### Example
+
+```
+sage> Send a message to #sage-tasks
+[Tool: irc_send]
+Sent to #sage-tasks: Starting work on guile-m86 (session locking)
+```
+
+---
+
 ## Beads Issue Tracking
 
 This project uses **bd** (beads) for issue tracking. Run `bd quickstart` for setup or `bd onboard` for a minimal snippet.
