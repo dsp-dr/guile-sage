@@ -573,6 +573,25 @@ Output: ~.meta/learnings/*.org~ for human review
 Not every operation needs review - that would blow token budgets.
 Review is triggered at specific checkpoints.
 
+*** Distinction from Pre-Commit
+
+| Layer | Question | Focus | Output |
+|-------+----------+-------+--------|
+| Pre-commit | "Did we break anything?" | Functional correctness | Pass/Fail |
+| Adversarial Review | "Did we do something strange?" | Meta-cognition | Learn/Incorporate |
+
+Pre-commit is a *quality gate*. Adversarial review is *reflection*.
+
+Examples that pass pre-commit but warrant review:
+- Commit removes error handling (tests pass if no errors triggered)
+- Change violates protocols stated in AGENTS.md
+- Task took 50 iterations when similar tasks took 3
+- Self-modification that makes future self-modification easier
+- Pattern that works but feels "off" relative to baseline behavior
+
+This feeds the *learning watchdog* (guile-xs2): not "is it correct?" but
+"what does this tell us about how we're working?"
+
 *** Operation Classification
 
 | Operation | In Workspace | Self-Mod (src/sage/*) | Outside Root |
