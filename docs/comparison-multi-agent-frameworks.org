@@ -1,0 +1,241 @@
+#+TITLE: Multi-Agent Framework Comparison: sage vs MetaGPT, CAMEL, AutoGen
+#+DATE: 2026-01-28
+#+AUTHOR: dsp-dr (sage-assisted)
+
+* Overview
+
+This document compares guile-sage's architecture against three prominent multi-agent frameworks:
+- *MetaGPT* (geekan/MetaGPT) - SOP-based role orchestration
+- *CAMEL* (camel-ai/camel) - Role-playing conversation framework
+- *AutoGen* (microsoft/autogen) - Actor model with type-driven routing
+
+* Architecture Comparison
+
+** Agent Model
+
+| Framework | Model | State Management | Communication |
+|-----------+-------+------------------+---------------|
+| sage | Single agent, tool-first | Session-based, beads persistence | IRC channels, file queues |
+| MetaGPT | Role FSM with states | RoleContext + Memory + Working Memory | Pub/Sub via Environment |
+| CAMEL | ChatAgent with step() | AgentMemory (history + vector) | RolePlaying ping-pong |
+| AutoGen | RoutedAgent actor model | Stateful agents, caller manages history | Type-routed messages |
+
+** Core Patterns
+
+*** sage (guile-sage)
+
+#+begin_src scheme
+;; Tool-first design
+(define *tools* '())           ; Registry of tools
+(define *safe-tools* '(...))   ; Permission whitelist
+
+;; Agent loop with beads integration
+(define *agent-mode* 'interactive)  ; interactive | autonomous | yolo
+(define *agent-tasks* '())          ; Task IDs from beads
+(define *max-iterations* 10)        ; Safety limit
+
+;; Execution: REPL → LLM → Tool calls → Result
+#+end_src
+
+*Key differentiators:*
+- Self-modification via =edit_file=, =eval_scheme=, =reload_module=
+- External task persistence (beads CLI integration)
+- IRC communication for multi-instance coordination
+- Single-threaded, synchronous design (simplicity over parallelism)
+
+*** MetaGPT
+
+#+begin_src python
+# Role FSM with think-act-observe pattern
+class Role:
+    async def run(self):
+        await self._observe()    # Read from msg_buffer
+        await self._think()      # LLM selects action
+        await self._act()        # Execute action
+
+# Message routing via Environment
+Environment.publish_message(message):
+    for role in members:
+        if is_send_to(message, role.addresses):
+            role.put_message(message)
+#+end_src
+
+*Key patterns:*
+- SOP (Standard Operating Procedure) via role definitions
+- Three react modes: REACT (LLM-driven), BY_ORDER, PLAN_AND_ACT
+- ActionNode for structured output with review/revise cycles
+- Team serialization for checkpointing
+
+*** CAMEL
+
+#+begin_src python
+# Role-playing conversation
+class RolePlaying:
+    def step(self, assistant_msg):
+        # Assistant → User Agent → Assistant (ping-pong)
+        user_response = self.user_agent.step(assistant_msg)
+        assistant_response = self.assistant_agent.step(user_response)
+        return assistant_response
+
+# Workforce for hierarchical task distribution
+class Workforce:
+    # Task channel-based communication
+    # Parallel worker execution
+    # Quality evaluation with structured responses
+#+end_src
+
+*Key patterns:*
+- Two-agent conversation framework
+- 40+ specialized toolkits (file, browser, code execution)
+- Token-aware context management with auto-summarization
+- ResponseTerminator for loop control
+
+*** AutoGen
+
+#+begin_src python
+# Actor model with type-driven routing
+class RoutedAgent:
+    @message_handler
+    async def handle_text(self, msg: TextMessage):
+        # Handler selected by message type annotation
+        pass
+
+# Topic-scoped messaging
+# Each team has UUID-based topic isolation
+# Prevents cross-team message leaks
+#+end_src
+
+*Key patterns:*
+- Type annotations drive handler selection
+- Intervention handlers for audit hooks
+- GroupChat teams (RoundRobin, Selector, Swarm)
+- ComponentModel versioning for reproducibility
+
+* Feature Matrix
+
+| Feature | sage | MetaGPT | CAMEL | AutoGen |
+|---------+------+---------+-------+---------|
+| *Multi-Agent* | IRC/beads coordination | Environment pub/sub | RolePlaying/Workforce | GroupChat teams |
+| *Tool System* | register-tool + execute | ActionNode + registry | FunctionTool + toolkits | FunctionTool + schemas |
+| *Persistence* | Session JSON + beads | Team serialization | Memory systems | ComponentModel config |
+| *Audit Layer* | Logging (planned: watchdog) | Cost tracking, logging | Verifiers, terminators | Intervention handlers |
+| *Self-Modification* | edit_file, eval_scheme | Not emphasized | Not emphasized | Not emphasized |
+| *Safety Controls* | safe-tools whitelist, YOLO mode | Budget constraints | Timeout management | Topic isolation |
+
+* Governance & Audit Comparison
+
+** sage Current State
+
+#+begin_src scheme
+;; Current: Permission-based, logging only
+(define *safe-tools* '("read_file" "write_file" ...))
+(check-permission "tool-name" args)  ; Inside main loop
+
+;; Planned (RFC-001):
+;; - External security watchdog (guile-0ai)
+;; - Meta-learning watchdog (guile-xs2)
+;; - Adversarial review triggers (guile-527)
+#+end_src
+
+*Gap:* No external audit layer outside main loop.
+
+** MetaGPT
+
+#+begin_src python
+# Cost tracking
+CostManager.add_cost(model, in_tokens, out_tokens)
+
+# Message audit trail
+Message.cause_by  # Action that generated message
+Message.sent_from # Source agent
+
+# Logging via loguru
+log-info, log-debug with tool output hooks
+#+end_src
+
+** CAMEL
+
+#+begin_src python
+# Verifiers for domain validation
+class MathVerifier(BaseVerifier):
+    async def verify(self, solution) -> VerificationResult
+
+# Terminators
+TokenLimitTerminator  # Budget enforcement
+ResponseTerminator    # Pattern-based termination
+
+# AgentOps instrumentation
+@track_agent() decorator
+#+end_src
+
+** AutoGen
+
+#+begin_src python
+# Intervention handlers (most sophisticated)
+class AuditHandler:
+    def on_send(self, msg):
+        # Can modify, log, or drop
+        return msg  # or DropMessage
+
+    def on_publish(self, msg):
+        # Hook for broadcast messages
+
+    def on_response(self, msg):
+        # Post-response processing
+
+# Registered at runtime creation
+SingleThreadedAgentRuntime(intervention_handlers=[AuditHandler()])
+#+end_src
+
+*AutoGen's intervention handlers are the closest to sage's planned watchdog architecture.*
+
+* Implementation Status vs Beads
+
+| Bead ID | Feature | Status | Framework Parallel |
+|---------+---------+--------+--------------------|
+| guile-t88 | Parallel sessions | Planned | MetaGPT Team, AutoGen GroupChat |
+| guile-m86 | Session locking | Planned | MetaGPT Environment |
+| guile-ns6 | Shared task queue | Planned | CAMEL Workforce TaskChannel |
+| guile-md1 | Self-modification | Partial (tools exist) | Unique to sage |
+| guile-6nv | Worktree dev | Planned | None |
+| guile-0ai | Audit watchdog | Planned | AutoGen InterventionHandler |
+| guile-xs2 | Meta-learning | Planned | None (unique) |
+| guile-kmh | Message queue | Planned | efrit-style, similar to CAMEL channels |
+| guile-527 | Adversarial review | Planned | CAMEL Verifiers |
+| guile-k7d | CLASSic eval | Planned | MetaGPT CostManager (partial) |
+
+* Recommendations
+
+** Adopt from MetaGPT
+
+1. *Structured ActionNode*: sage could benefit from structured output schemas
+2. *Cost tracking*: Token budget management integrated with session stats
+3. *React modes*: Support LLM-driven vs sequential action selection
+
+** Adopt from CAMEL
+
+1. *ResponseTerminator patterns*: Clean termination conditions
+2. *Timeout management*: Per-tool timeout configuration
+3. *Toolkit organization*: Group tools by domain (file, git, agent)
+
+** Adopt from AutoGen
+
+1. *Intervention handlers*: External hooks for audit layer (aligns with guile-0ai)
+2. *Type-driven routing*: Message type → handler mapping
+3. *Topic isolation*: Prevent cross-session pollution
+
+** Keep Unique to sage
+
+1. *Self-modification*: No other framework emphasizes this
+2. *Beads integration*: External persistent task memory
+3. *IRC coordination*: Simple, debuggable multi-instance communication
+4. *Guile/Scheme foundation*: Homoiconicity for meta-programming
+
+* References
+
+- MetaGPT: https://arxiv.org/abs/2308.00352, https://github.com/geekan/MetaGPT
+- CAMEL: https://arxiv.org/abs/2303.17760, https://github.com/camel-ai/camel
+- AutoGen: https://github.com/microsoft/autogen
+- sage RFC-001: docs/rfc/001-plugin-contract.org
+- sage ADR-001: docs/adr/001-mcp-protocol.org
+- Agentic Research: https://wal.sh/research/agentic-2026/

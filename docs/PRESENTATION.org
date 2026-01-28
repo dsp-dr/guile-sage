@@ -16,12 +16,41 @@
 - Tool calling for code manipulation
 - Self-modifying capabilities
 
+** Why This Project?
+
+Current multi-agent frameworks (MetaGPT, CAMEL, AutoGen) focus on *orchestration* but lack:
+
+- *Attribution*: Who authorized this agent? Who is accountable?
+- *Governance*: How do we audit and trust autonomous agents?
+- *Self-hosting*: Can you understand and modify your own agent?
+
+guile-sage explores:
+- Self-modifying agents that can improve themselves
+- External audit layers (watchdogs outside the main loop)
+- Homoiconic language for true meta-programming
+
+#+begin_quote
+"The agent that can modify itself is the agent you can trust—because you can see what it's doing."
+#+end_quote
+
+/Reference: [[https://wal.sh/research/agentic-2026/][Agentic Systems Research Q1 2026]]/
+
 ** Why Guile Scheme?
 
-- Powerful macro system
-- First-class functions
-- REPL-native development
-- GNU ecosystem integration
+- *Homoiconicity*: Code is data, data is code (meta-programming)
+- *Macros*: Compile-time code generation
+- *REPL-native*: Live system modification
+- *GNU ecosystem*: Emacs, Guix, standards-compliant
+
+** Differentiation from Python Frameworks
+
+| Feature | MetaGPT/CAMEL/AutoGen | guile-sage |
+|---------+-----------------------+------------|
+| Self-modification | Not emphasized | Core feature |
+| Audit layer | Logging only | External watchdog (planned) |
+| Runtime modification | Reload modules | Hot-reload + eval |
+| Meta-programming | Limited | First-class (homoiconic) |
+| Governance | Cost tracking | Dual watchdog architecture |
 
 * Architecture
 
@@ -160,34 +189,54 @@ main.scm
 
 * Future Work
 
-** Roadmap
+** Research Roadmap (Q1 2026)
 
-1. MCP Protocol support
-2. Multi-provider backends
-3. Agent orchestration
-4. Streaming responses
-5. IDE integration
+| Priority | Feature | Research Theme |
+|----------+---------+----------------|
+| P1 | Dual Watchdog Architecture | Governance |
+| P1 | Parallel Sessions | Multi-agent coordination |
+| P1 | Self-modification Workflow | Agent autonomy |
+| P2 | Adversarial Review | Trust & verification |
+| P2 | CLASSic Evaluation | Cost/Latency/Accuracy/Stability/Security |
 
-** AGENTS.md Support
+** Dual Watchdog Architecture
 
-- Project-specific instructions
-- XDG-compliant locations
-- Hierarchical loading
+#+begin_example
+┌─────────────────────────────────────────┐
+│            Main Agent Loop              │
+│  (REPL → LLM → Tools → Response)        │
+└─────────────────────────────────────────┘
+        │                    │
+        ▼                    ▼
+┌───────────────┐    ┌───────────────┐
+│   Security    │    │ Meta-Learning │
+│   Watchdog    │    │   Watchdog    │
+│ "Is this odd?"│    │"What can we   │
+│               │    │  improve?"    │
+└───────────────┘    └───────────────┘
+#+end_example
+
+** Native Plugin Contract (Not MCP)
+
+- Rejected MCP (see ADR-001): complexity, Node.js dependency
+- Native Guile plugins instead (RFC-001)
+- Shell out for external integrations
 
 * Conclusion
 
 ** Key Takeaways
 
-- Guile3 enables powerful AI tooling
-- Safety-first permission model
-- Self-modification for AI improvement
-- Claude Code-compatible patterns
+- *Why*: Governance and self-hosting gaps in current frameworks
+- *How*: Homoiconic language enables true self-modification
+- *What*: Dual watchdog architecture for trust
+- *Unique*: Agent that can understand and modify itself
 
 ** Resources
 
 - GitHub: github.com/dsp-dr/guile-sage
-- Ollama: ollama.ai
+- Research: wal.sh/research/agentic-2026/
 - Guile: gnu.org/software/guile
+- Ollama: ollama.ai
 
 * Q&A
 

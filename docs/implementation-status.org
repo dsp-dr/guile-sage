@@ -1,0 +1,110 @@
+#+TITLE: sage Implementation Status vs Beads
+#+DATE: 2026-01-28
+#+AUTHOR: dsp-dr
+
+* Implementation Summary
+
+This document tracks what's implemented in sage source code vs what's planned in beads.
+
+* Implemented Features
+
+** Core Modules (src/sage/)
+
+| Module | LOC | Status | Features |
+|--------+-----+--------+----------|
+| agent.scm | 275 | ✅ Complete | Agent modes, beads integration, task CRUD |
+| irc.scm | ~200 | ✅ Complete | RFC 1459 client, channels, messaging |
+| tools.scm | ~500 | ✅ Complete | Tool registry, permissions, 18 safe + 4 unsafe tools |
+| session.scm | ~300 | ✅ Complete | Session persistence, JSON serialization |
+| logging.scm | ~150 | ✅ Complete | Structured logging to files |
+| compaction.scm | ~200 | ✅ Complete | Context window management |
+| ollama.scm | ~250 | ✅ Complete | Ollama API client with tool calling |
+| repl.scm | ~400 | ✅ Complete | Interactive REPL with slash commands |
+| config.scm | ~200 | ✅ Complete | XDG dirs, .env loading |
+| context.scm | ~100 | ✅ Complete | AGENTS.md loading |
+
+** Working Features
+
+*** Agent System
+- [X] =*agent-mode*= (interactive/autonomous/yolo)
+- [X] =*agent-tasks*= list with beads CLI integration
+- [X] =*max-iterations*= safety limit (default 10)
+- [X] Task lifecycle: create → work → complete
+- [X] IRC notifications for task events
+
+*** Tool System
+- [X] 18 safe tools (file ops, git ops, agent tasks)
+- [X] 4 unsafe tools (eval_scheme, run_tests, reload_module, create_tool)
+- [X] Permission checking via =check-permission=
+- [X] Path safety validation via =safe-path?=
+- [X] Dynamic tool registration
+
+*** IRC Communication
+- [X] Socket-based client (RFC 1459 subset)
+- [X] Channels: #sage-agents, #sage-tasks, #sage-debug
+- [X] =irc-broadcast=, =irc-log-task=, =irc-log-debug=
+- [X] Configurable via SAGE_IRC_* env vars
+
+*** Session Management
+- [X] JSON persistence
+- [X] Token tracking (in/out)
+- [X] Project-local storage (XDG)
+- [X] Save/load commands
+
+* Pending Beads (Not Yet Implemented)
+
+** P1 - High Priority
+
+| Bead | Feature | Gap |
+|------+---------+-----|
+| guile-t88 | Parallel sessions | Need session locking, shared queue |
+| guile-m86 | Session locking | File locks not implemented |
+| guile-ns6 | Shared task queue | Beads works but no cross-session coordination |
+| guile-md1 | Self-modification workflow | Tools exist but no workflow automation |
+| guile-6nv | Worktree development | No git worktree integration |
+| guile-0ai | Audit watchdog | Logging only, no external oversight |
+| guile-xs2 | Meta-learning | No reflection/improvement loop |
+| guile-kmh | Message queue | IRC works, need file-based queue (efrit-style) |
+
+** P2 - Medium Priority
+
+| Bead | Feature | Gap |
+|------+---------+-----|
+| guile-527 | Adversarial review | No secondary review pattern |
+| guile-k7d | CLASSic evaluation | No cost/latency/accuracy metrics |
+| guile-sage-02w | Context warnings | Compaction exists but no warnings |
+| guile-sage-4kz | Log introspection | read_logs exists, need search_logs |
+| guile-sage-44z | Auto-compaction | Manual only |
+| guile-sage-bfo | Streaming | Batch responses only |
+| guile-sage-lzq | Retry logic | No exponential backoff |
+
+* Gap Analysis
+
+** What sage Has That Others Don't
+
+1. *Self-modification*: =edit_file= + =eval_scheme= + =reload_module= chain
+2. *Beads integration*: External persistent task memory
+3. *IRC coordination*: Simple, debuggable multi-instance messaging
+4. *Guile foundation*: Homoiconicity enables runtime modification
+
+** What sage Needs (from framework comparison)
+
+1. *External audit layer* (like AutoGen's InterventionHandlers)
+2. *Structured output schemas* (like MetaGPT's ActionNode)
+3. *Token budget management* (like CAMEL's terminators)
+4. *Response validation* (like CAMEL's Verifiers)
+
+* Confirmation
+
+Based on source code analysis:
+- *14 modules* implemented in src/sage/
+- *22 tools* registered (18 safe, 4 unsafe)
+- *3 IRC channels* configured
+- *Agent loop* with beads integration working
+- *Session persistence* with XDG compliance
+
+Primary gaps:
+- No session locking for parallel instances
+- No external audit/watchdog layer
+- No self-modification workflow automation
+- No message queue (file-based) for external tools
