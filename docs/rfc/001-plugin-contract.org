@@ -568,6 +568,115 @@ Output: ~.meta/learnings/*.org~ for human review
     (loop)))
 #+end_src
 
+** Adversarial Review Triggers
+
+Not every operation needs review - that would blow token budgets.
+Review is triggered at specific checkpoints.
+
+*** Operation Classification
+
+| Operation | In Workspace | Self-Mod (src/sage/*) | Outside Root |
+|-----------+--------------+-----------------------+--------------|
+| read_file | Safe | *Trigger* | Unsafe |
+| write_file | Safe | *Trigger* | Unsafe |
+| edit_file | Safe | *Trigger* | Unsafe |
+| delete | Safe | *Trigger* | Unsafe |
+| git_push | Safe | *Trigger* | N/A |
+| eval_scheme | Unsafe | *Trigger* | Unsafe |
+| plugin_load | N/A | *Trigger* | Unsafe |
+
+*** Trigger Categories
+
+| Category | Trigger | Review Type |
+|----------+---------+-------------|
+| Self-modification | ~edit_file~ on ~src/sage/*.scm~ | Full (worth the cost) |
+| Irreversible | ~git_push~, ~delete~, deploy | Full |
+| Permission escalation | Plugin load, YOLO enable | Full |
+| Iteration threshold | > 20 iterations without human | Cheap (rule-based) |
+| Token threshold | Single op > 50K tokens | Cheap (haiku) |
+| Anomaly flag | Security watchdog alert | Full |
+| Compaction | Before context loss | Checkpoint |
+
+*** What Does NOT Trigger Review
+
+- Normal ~read_file~ in workspace
+- Safe tool calls (~git_status~, ~list_files~)
+- Routine commits to worktrees (not main)
+- Standard chat responses
+- Logging operations
+
+*** Review Implementation Options
+
+| Method | Cost | Use When |
+|--------+------+----------|
+| Full LLM review | High | Self-mod, irreversible |
+| Haiku review | ~10x cheaper | Token threshold |
+| Rule-based | Free | Iteration check, patterns |
+| Diff-only | Medium | Large file edits |
+| Async queue | Deferred | Non-blocking operations |
+
+*** Trigger Configuration
+
+#+begin_src scheme
+(define *review-triggers*
+  '((file-patterns . ("^src/sage/.*\\.scm$"    ; self-mod
+                      "^plugins/.*\\.scm$"      ; plugin code
+                      "AGENTS\\.md$"            ; behavior config
+                      "\\.env"))                ; secrets
+    (tools . (git_push
+              eval_scheme
+              create_tool
+              reload_module
+              plugin_load))
+    (iteration-threshold . 20)
+    (token-threshold . 50000)))
+
+(define (needs-adversarial-review? operation context)
+  "Determine if operation needs review before execution."
+  (or
+   ;; Self-modification
+   (and (member (op-tool operation) '(edit_file write_file))
+        (any (lambda (pat)
+               (string-match pat (op-path operation)))
+             (assoc-ref *review-triggers* 'file-patterns)))
+   ;; Dangerous tools
+   (member (op-tool operation)
+           (assoc-ref *review-triggers* 'tools))
+   ;; Runaway detection
+   (> (context-iteration context)
+      (assoc-ref *review-triggers* 'iteration-threshold))
+   ;; Expensive operation
+   (> (estimate-tokens operation)
+      (assoc-ref *review-triggers* 'token-threshold))))
+#+end_src
+
+*** Review Protocol
+
+#+begin_src
+┌─────────────────┐
+│  Operation      │
+│  Proposed       │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     No
+│ Needs Review?   │─────────────────┐
+└────────┬────────┘                 │
+         │ Yes                      │
+         ▼                          │
+┌─────────────────┐                 │
+│ Review Agent    │                 │
+│ (challenger)    │                 │
+└────────┬────────┘                 │
+         │                          │
+    ┌────┴────┐                     │
+    ▼         ▼                     │
+ APPROVE   REJECT                   │
+    │         │                     │
+    ▼         ▼                     ▼
+ Execute   Log + Alert          Execute
+#+end_src
+
 ** Verification Checklist
 
 Before marking RFC as accepted:
