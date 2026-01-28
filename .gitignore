@@ -17,4 +17,6 @@
 *~
 \#*\#
 .#*
-.env
+
+# Git worktrees (parallel development branches)
+worktrees/
