@@ -386,6 +386,130 @@ We DO try to prevent:
 - Plugins exceeding declared capabilities
 - Silent persistence of malicious code
 
+** Audit Layer (Missing - See guile-0ai)
+
+*CRITICAL GAP*: sage currently has no second-layer audit outside the main loop.
+
+*** Current State (Insufficient)
+
+#+begin_src
+┌─────────────────────────────────────┐
+│           Main Agent Loop           │
+│  ┌─────────────────────────────┐   │
+│  │  Logging (passive)          │   │  ← Records events but doesn't verify
+│  │  Permissions (check)        │   │  ← Inside the loop being checked
+│  │  Max iterations (limit)     │   │  ← Safety valve, but inside loop
+│  └─────────────────────────────┘   │
+└─────────────────────────────────────┘
+         No external observer!
+#+end_src
+
+*** Required Architecture
+
+#+begin_src
+┌─────────────────────────────────────┐
+│         External Watchdog           │  ← MISSING: Separate process
+│  - Heartbeat monitoring             │
+│  - Integrity verification           │
+│  - Kill switch                      │
+└──────────────┬──────────────────────┘
+               │ monitors
+               ▼
+┌─────────────────────────────────────┐
+│           Main Agent Loop           │
+│  ┌─────────────────────────────┐   │
+│  │  Integrity checks           │   │  ← Hash verification before self-mod
+│  │  Canary values              │   │  ← Detect tampering
+│  │  Anomaly detection          │   │  ← Decision pattern drift
+│  └─────────────────────────────┘   │
+└─────────────────────────────────────┘
+#+end_src
+
+*** Watchdog Requirements
+
+| Component | Purpose |
+|-----------+---------|
+| Heartbeat | Agent must ping watchdog every N seconds |
+| Integrity registry | SHA256 of all .scm files at startup |
+| Pre-mod verification | Check file hash before ~edit_file~ on src/ |
+| Post-mod verification | Recalculate hash after modification |
+| Behavior baseline | Log decision patterns, detect drift |
+| Kill switch | Watchdog can terminate agent externally |
+| Canary checks | Known values in critical paths |
+
+*** Implementation Sketch
+
+#+begin_src scheme
+;; src/sage/audit.scm (NEW MODULE)
+
+(define *integrity-registry* (make-hash-table))
+(define *watchdog-socket* #f)
+(define *canary-value* (random-hex 32))
+
+(define (init-audit)
+  "Initialize audit layer."
+  ;; Calculate hashes of all source files
+  (for-each
+   (lambda (path)
+     (hash-set! *integrity-registry* path (file-sha256 path)))
+   (glob "src/sage/*.scm"))
+  ;; Connect to watchdog
+  (set! *watchdog-socket* (connect-watchdog))
+  ;; Log baseline
+  (log-audit "Audit initialized" `(("files" . ,(hash-count *integrity-registry*))))
+  #t)
+
+(define (verify-integrity path)
+  "Verify file hasn't been tampered with."
+  (let ((expected (hash-ref *integrity-registry* path))
+        (actual (file-sha256 path)))
+    (unless (equal? expected actual)
+      (log-error "audit" "INTEGRITY VIOLATION" `(("path" . ,path)))
+      (watchdog-alert! 'integrity-violation path)
+      (error "Integrity check failed" path))
+    #t))
+
+(define (heartbeat!)
+  "Send heartbeat to watchdog."
+  (when *watchdog-socket*
+    (send-message *watchdog-socket*
+                  `(("type" . "heartbeat")
+                    ("canary" . ,*canary-value*)
+                    ("iteration" . ,*agent-iteration*)))))
+
+(define (check-canary!)
+  "Verify canary value hasn't been modified."
+  (unless (= (string-length *canary-value*) 32)
+    (log-error "audit" "CANARY TAMPERED")
+    (watchdog-alert! 'canary-tampered)
+    (error "Canary check failed")))
+#+end_src
+
+*** Watchdog Process (Separate)
+
+#+begin_src scheme
+;; bin/sage-watchdog (separate process)
+
+(define *last-heartbeat* (current-time))
+(define *heartbeat-timeout* 30)  ; seconds
+
+(define (watchdog-loop)
+  (let loop ()
+    (let ((msg (receive-message)))
+      (case (assoc-ref msg "type")
+        ((heartbeat)
+         (set! *last-heartbeat* (current-time))
+         (verify-canary (assoc-ref msg "canary")))
+        ((alert)
+         (handle-alert msg))))
+    ;; Check for timeout
+    (when (> (- (current-time) *last-heartbeat*) *heartbeat-timeout*)
+      (log-error "watchdog" "Agent heartbeat timeout - killing")
+      (kill-agent!))
+    (sleep 1)
+    (loop)))
+#+end_src
+
 ** Verification Checklist
 
 Before marking RFC as accepted:
@@ -395,6 +519,9 @@ Before marking RFC as accepted:
 - [ ] Can auto-loaded plugins come from workspace? (should: NO without trust)
 - [ ] Are plugin loads audited? (should: YES)
 - [ ] Can permission be escalated at runtime? (should: NO)
+- [ ] Is there a watchdog process? (should: YES) *← NEW*
+- [ ] Are source files integrity-checked? (should: YES) *← NEW*
+- [ ] Is heartbeat implemented? (should: YES) *← NEW*
 
 * Open Questions
 
