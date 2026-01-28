@@ -485,6 +485,64 @@ We DO try to prevent:
     (error "Canary check failed")))
 #+end_src
 
+*** Dual Watchdog Architecture
+
+Two parallel out-of-band processes:
+
+#+begin_src
+┌─────────────────────────────────────────────────────────────────┐
+│                    Out-of-Band Observers                        │
+│  ┌─────────────────────────┐  ┌─────────────────────────────┐  │
+│  │   Security Watchdog     │  │   Learning Watchdog         │  │
+│  │   "Is something odd?"   │  │   "Can I improve?"          │  │
+│  │                         │  │                             │  │
+│  │   - Heartbeat timeout   │  │   - Pattern recognition     │  │
+│  │   - Integrity checks    │  │   - Protocol effectiveness  │  │
+│  │   - Canary verification │  │   - Anti-pattern detection  │  │
+│  │   - Anomaly detection   │  │   - Molecule suggestions    │  │
+│  │                         │  │                             │  │
+│  │   Output: KILL / ALERT  │  │   Output: .meta/learnings/  │  │
+│  └───────────┬─────────────┘  └──────────────┬──────────────┘  │
+│              │                               │                  │
+└──────────────┼───────────────────────────────┼──────────────────┘
+               │ monitors                      │ observes
+               ▼                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Main Agent Loop                            │
+│   (.logs/, .beads/, git log, session transcripts)              │
+└─────────────────────────────────────────────────────────────────┘
+#+end_src
+
+*** Security Watchdog (guile-0ai)
+
+Answers: "Is something wrong?"
+
+| Check | Frequency | Action |
+|-------+----------+--------|
+| Heartbeat | 10s | Kill if timeout |
+| Source integrity | Before self-mod | Halt if mismatch |
+| Canary values | Each iteration | Alert if tampered |
+| Behavior drift | Hourly | Log anomaly score |
+
+*** Learning Watchdog (guile-xs2)
+
+Answers: "What am I learning?"
+
+| Pattern | Detection | Output |
+|---------+-----------+--------|
+| Tool sequences | Frequent N-grams in logs | Molecule candidates |
+| Forgotten steps | "push after commit" missing | Protocol reminder |
+| Effective protocols | PCP, HIVE success rate | Reinforcement |
+| Anti-patterns | Repeated failures | AGENTS.md warning |
+
+Data sources:
+- ~.logs/~ - Tool call patterns
+- ~.beads/~ - Task completion patterns
+- ~git log~ - Commit patterns
+- Session transcripts - Conversation patterns
+
+Output: ~.meta/learnings/*.org~ for human review
+
 *** Watchdog Process (Separate)
 
 #+begin_src scheme
