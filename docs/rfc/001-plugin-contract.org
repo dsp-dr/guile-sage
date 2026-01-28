@@ -594,3 +594,5 @@ Before marking RFC as accepted:
 - ADR-001: MCP Protocol Integration (Rejected)
 - MCP Specification: https://modelcontextprotocol.io/
 - Guile Module System: https://www.gnu.org/software/guile/manual/html_node/Modules.html
+- Agentic Research 2026: https://wal.sh/research/agentic-2026/
+- Efrit Remote Queue: https://github.com/steveyegge/efrit (lisp/interfaces/efrit-remote-queue.el)

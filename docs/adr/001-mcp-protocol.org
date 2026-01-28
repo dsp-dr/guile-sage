@@ -90,5 +90,6 @@ We can reference MCP's patterns without adopting the protocol.
 
 - https://modelcontextprotocol.io/
 - https://github.com/anthropics/mcp
+- https://wal.sh/research/agentic-2026/
 - RFC-001: Native Plugin Contract
 - Beads: guile-mak, guile-ta9, guile-8gw (closed)
