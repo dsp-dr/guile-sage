@@ -113,3 +113,189 @@ bd sync               # Sync with git
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
 
+---
+
+## Task Decomposition Patterns
+
+When working on complex tasks, decompose them systematically:
+
+### Decomposition Hierarchy
+
+```
+Epic (guile-xxx)           # Large feature or milestone
+├── Feature (guile-yyy)    # Discrete capability
+│   ├── Task (guile-zzz)   # Single unit of work
+│   └── Task (guile-aaa)
+└── Feature (guile-bbb)
+    └── Task (guile-ccc)
+```
+
+### Task Sizing Rules
+
+| Size | Description | Example |
+|------|-------------|---------|
+| XS | < 10 lines, single file | Fix typo, add comment |
+| S | < 50 lines, 1-2 files | Add function, fix bug |
+| M | 50-200 lines, 2-5 files | New tool, refactor module |
+| L | > 200 lines, many files | New feature → decompose further |
+
+**Rule**: If a task is size L, break it into M or smaller tasks.
+
+### Task Creation Template
+
+```bash
+bd create "Verb + Object + Context" -p 1 --label task \
+  --description "Why: ...
+What: ...
+Acceptance: ..."
+```
+
+### Saving Tasks to Beads
+
+```bash
+# Create task
+bd create "Title" -p 1 --label task --description "Details..."
+
+# Claim task
+bd update <id> --status in_progress
+
+# Complete with result
+bd close <id> --comment "Result: ..."
+
+# Sync to git
+bd sync && git push
+```
+
+---
+
+## Worktree Workflow (Self-Modification)
+
+Sage can modify its own source code using git worktrees for isolation.
+
+### Why Worktrees?
+
+- **Isolation**: Changes in worktree don't affect main checkout
+- **Parallel work**: Multiple tasks can run simultaneously
+- **Safe rollback**: Just delete the worktree if something goes wrong
+- **Test before merge**: Run tests in worktree before merging
+
+### Worktree Directory Structure
+
+```
+guile-sage/                 # Main checkout (main branch)
+├── src/sage/
+├── tests/
+└── worktrees/              # All worktrees live here (gitignored)
+    ├── fix-session-lock/   # Worktree for session locking task
+    ├── add-retry-logic/    # Worktree for retry feature
+    └── refactor-tools/     # Worktree for tools refactor
+```
+
+### Self-Modification Workflow
+
+```bash
+# 1. Create worktree for task
+mkdir -p worktrees
+git worktree add worktrees/fix-<name> -b fix/<name>
+cd worktrees/fix-<name>
+
+# 2. Make changes
+# ... edit files ...
+
+# 3. Test in worktree
+make check
+
+# 4. Commit if tests pass
+git add <files>
+git commit -m "fix: description
+
+Co-Authored-By: sage <sage@guile-sage.local>"
+
+# 5. Return to main and merge
+cd ../..
+git merge fix/<name> --no-ff -m "Merge fix/<name>"
+
+# 6. Clean up
+git worktree remove worktrees/fix-<name>
+git branch -d fix/<name>
+
+# 7. Push
+git push origin main
+```
+
+### Sage Self-Modification Tools
+
+When sage needs to modify itself:
+
+1. **Create task**: `sage_task_create` with clear scope
+2. **Create worktree**: `git_commit` after creating worktree
+3. **Edit source**: `edit_file` or `write_file`
+4. **Run tests**: `run_tests` (requires YOLO mode)
+5. **Commit**: `git_commit` with descriptive message
+6. **Merge**: Manual or via `eval_scheme` (YOLO)
+
+### Worktree Quick Reference
+
+```bash
+# List worktrees
+git worktree list
+
+# Create worktree
+git worktree add worktrees/<name> -b <branch>
+
+# Remove worktree
+git worktree remove worktrees/<name>
+
+# Prune stale worktrees
+git worktree prune
+```
+
+---
+
+## Parallel Sessions
+
+Multiple sage instances can run concurrently with proper coordination.
+
+### Session Isolation
+
+Each sage instance should:
+1. Use a unique session ID
+2. Lock session files before writing
+3. Use beads for cross-session task coordination
+
+### Task Claiming Protocol
+
+```bash
+# Instance 1: Find and claim work
+bd ready                           # See available tasks
+bd update guile-xxx --status in_progress  # Claim it
+
+# Instance 2: Sees task is claimed
+bd ready                           # guile-xxx not shown
+bd show guile-xxx                  # Shows "in_progress"
+```
+
+### Conflict Avoidance
+
+| Scenario | Solution |
+|----------|----------|
+| Same file | Use worktrees (separate branches) |
+| Same task | Claim via beads before starting |
+| Same session | Use unique session IDs |
+| Git conflicts | Pull before push, rebase if needed |
+
+### Multi-Instance Workflow
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Instance 1 │     │  Instance 2 │     │  Instance 3 │
+│  (main)     │     │  (worktree) │     │  (worktree) │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+       ▼                   ▼                   ▼
+   ┌───────────────────────────────────────────────┐
+   │              Beads Task Queue                 │
+   │  (.beads/issues.jsonl - shared via git)      │
+   └───────────────────────────────────────────────┘
+```
+
