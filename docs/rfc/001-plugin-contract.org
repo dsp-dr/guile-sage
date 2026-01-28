@@ -1,0 +1,411 @@
+#+TITLE: RFC-001: Native Plugin Contract
+#+DATE: 2026-01-28
+#+STATUS: Draft
+#+AUTHOR: dsp-dr
+
+* Abstract
+
+This RFC proposes a native Guile plugin contract for extending guile-sage with external tools and capabilities. The design prioritizes simplicity, Guile idioms, and zero external dependencies.
+
+* Motivation
+
+guile-sage needs extensibility for:
+- External service integrations (Cloudflare, Atlassian, databases)
+- Custom tool sets for specific workflows
+- Community contributions
+
+Rather than adopt MCP (see ADR-001), we define a lightweight native contract.
+
+* Design Goals
+
+1. *Simple*: Minimal boilerplate, obvious semantics
+2. *Guile-native*: Use modules, not JSON-RPC
+3. *Safe by default*: Plugins declare required permissions
+4. *Discoverable*: Runtime introspection of loaded plugins
+5. *Hot-reloadable*: Support development workflow
+
+* Plugin Contract
+
+** Module Structure
+
+Plugins are Guile modules under ~(sage plugins <name>)~:
+
+#+begin_src scheme
+;; src/sage/plugins/cloudflare.scm
+(define-module (sage plugins cloudflare)
+  #:use-module (sage plugin-api)
+  #:export (plugin-manifest))
+
+(define plugin-manifest
+  `((name . "cloudflare")
+    (version . "0.1.0")
+    (description . "Cloudflare Workers and KV integration")
+    (author . "dsp-dr")
+    (tools . ,(list tool-cf-deploy
+                    tool-cf-status
+                    tool-cf-kv-get
+                    tool-cf-kv-put))
+    (init . ,plugin-init)
+    (cleanup . ,plugin-cleanup)
+    (permissions . (network shell))))
+#+end_src
+
+** Tool Definition
+
+Tools follow the existing sage tool schema:
+
+#+begin_src scheme
+(define tool-cf-deploy
+  `((name . "cf_deploy")
+    (description . "Deploy a Cloudflare Worker")
+    (parameters . ((type . "object")
+                   (properties . ((script . ((type . "string")
+                                             (description . "Worker script path")))
+                                  (name . ((type . "string")
+                                           (description . "Worker name")))))
+                   (required . #("script" "name"))))
+    (handler . ,cf-deploy-handler)
+    (safe . #f)))  ; requires permission
+
+(define (cf-deploy-handler args)
+  (let ((script (assoc-ref args "script"))
+        (name (assoc-ref args "name")))
+    ;; Implementation
+    (format #f "Deployed ~a from ~a" name script)))
+#+end_src
+
+** Lifecycle Hooks
+
+#+begin_src scheme
+;; Called when plugin is loaded
+(define (plugin-init)
+  ;; Initialize API client, validate credentials, etc.
+  (let ((api-key (config-get "CLOUDFLARE_API_KEY")))
+    (unless api-key
+      (error "CLOUDFLARE_API_KEY not configured"))
+    (set! *cf-client* (make-cf-client api-key))
+    #t))
+
+;; Called when plugin is unloaded
+(define (plugin-cleanup)
+  (when *cf-client*
+    (cf-client-close *cf-client*)
+    (set! *cf-client* #f))
+  #t)
+#+end_src
+
+** Permissions Model
+
+Plugins declare required permissions:
+
+| Permission | Description |
+|------------+-------------|
+| ~network~ | HTTP/TCP connections |
+| ~shell~ | Shell command execution |
+| ~filesystem~ | File operations outside workspace |
+| ~eval~ | Dynamic code evaluation |
+
+#+begin_src scheme
+;; In manifest
+(permissions . (network))
+
+;; Runtime check
+(define (cf-deploy-handler args)
+  (require-permission 'network)
+  ;; ... implementation
+  )
+#+end_src
+
+* Plugin API
+
+** Loading Plugins
+
+#+begin_src scheme
+;; Load a plugin by name
+(plugin-load 'cloudflare)
+
+;; Load from path
+(plugin-load-file "/path/to/plugin.scm")
+
+;; List loaded plugins
+(plugin-list)
+;; => ((cloudflare . #<plugin>) (atlassian . #<plugin>))
+
+;; Get plugin info
+(plugin-info 'cloudflare)
+;; => ((name . "cloudflare") (version . "0.1.0") ...)
+#+end_src
+
+** Unloading Plugins
+
+#+begin_src scheme
+;; Unload plugin (calls cleanup)
+(plugin-unload 'cloudflare)
+
+;; Reload plugin (for development)
+(plugin-reload 'cloudflare)
+#+end_src
+
+** Tool Registration
+
+When a plugin loads, its tools are registered with the main tool system:
+
+#+begin_src scheme
+;; Automatic on plugin-load
+(plugin-load 'cloudflare)
+;; Now (get-tool "cf_deploy") works
+
+;; Tools are namespaced internally
+;; plugin:cloudflare:cf_deploy
+;; but accessible as just "cf_deploy" if unique
+#+end_src
+
+* Configuration
+
+** Plugin Search Path
+
+#+begin_src scheme
+;; Default paths (in order)
+;; 1. $SAGE_PLUGIN_PATH (colon-separated)
+;; 2. ~/.local/share/sage/plugins/
+;; 3. /usr/local/share/sage/plugins/
+;; 4. ./plugins/ (workspace-local)
+#+end_src
+
+** Auto-loading
+
+#+begin_src bash
+# In .env
+SAGE_PLUGINS=cloudflare,atlassian,postgres
+#+end_src
+
+Or in config:
+
+#+begin_src scheme
+;; ~/.config/sage/plugins.scm
+(auto-load-plugins '(cloudflare atlassian))
+#+end_src
+
+* Example: Minimal Plugin
+
+#+begin_src scheme
+;;; plugins/hello.scm - Minimal plugin example
+(define-module (sage plugins hello)
+  #:use-module (sage plugin-api)
+  #:export (plugin-manifest))
+
+(define (hello-handler args)
+  (let ((name (or (assoc-ref args "name") "World")))
+    (format #f "Hello, ~a!" name)))
+
+(define plugin-manifest
+  `((name . "hello")
+    (version . "0.1.0")
+    (description . "Example plugin")
+    (tools . (((name . "hello")
+               (description . "Say hello")
+               (parameters . ((type . "object")
+                              (properties . ((name . ((type . "string")))))
+                              (required . #())))
+               (handler . ,hello-handler)
+               (safe . #t))))
+    (permissions . ())))
+#+end_src
+
+* Example: Service Integration
+
+#+begin_src scheme
+;;; plugins/atlassian.scm - Jira/Confluence integration
+(define-module (sage plugins atlassian)
+  #:use-module (sage plugin-api)
+  #:use-module (sage util)  ; http-request, json-parse
+  #:export (plugin-manifest))
+
+(define *jira-client* #f)
+
+(define (plugin-init)
+  (let ((url (config-get "JIRA_URL"))
+        (token (config-get "JIRA_API_TOKEN")))
+    (unless (and url token)
+      (error "JIRA_URL and JIRA_API_TOKEN required"))
+    (set! *jira-client*
+          `((url . ,url) (token . ,token)))
+    #t))
+
+(define (jira-create-issue args)
+  (require-permission 'network)
+  (let ((project (assoc-ref args "project"))
+        (summary (assoc-ref args "summary"))
+        (type (or (assoc-ref args "type") "Task")))
+    (let ((response (http-request
+                     (string-append (assoc-ref *jira-client* 'url)
+                                    "/rest/api/2/issue")
+                     #:method 'POST
+                     #:headers `(("Authorization" .
+                                  ,(string-append "Bearer "
+                                                  (assoc-ref *jira-client* 'token)))
+                                 ("Content-Type" . "application/json"))
+                     #:body (json-encode
+                             `((fields . ((project . ((key . ,project)))
+                                          (summary . ,summary)
+                                          (issuetype . ((name . ,type))))))))))
+      (let ((key (assoc-ref (json-parse response) "key")))
+        (format #f "Created issue: ~a" key)))))
+
+(define plugin-manifest
+  `((name . "atlassian")
+    (version . "0.1.0")
+    (description . "Jira and Confluence integration")
+    (author . "dsp-dr")
+    (tools . (((name . "jira_create_issue")
+               (description . "Create a Jira issue")
+               (parameters . ((type . "object")
+                              (properties . ((project . ((type . "string")))
+                                             (summary . ((type . "string")))
+                                             (type . ((type . "string")))))
+                              (required . #("project" "summary"))))
+               (handler . ,jira-create-issue)
+               (safe . #f))))
+    (init . ,plugin-init)
+    (permissions . (network))))
+#+end_src
+
+* Implementation Plan
+
+| Phase | Task | Effort |
+|-------+------+--------|
+| 1 | Define ~(sage plugin-api)~ module | S |
+| 2 | Implement ~plugin-load~, ~plugin-unload~ | M |
+| 3 | Permission system (~require-permission~) | S |
+| 4 | Auto-loading from config | S |
+| 5 | Example plugins (hello, echo) | XS |
+| 6 | Documentation | S |
+
+Total: ~M effort (50-100 lines core, plus examples)
+
+* Security Considerations (Red Team)
+
+Self-modifying AI agents with plugin systems present unique attack surfaces.
+
+** Threat Model
+
+| Attacker | Goal | Vector |
+|----------+------+--------|
+| Malicious plugin | Exfiltrate data | Network permission abuse |
+| Compromised LLM | Self-propagate | ~create_tool~ + ~eval_scheme~ |
+| Prompt injection | Privilege escalation | Convince agent to load malicious plugin |
+| Supply chain | Backdoor | Compromised plugin repository |
+
+** Attack Scenarios
+
+*** 1. Plugin Masquerade
+Malicious plugin claims to be "cloudflare" but exfiltrates credentials.
+
+*Mitigation*: Plugin signing, hash verification, trusted sources only.
+
+#+begin_src scheme
+;; Plugin must be signed or from trusted path
+(plugin-load 'cloudflare #:require-signature #t)
+(plugin-load 'cloudflare #:trusted-paths '("/usr/local/share/sage/plugins/"))
+#+end_src
+
+*** 2. Self-Modification Loop
+Agent uses ~edit_file~ to modify its own plugin loader, removing security checks.
+
+*Mitigation*: Core files are immutable during runtime.
+
+#+begin_src scheme
+;; Protect core modules
+(define *immutable-paths*
+  '("src/sage/plugin-api.scm"
+    "src/sage/tools.scm"
+    "src/sage/config.scm"))
+
+(define (safe-path? path)
+  (and (not (member path *immutable-paths*))
+       ;; existing checks
+       ))
+#+end_src
+
+*** 3. Permission Creep
+Plugin requests ~network~, uses it to download and execute arbitrary code.
+
+*Mitigation*: Capability-based permissions, not blanket grants.
+
+#+begin_src scheme
+;; Instead of (permissions . (network))
+;; Use capability tokens
+(permissions . ((network . ((hosts . ("api.cloudflare.com"))
+                            (methods . (GET POST))))))
+#+end_src
+
+*** 4. Eval Injection
+LLM is convinced to use ~eval_scheme~ to run plugin code without loading contract.
+
+*Mitigation*: ~eval_scheme~ cannot access plugin-api, separate evaluation contexts.
+
+#+begin_src scheme
+;; eval_scheme runs in restricted sandbox
+(define (eval-scheme-handler args)
+  (let ((code (assoc-ref args "code")))
+    (eval-in-sandbox code
+      #:denied-modules '((sage plugin-api)
+                         (sage tools)
+                         (sage config)))))
+#+end_src
+
+*** 5. Persistence via Git
+Agent commits malicious plugin to repo, next session loads it automatically.
+
+*Mitigation*: Plugin auto-load only from system paths, not workspace.
+
+#+begin_src scheme
+;; Workspace plugins require explicit --trust flag
+(plugin-load 'local-plugin #:from-workspace #t #:trust #t)
+;; Without trust, refuse
+#+end_src
+
+** Defense in Depth
+
+1. *Principle of Least Privilege*: Plugins declare minimum permissions
+2. *Immutable Core*: ~plugin-api~, ~tools~, ~config~ cannot be modified at runtime
+3. *Audit Trail*: All plugin loads logged with hash
+4. *Review Gate*: New plugins require human approval (not in YOLO mode)
+5. *Capability Tokens*: Fine-grained permissions, not role-based
+6. *Separate Contexts*: Plugin code runs in isolated module environment
+
+** Non-Goals (Explicit)
+
+We do NOT try to prevent:
+- User intentionally loading malicious plugin (they own the system)
+- Physical access attacks
+- Bugs in Guile runtime itself
+
+We DO try to prevent:
+- LLM being tricked into compromising itself
+- Plugins exceeding declared capabilities
+- Silent persistence of malicious code
+
+** Verification Checklist
+
+Before marking RFC as accepted:
+
+- [ ] Can a plugin modify ~plugin-api.scm~? (should: NO)
+- [ ] Can ~eval_scheme~ load arbitrary modules? (should: NO)
+- [ ] Can auto-loaded plugins come from workspace? (should: NO without trust)
+- [ ] Are plugin loads audited? (should: YES)
+- [ ] Can permission be escalated at runtime? (should: NO)
+
+* Open Questions
+
+1. *Namespacing*: Should plugin tools be prefixed? (~cloudflare:deploy~ vs ~cf_deploy~)
+2. *Versioning*: How to handle plugin version conflicts?
+3. *Dependencies*: Can plugins depend on other plugins?
+4. *Sandboxing*: Should unsafe plugins run in isolated environments?
+5. *Signing*: What key infrastructure for plugin signatures?
+
+* References
+
+- ADR-001: MCP Protocol Integration (Rejected)
+- MCP Specification: https://modelcontextprotocol.io/
+- Guile Module System: https://www.gnu.org/software/guile/manual/html_node/Modules.html
