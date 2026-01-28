@@ -344,6 +344,8 @@ See [[file:CONTRIBUTING.org][CONTRIBUTING.org]] for guidelines.
 
 ** Related Projects
 
+- [[https://wal.sh/research/agentic-2026/][Agentic Research 2026]] - Self-hosting AI agent research
+- [[https://github.com/steveyegge/efrit][Efrit]] - Emacs AI assistant (remote queue pattern)
 - [[https://github.com/aygp-dr/sage.el][sage.el]] - Emacs multi-provider LLM interface (inspiration)
 - [[https://ollama.ai][Ollama]] - Local LLM runtime
 - [[https://www.gnu.org/software/guile/][GNU Guile]] - Scheme implementation
