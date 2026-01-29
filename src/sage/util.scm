@@ -18,6 +18,7 @@
   #:use-module (srfi srfi-1)
   #:export (http-get
             http-post
+            http-post-with-timeout
             json-read-string
             json-write-string
             string-replace-substring
@@ -301,6 +302,14 @@
   (catch #t
     (lambda ()
       (http-post-curl url body #:headers headers))
+    (lambda (key . args)
+      (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
+
+;;; http-post-with-timeout: POST with explicit timeout in seconds
+(define* (http-post-with-timeout url body timeout #:key (headers '()))
+  (catch #t
+    (lambda ()
+      (http-post-curl url body #:headers headers #:timeout timeout))
     (lambda (key . args)
       (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
 

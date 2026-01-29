@@ -23,7 +23,10 @@
             ollama-chat-with-tools
             ollama-format-tool-prompt
             ollama-parse-tool-call
-            ollama-extract-token-usage))
+            ollama-extract-token-usage
+            ollama-image-host
+            ollama-image-model
+            ollama-generate-image))
 
 ;;; ollama-host: Get configured Ollama host
 ;;; Returns: Host URL string
@@ -206,3 +209,105 @@
       ;; Fallback for invalid response
       (list (cons 'prompt_tokens 0)
             (cons 'completion_tokens 0))))
+
+;;; ============================================================
+;;; Image Generation
+;;; ============================================================
+
+;;; ollama-image-host: Get configured Ollama image generation host
+;;; Returns: Host URL string (defaults to local host.lan)
+(define (ollama-image-host)
+  (or (config-get "OLLAMA_IMAGE_HOST")
+      "http://host.lan:11434"))
+
+;;; ollama-image-model: Get configured image generation model
+;;; Returns: Model name string
+(define (ollama-image-model)
+  (or (config-get "OLLAMA_IMAGE_MODEL")
+      "x/flux2-klein:4b"))
+
+;;; ollama-generate-image: Generate an image from a text prompt
+;;; Arguments:
+;;;   prompt - Text description of the image to generate
+;;;   output-path - File path to save the PNG image
+;;; Returns: output-path on success, or raises an error
+(define (ollama-generate-image prompt output-path)
+  (let* ((url (string-append (ollama-image-host) "/api/generate"))
+         (request `(("model" . ,(ollama-image-model))
+                    ("prompt" . ,prompt)
+                    ("stream" . ,#f)))
+         (body (json-write-string request))
+         (start-time (current-time)))
+
+    (log-info "ollama" "Generating image"
+              `(("model" . ,(ollama-image-model))
+                ("prompt" . ,prompt)
+                ("output" . ,output-path)))
+
+    (status-thinking)
+
+    ;; Image generation can take a while; use 10 minute timeout via curl
+    (let* ((result (http-post-with-timeout url body 600))
+           (elapsed (- (time-second (current-time)) (time-second start-time)))
+           (code (if (pair? result) (car result) 0))
+           (resp-body (if (pair? result) (cdr result) "")))
+
+      (status-done elapsed)
+
+      (cond
+       ((= code 200)
+        (catch #t
+          (lambda ()
+            (let* ((parsed (json-read-string resp-body))
+                   (images (assoc-ref parsed "images")))
+              (if (and images (pair? images))
+                  (let ((b64-data (car images)))
+                    (save-base64-png b64-data output-path)
+                    (log-info "ollama" "Image saved"
+                              `(("path" . ,output-path)
+                                ("elapsed" . ,elapsed)))
+                    output-path)
+                  ;; Some models return response in "response" field with base64
+                  (let ((response-data (assoc-ref parsed "response")))
+                    (if (and response-data (string? response-data)
+                             (> (string-length response-data) 100))
+                        (begin
+                          (save-base64-png response-data output-path)
+                          (log-info "ollama" "Image saved (from response field)"
+                                    `(("path" . ,output-path)
+                                      ("elapsed" . ,elapsed)))
+                          output-path)
+                        (begin
+                          (log-error "ollama" "No image data in response"
+                                     `(("keys" . ,(format #f "~a"
+                                                          (map car parsed)))))
+                          (error "No image data in API response")))))))
+          (lambda (key . args)
+            (log-error "ollama" "Failed to parse image response"
+                       `(("error" . ,(format #f "~a ~a" key args))))
+            (error "Failed to parse image response" key args))))
+       ((= code 0)
+        (log-error "ollama" "Image API connection failed"
+                   `(("host" . ,(ollama-image-host))
+                     ("error" . ,resp-body)))
+        (error "Image API connection failed" resp-body))
+       (else
+        (log-error "ollama" "Image generation failed"
+                   `(("code" . ,code) ("error" . ,resp-body)))
+        (error "Image generation failed" code resp-body))))))
+
+;;; save-base64-png: Decode base64 data and write to PNG file
+;;; Arguments:
+;;;   b64-data - Base64-encoded image data string
+;;;   path - Output file path
+(define (save-base64-png b64-data path)
+  ;; Ensure parent directory exists
+  (let ((dir (dirname path)))
+    (unless (file-exists? dir)
+      (mkdir dir)))
+  ;; Use base64 command to decode since Guile lacks native base64
+  (let ((tmp-b64 (make-temp-file "sage-b64")))
+    (call-with-output-file tmp-b64
+      (lambda (port) (display b64-data port)))
+    (system (format #f "base64 -d < '~a' > '~a'" tmp-b64 path))
+    (delete-file tmp-b64)))
