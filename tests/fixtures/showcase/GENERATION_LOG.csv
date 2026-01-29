@@ -1,0 +1,101 @@
+seq,filename,width,height,time_s,size_bytes,category,prompt,model,host,status
+1,lambda-neon.png,512,512,7,200323,programming,"lambda calculus symbol glowing in neon purple on dark background",x/flux2-klein:4b,http://host.lan:11434,ok
+2,ast-visualization.png,512,512,5,260787,programming,"abstract syntax tree visualization, colorful nodes and edges on dark background",x/flux2-klein:4b,http://host.lan:11434,ok
+3,parens-fractal.png,512,512,4,278902,programming,"parentheses nested in fractal pattern, lisp-inspired art",x/flux2-klein:4b,http://host.lan:11434,ok
+4,terminal-green.png,512,512,5,120914,programming,"terminal screen with green text on black, hacker aesthetic",x/flux2-klein:4b,http://host.lan:11434,ok
+5,recursive-fibonacci.png,512,512,5,219275,programming,"recursive function visualization, fibonacci spiral made of code",x/flux2-klein:4b,http://host.lan:11434,ok
+6,binary-tree.png,512,512,5,158264,programming,"binary tree data structure, minimalist line art on white",x/flux2-klein:4b,http://host.lan:11434,ok
+7,git-branches.png,512,512,5,232553,programming,"git branch diagram, colorful branches merging, technical illustration",x/flux2-klein:4b,http://host.lan:11434,ok
+8,call-stack.png,512,512,5,343876,programming,"stack of colorful function calls, debug visualization",x/flux2-klein:4b,http://host.lan:11434,ok
+9,scheme-repl.png,512,512,5,415575,programming,"scheme repl prompt with s-expressions, retro computer aesthetic",x/flux2-klein:4b,http://host.lan:11434,ok
+10,neural-network.png,512,512,5,387179,programming,"neural network layers visualization, glowing interconnected nodes",x/flux2-klein:4b,http://host.lan:11434,ok
+11,robot-library.png,512,512,5,412351,ai-agent,"robot reading a book in a library, warm lighting",x/flux2-klein:4b,http://host.lan:11434,ok
+12,circuit-brain.png,512,512,5,416517,ai-agent,"artificial brain made of glowing circuits, blue and white",x/flux2-klein:4b,http://host.lan:11434,ok
+13,sage-owl.png,512,512,5,434552,ai-agent,"owl wearing glasses sitting at a computer, digital art",x/flux2-klein:4b,http://host.lan:11434,ok
+14,agent-network.png,512,512,5,236533,ai-agent,"constellation of interconnected AI agents, network diagram style",x/flux2-klein:4b,http://host.lan:11434,ok
+15,human-robot-handshake.png,512,512,5,357899,ai-agent,"human and robot shaking hands, partnership concept",x/flux2-klein:4b,http://host.lan:11434,ok
+16,chat-flow.png,512,512,5,206337,ai-agent,"chat bubbles flowing between two entities, conversation visualization",x/flux2-klein:4b,http://host.lan:11434,ok
+17,code-review.png,512,512,4,227504,ai-agent,"magnifying glass over source code, code review concept",x/flux2-klein:4b,http://host.lan:11434,ok
+18,agent-toolbox.png,512,512,5,382186,ai-agent,"toolbox with wrenches and gears, tool-use concept art",x/flux2-klein:4b,http://host.lan:11434,ok
+19,decision-tree.png,512,512,5,161717,ai-agent,"thought bubble with branching decision tree inside",x/flux2-klein:4b,http://host.lan:11434,ok
+20,code-compass.png,512,512,5,213407,ai-agent,"compass rose with code symbols at cardinal points, navigation concept",x/flux2-klein:4b,http://host.lan:11434,ok
+21,server-rack.png,512,512,5,406012,infra,"server rack with glowing blue LEDs in dark data center",x/flux2-klein:4b,http://host.lan:11434,ok
+22,message-queue.png,512,512,5,245319,infra,"message queue pipeline, flowing data packets illustration",x/flux2-klein:4b,http://host.lan:11434,ok
+23,microservices.png,512,512,5,244849,infra,"microservices architecture diagram, colorful hexagons connected",x/flux2-klein:4b,http://host.lan:11434,ok
+24,docker-ship.png,512,512,5,441343,infra,"container ship made of docker containers, digital art",x/flux2-klein:4b,http://host.lan:11434,ok
+25,network-lighthouse.png,512,512,5,529179,infra,"lighthouse beacon sending signals across network, cyberpunk style",x/flux2-klein:4b,http://host.lan:11434,ok
+26,bridge-infra.png,512,512,5,396618,infra,"bridge connecting two islands, infrastructure metaphor, sunset",x/flux2-klein:4b,http://host.lan:11434,ok
+27,honeycomb-services.png,512,512,5,372905,infra,"honeycomb pattern of interconnected services, technical illustration",x/flux2-klein:4b,http://host.lan:11434,ok
+28,watchtower-security.png,512,512,5,529503,infra,"watchtower overlooking a digital landscape, security monitoring concept",x/flux2-klein:4b,http://host.lan:11434,ok
+29,cicd-pipeline.png,512,512,5,519468,infra,"pipeline flowing through stages, CI/CD concept art",x/flux2-klein:4b,http://host.lan:11434,ok
+30,distributed-map.png,512,512,5,329311,infra,"map with glowing connection lines between cities, distributed systems",x/flux2-klein:4b,http://host.lan:11434,ok
+31,circuit-bonsai.png,512,512,5,428362,nature,"bonsai tree with circuit board branches, tech-nature fusion",x/flux2-klein:4b,http://host.lan:11434,ok
+32,mycelium-network.png,512,512,5,551814,nature,"mycelium network underground, glowing connections, cross-section view",x/flux2-klein:4b,http://host.lan:11434,ok
+33,data-dandelion.png,512,512,5,385461,nature,"dandelion seeds dispersing in wind, each seed is a data packet",x/flux2-klein:4b,http://host.lan:11434,ok
+34,coral-reef.png,512,512,5,489321,nature,"coral reef ecosystem, vibrant colors, biodiversity",x/flux2-klein:4b,http://host.lan:11434,ok
+35,aurora-lake.png,512,512,5,347585,nature,"aurora borealis over mountain lake, reflection",x/flux2-klein:4b,http://host.lan:11434,ok
+36,bee-pollination.png,512,512,5,363227,nature,"bee pollinating flower, macro photography, golden hour",x/flux2-klein:4b,http://host.lan:11434,ok
+37,crystal-cave.png,512,512,5,481751,nature,"crystal cave with glowing minerals, underground wonder",x/flux2-klein:4b,http://host.lan:11434,ok
+38,tree-rings.png,512,512,5,519038,nature,"tree rings cross section showing growth patterns, macro",x/flux2-klein:4b,http://host.lan:11434,ok
+39,murmuration.png,512,512,5,468199,nature,"flock of starlings forming murmuration pattern in sunset sky",x/flux2-klein:4b,http://host.lan:11434,ok
+40,nautilus-golden.png,512,512,5,425040,nature,"nautilus shell spiral, golden ratio, mathematical beauty",x/flux2-klein:4b,http://host.lan:11434,ok
+41,voronoi-gradient.png,512,512,5,314676,abstract,"voronoi diagram in gradient colors, computational geometry",x/flux2-klein:4b,http://host.lan:11434,ok
+42,penrose-tiling.png,512,512,6,539835,abstract,"penrose tiling pattern, impossible geometry, colorful",x/flux2-klein:4b,http://host.lan:11434,ok
+43,mobius-data.png,512,512,5,519263,abstract,"mobius strip made of flowing data, infinite loop concept",x/flux2-klein:4b,http://host.lan:11434,ok
+44,escher-tessellation.png,512,512,5,651069,abstract,"tessellation pattern inspired by MC Escher, morphing shapes",x/flux2-klein:4b,http://host.lan:11434,ok
+45,sacred-geometry.png,512,512,5,480039,abstract,"sacred geometry mandala, intricate symmetric pattern",x/flux2-klein:4b,http://host.lan:11434,ok
+46,wave-interference.png,512,512,5,389443,abstract,"wave interference pattern, double slit experiment visualization",x/flux2-klein:4b,http://host.lan:11434,ok
+47,impossible-triangle.png,512,512,5,294900,abstract,"impossible triangle made of glass, optical illusion",x/flux2-klein:4b,http://host.lan:11434,ok
+48,topographic-map.png,512,512,5,567348,abstract,"topographic contour map, elevation lines in earth tones",x/flux2-klein:4b,http://host.lan:11434,ok
+49,op-art-3d.png,512,512,5,493943,abstract,"op art black and white pattern creating 3D illusion",x/flux2-klein:4b,http://host.lan:11434,ok
+50,kaleidoscope.png,512,512,6,682115,abstract,"kaleidoscope pattern with jewel tones, symmetric radial design",x/flux2-klein:4b,http://host.lan:11434,ok
+51,retro-computer-80s.png,512,512,5,439603,retro,"vintage computer with CRT monitor, 1980s office",x/flux2-klein:4b,http://host.lan:11434,ok
+52,punch-cards.png,512,512,5,426710,retro,"punch card stack, early computing, sepia tone photograph",x/flux2-klein:4b,http://host.lan:11434,ok
+53,vacuum-tubes.png,512,512,5,419077,retro,"vacuum tubes glowing orange, old radio electronics",x/flux2-klein:4b,http://host.lan:11434,ok
+54,blueprint-schematic.png,512,512,5,235792,retro,"blueprint technical drawing, engineering schematic, blue and white",x/flux2-klein:4b,http://host.lan:11434,ok
+55,art-deco-poster.png,512,512,6,391735,retro,"art deco poster design, geometric patterns, gold and black",x/flux2-klein:4b,http://host.lan:11434,ok
+56,typewriter-closeup.png,512,512,5,351256,retro,"old typewriter with paper, close-up of typebars",x/flux2-klein:4b,http://host.lan:11434,ok
+57,analog-synth.png,512,512,5,543182,retro,"analog synthesizer with patch cables, modular synth",x/flux2-klein:4b,http://host.lan:11434,ok
+58,cassette-art.png,512,512,6,317886,retro,"cassette tape with magnetic ribbon unwound artistically",x/flux2-klein:4b,http://host.lan:11434,ok
+59,vintage-map.png,512,512,5,607026,retro,"vintage map with compass rose and sea monsters",x/flux2-klein:4b,http://host.lan:11434,ok
+60,clock-mechanism.png,512,512,5,433139,retro,"old clock mechanism, gears and springs, macro photography",x/flux2-klein:4b,http://host.lan:11434,ok
+61,lightbulb-idea.png,512,512,6,233100,minimal,"single light bulb glowing warmly on dark background, minimal",x/flux2-klein:4b,http://host.lan:11434,ok
+62,paper-airplane.png,512,512,5,72986,minimal,"paper airplane flying upward, trailing dotted line, white background",x/flux2-klein:4b,http://host.lan:11434,ok
+63,key-lock.png,512,512,5,123680,minimal,"key and lock, simple elegant illustration, security concept",x/flux2-klein:4b,http://host.lan:11434,ok
+64,hourglass-time.png,512,512,6,136086,minimal,"hourglass with sand flowing, time concept, minimal style",x/flux2-klein:4b,http://host.lan:11434,ok
+65,seedling-growth.png,512,512,5,283142,minimal,"seedling growing from soil, growth concept, clean background",x/flux2-klein:4b,http://host.lan:11434,ok
+66,puzzle-pieces.png,512,512,6,393035,minimal,"puzzle pieces fitting together, collaboration concept",x/flux2-klein:4b,http://host.lan:11434,ok
+67,open-book.png,512,512,5,321536,minimal,"open book with pages turning, knowledge concept",x/flux2-klein:4b,http://host.lan:11434,ok
+68,anchor-stability.png,512,512,5,143015,minimal,"anchor symbol, stability concept, nautical minimal art",x/flux2-klein:4b,http://host.lan:11434,ok
+69,summit-flag.png,512,512,6,154959,minimal,"mountain peak with flag, achievement concept, simple illustration",x/flux2-klein:4b,http://host.lan:11434,ok
+70,origami-crane.png,512,512,5,230631,minimal,"origami crane, elegant paper fold, minimal white background",x/flux2-klein:4b,http://host.lan:11434,ok
+71,holo-display.png,512,512,6,427440,scifi,"holographic display floating in mid-air, futuristic interface",x/flux2-klein:4b,http://host.lan:11434,ok
+72,space-elevator.png,512,512,5,336832,scifi,"space elevator reaching into orbit, earth below",x/flux2-klein:4b,http://host.lan:11434,ok
+73,dyson-sphere.png,512,512,6,504303,scifi,"dyson sphere around a star, mega-structure concept art",x/flux2-klein:4b,http://host.lan:11434,ok
+74,terraformed-mars.png,512,512,5,520449,scifi,"terraformed mars with oceans and green continents",x/flux2-klein:4b,http://host.lan:11434,ok
+75,quantum-computer.png,512,512,5,476382,scifi,"quantum computer core, glowing qubits in cryogenic chamber",x/flux2-klein:4b,http://host.lan:11434,ok
+76,warp-drive.png,512,512,6,511607,scifi,"warp drive engine room, blue plasma glow, starship interior",x/flux2-klein:4b,http://host.lan:11434,ok
+77,solarpunk-city.png,512,512,5,412692,scifi,"floating city in clouds, solarpunk architecture",x/flux2-klein:4b,http://host.lan:11434,ok
+78,alien-monolith.png,512,512,6,417420,scifi,"alien monolith on barren planet, mysterious artifact",x/flux2-klein:4b,http://host.lan:11434,ok
+79,cyberpunk-alley.png,512,512,5,554447,scifi,"cyberpunk alley with neon signs and rain reflections",x/flux2-klein:4b,http://host.lan:11434,ok
+80,ringworld.png,512,512,6,480522,scifi,"ringworld space habitat, interior view with landscape curving upward",x/flux2-klein:4b,http://host.lan:11434,ok
+81,impressionist-garden.png,512,512,5,591295,art-style,"impressionist painting of a garden path with flowers, monet style",x/flux2-klein:4b,http://host.lan:11434,ok
+82,cubist-portrait.png,512,512,6,584002,art-style,"cubist portrait in earth tones, picasso inspired",x/flux2-klein:4b,http://host.lan:11434,ok
+83,art-nouveau-floral.png,512,512,5,438849,art-style,"art nouveau floral border design, mucha style",x/flux2-klein:4b,http://host.lan:11434,ok
+84,pointillist-sea.png,512,512,6,708629,art-style,"pointillist seascape, dots of color forming waves and sky",x/flux2-klein:4b,http://host.lan:11434,ok
+85,pop-art-comic.png,512,512,5,513003,art-style,"pop art comic panel, bold colors, halftone dots",x/flux2-klein:4b,http://host.lan:11434,ok
+86,ink-wash-mountains.png,512,512,5,411568,art-style,"chinese ink wash painting of misty mountains, traditional",x/flux2-klein:4b,http://host.lan:11434,ok
+87,stained-glass.png,512,512,6,500401,art-style,"stained glass window design, gothic cathedral, vibrant colors",x/flux2-klein:4b,http://host.lan:11434,ok
+88,aboriginal-dots.png,512,512,5,633570,art-style,"aboriginal dot painting, dreamtime story, earth tones",x/flux2-klein:4b,http://host.lan:11434,ok
+89,ukiyoe-fuji.png,512,512,6,615500,art-style,"ukiyo-e style cherry blossoms and mount fuji",x/flux2-klein:4b,http://host.lan:11434,ok
+90,persian-miniature.png,512,512,5,667899,art-style,"persian miniature painting, garden scene with birds",x/flux2-klein:4b,http://host.lan:11434,ok
+91,hero-golden-tree.png,1024,512,10,857763,hero,"wide landscape of rolling hills with a single tree, golden hour, cinematic",x/flux2-klein:4b,http://host.lan:11434,ok
+92,hero-future-city.png,1024,512,9,902759,hero,"panoramic view of a futuristic city skyline at dusk",x/flux2-klein:4b,http://host.lan:11434,ok
+93,hero-gradient-wave.png,1024,512,10,424693,hero,"abstract flowing gradient, purple to blue to cyan, smooth waves",x/flux2-klein:4b,http://host.lan:11434,ok
+94,hero-community.png,1024,512,9,861948,hero,"open source community, diverse people collaborating around a table with laptops",x/flux2-klein:4b,http://host.lan:11434,ok
+95,hero-babel-library.png,1024,512,10,1006509,hero,"library of babel, infinite bookshelves stretching into distance",x/flux2-klein:4b,http://host.lan:11434,ok
+96,hero-forge.png,1024,512,9,842245,hero,"forge with molten metal and sparks, craftsmanship concept",x/flux2-klein:4b,http://host.lan:11434,ok
+97,hero-ocean-sunrise.png,1024,512,10,803360,hero,"ocean waves at sunrise, long exposure photography",x/flux2-klein:4b,http://host.lan:11434,ok
+98,hero-starfield.png,1024,512,9,1174339,hero,"starfield with nebula, wide format space panorama",x/flux2-klein:4b,http://host.lan:11434,ok
+99,hero-zen-stones.png,1024,512,10,685323,hero,"zen stones stacked on beach at sunset, balance and harmony",x/flux2-klein:4b,http://host.lan:11434,ok
+100,hero-wisdom-tree.png,1024,512,9,899773,hero,"ancient tree with massive roots, wisdom and knowledge concept, magical lighting",x/flux2-klein:4b,http://host.lan:11434,ok
