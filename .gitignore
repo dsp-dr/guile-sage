@@ -18,5 +18,8 @@
 \#*\#
 .#*
 
+# Generated output (images, etc.)
+output/
+
 # Git worktrees (parallel development branches)
 worktrees/

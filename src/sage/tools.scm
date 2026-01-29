@@ -11,6 +11,7 @@
   #:use-module (sage logging)
   #:use-module (sage agent)
   #:use-module (sage irc)
+  #:use-module (sage ollama)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -41,7 +42,8 @@
                        "git_commit" "git_add_note" "git_push"
                        "read_logs" "search_logs"
                        "sage_task_create" "sage_task_complete"
-                       "sage_task_list" "sage_task_status"))  ;; Full dev + agent
+                       "sage_task_list" "sage_task_status"
+                       "generate_image"))  ;; Full dev + agent
 (define *workspace* #f)
 
 ;;; workspace: Get current workspace directory
@@ -656,4 +658,34 @@
            "Not connected to IRC. Use SAGE_IRC_ENABLED=1 to enable."
            (begin
              (irc-send channel message)
-             (format #f "Sent to ~a: ~a" channel message)))))))
+             (format #f "Sent to ~a: ~a" channel message))))))
+
+  ;; ============================================================
+  ;; Image Generation Tools
+  ;; ============================================================
+
+  ;; generate_image - Generate image via Ollama
+  (register-safe-tool
+   "generate_image"
+   "Generate an image from a text prompt using Ollama image model"
+   '(("type" . "object")
+     ("properties" . (("prompt" . (("type" . "string")
+                                   ("description" . "Text description of the image to generate")))
+                      ("filename" . (("type" . "string")
+                                     ("description" . "Output filename without extension (defaults to timestamp)")))))
+     ("required" . #("prompt")))
+   (lambda (args)
+     (let* ((prompt (assoc-ref args "prompt"))
+            (filename (or (assoc-ref args "filename")
+                          (format #f "image-~a" (car (gettimeofday)))))
+            (output-dir (string-append (workspace) "/output"))
+            (output-path (string-append output-dir "/" filename ".png")))
+       ;; Ensure output directory exists
+       (unless (file-exists? output-dir)
+         (mkdir output-dir))
+       (catch #t
+         (lambda ()
+           (ollama-generate-image prompt output-path)
+           (format #f "Saved to output/~a.png" filename))
+         (lambda (key . rest)
+           (format #f "Image generation error: ~a ~a" key rest)))))))
