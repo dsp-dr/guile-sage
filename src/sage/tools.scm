@@ -667,17 +667,26 @@
   ;; generate_image - Generate image via Ollama
   (register-safe-tool
    "generate_image"
-   "Generate an image from a text prompt using Ollama image model"
+   "Generate an image from a text prompt using Ollama image model. Supports optional width, height, and steps parameters."
    '(("type" . "object")
      ("properties" . (("prompt" . (("type" . "string")
                                    ("description" . "Text description of the image to generate")))
                       ("filename" . (("type" . "string")
-                                     ("description" . "Output filename without extension (defaults to timestamp)")))))
+                                     ("description" . "Output filename without extension (defaults to timestamp)")))
+                      ("width" . (("type" . "integer")
+                                  ("description" . "Image width in pixels (default: model default, typically 1024)")))
+                      ("height" . (("type" . "integer")
+                                   ("description" . "Image height in pixels (default: model default, typically 1024)")))
+                      ("steps" . (("type" . "integer")
+                                  ("description" . "Number of diffusion steps (higher = better quality, slower)")))))
      ("required" . #("prompt")))
    (lambda (args)
      (let* ((prompt (assoc-ref args "prompt"))
             (filename (or (assoc-ref args "filename")
                           (format #f "image-~a" (car (gettimeofday)))))
+            (width (assoc-ref args "width"))
+            (height (assoc-ref args "height"))
+            (steps (assoc-ref args "steps"))
             (output-dir (string-append (workspace) "/output"))
             (output-path (string-append output-dir "/" filename ".png")))
        ;; Ensure output directory exists
@@ -685,7 +694,8 @@
          (mkdir output-dir))
        (catch #t
          (lambda ()
-           (ollama-generate-image prompt output-path)
+           (ollama-generate-image prompt output-path
+                                  #:width width #:height height #:steps steps)
            (format #f "Saved to output/~a.png" filename))
          (lambda (key . rest)
            (format #f "Image generation error: ~a ~a" key rest)))))))
