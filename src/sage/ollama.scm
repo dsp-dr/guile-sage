@@ -259,29 +259,31 @@
         (catch #t
           (lambda ()
             (let* ((parsed (json-read-string resp-body))
+                   ;; Ollama returns image data in "image" (singular) field
+                   (image-data (assoc-ref parsed "image"))
+                   ;; Also check "images" (list) as fallback
                    (images (assoc-ref parsed "images")))
-              (if (and images (pair? images))
-                  (let ((b64-data (car images)))
-                    (save-base64-png b64-data output-path)
-                    (log-info "ollama" "Image saved"
-                              `(("path" . ,output-path)
-                                ("elapsed" . ,elapsed)))
-                    output-path)
-                  ;; Some models return response in "response" field with base64
-                  (let ((response-data (assoc-ref parsed "response")))
-                    (if (and response-data (string? response-data)
-                             (> (string-length response-data) 100))
-                        (begin
-                          (save-base64-png response-data output-path)
-                          (log-info "ollama" "Image saved (from response field)"
-                                    `(("path" . ,output-path)
-                                      ("elapsed" . ,elapsed)))
-                          output-path)
-                        (begin
-                          (log-error "ollama" "No image data in response"
-                                     `(("keys" . ,(format #f "~a"
-                                                          (map car parsed)))))
-                          (error "No image data in API response")))))))
+              (cond
+               ;; Primary: "image" field (string, base64)
+               ((and image-data (string? image-data)
+                     (> (string-length image-data) 0))
+                (save-base64-png image-data output-path)
+                (log-info "ollama" "Image saved"
+                          `(("path" . ,output-path)
+                            ("elapsed" . ,elapsed)))
+                output-path)
+               ;; Fallback: "images" field (list of base64 strings)
+               ((and images (pair? images))
+                (save-base64-png (car images) output-path)
+                (log-info "ollama" "Image saved (from images list)"
+                          `(("path" . ,output-path)
+                            ("elapsed" . ,elapsed)))
+                output-path)
+               (else
+                (log-error "ollama" "No image data in response"
+                           `(("keys" . ,(format #f "~a"
+                                                (map car parsed)))))
+                (error "No image data in API response")))))
           (lambda (key . args)
             (log-error "ollama" "Failed to parse image response"
                        `(("error" . ,(format #f "~a ~a" key args))))
