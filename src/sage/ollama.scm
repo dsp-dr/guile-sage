@@ -230,12 +230,21 @@
 ;;; Arguments:
 ;;;   prompt - Text description of the image to generate
 ;;;   output-path - File path to save the PNG image
+;;;   width - Image width in pixels (optional, default: model default)
+;;;   height - Image height in pixels (optional, default: model default)
+;;;   steps - Number of diffusion steps (optional, default: model default)
 ;;; Returns: output-path on success, or raises an error
-(define (ollama-generate-image prompt output-path)
+(define* (ollama-generate-image prompt output-path
+                                #:key (width #f) (height #f) (steps #f))
   (let* ((url (string-append (ollama-image-host) "/api/generate"))
-         (request `(("model" . ,(ollama-image-model))
-                    ("prompt" . ,prompt)
-                    ("stream" . ,#f)))
+         (base-request `(("model" . ,(ollama-image-model))
+                         ("prompt" . ,prompt)
+                         ("stream" . ,#f)))
+         ;; Append optional image generation parameters
+         (request (append base-request
+                          (if width `(("width" . ,width)) '())
+                          (if height `(("height" . ,height)) '())
+                          (if steps `(("steps" . ,steps)) '())))
          (body (json-write-string request))
          (start-time (current-time)))
 
