@@ -2,6 +2,12 @@
 
 GUILE = guile3
 GUILD = guild3
+
+# macOS uses 'guile' not 'guile3'
+ifeq ($(shell uname -s),Darwin)
+GUILE = guile
+GUILD = guild
+endif
 SRCDIR = src
 TESTDIR = tests
 

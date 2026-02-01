@@ -38,7 +38,7 @@
   (display "  -y, --yolo       Enable YOLO mode (allow all tools)\n")
   (display "  -w, --workspace  Set workspace directory\n")
   (display "  -p, --prompt     Initial prompt to send\n")
-  (display "  -d, --debug      Enable debug mode\n")
+  (display "  -d, --debug      Enable debug mode (verbose REPL + debug-level logging)\n")
   (display "      --check      Check configuration and exit\n"))
 
 (define (show-version)
@@ -76,9 +76,10 @@
       ;; Set workspace
       (when workspace
         (setenv "SAGE_WORKSPACE" workspace))
-      ;; Set debug
+      ;; Set debug (enables both REPL debug output and debug-level logging)
       (when debug?
-        (setenv "SAGE_DEBUG" "1"))
+        (setenv "SAGE_DEBUG" "1")
+        (setenv "SAGE_LOG_LEVEL" "debug"))
       ;; Combine prompt from -p and remaining args
       (let ((initial-prompt (or prompt
                                 (if (null? rest-args)
