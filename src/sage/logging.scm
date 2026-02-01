@@ -15,6 +15,7 @@
   #:use-module (ice-9 regex)
   #:use-module (ice-9 textual-ports)
   #:use-module (ice-9 rdelim)
+  #:use-module (sage config)
   #:export (*log-level*
             *log-file*
             *log-dir*
@@ -69,15 +70,16 @@
 ;;;   level - Minimum log level (default: info)
 ;;; Returns: #t on success
 (define* (init-logging #:key (log-dir #f) (level #f))
-  ;; Set log level from environment or parameter
-  (let ((env-level (getenv "SAGE_LOG_LEVEL")))
-    (when (or level env-level)
-      (set-log-level! (or level
-                          (and env-level (string->symbol env-level))
-                          'info))))
+  ;; Set log level from parameter, config, or environment
+  (let ((cfg-level (or (config-get "LOG_LEVEL")
+                       (getenv "SAGE_LOG_LEVEL"))))
+    (set-log-level! (or level
+                        (and cfg-level (string->symbol cfg-level))
+                        'info)))
 
-  ;; Set log directory
+  ;; Set log directory from parameter, config, or default
   (let ((dir (or log-dir
+                 (config-get "LOG_DIR")
                  (getenv "SAGE_LOG_DIR")
                  (string-append (getcwd) "/.logs"))))
     (set! *log-dir* dir)
@@ -88,16 +90,18 @@
   ;; Set log file path
   (set! *log-file* (string-append *log-dir* "/sage.log"))
 
-  ;; Set max size from environment
-  (let ((env-size (getenv "SAGE_LOG_MAX_SIZE")))
-    (when env-size
-      (let ((size (string->number env-size)))
+  ;; Set max size from config or environment
+  (let ((cfg-size (or (config-get "LOG_MAX_SIZE")
+                      (getenv "SAGE_LOG_MAX_SIZE"))))
+    (when cfg-size
+      (let ((size (string->number cfg-size)))
         (when size (set! *log-max-size* size)))))
 
-  ;; Set keep count from environment
-  (let ((env-keep (getenv "SAGE_LOG_KEEP")))
-    (when env-keep
-      (let ((keep (string->number env-keep)))
+  ;; Set keep count from config or environment
+  (let ((cfg-keep (or (config-get "LOG_KEEP")
+                      (getenv "SAGE_LOG_KEEP"))))
+    (when cfg-keep
+      (let ((keep (string->number cfg-keep)))
         (when keep (set! *log-keep* keep)))))
 
   ;; Log initialization
