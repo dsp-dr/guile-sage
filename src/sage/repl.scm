@@ -118,6 +118,7 @@
   (display "  /debug          - Toggle debug mode\n")
   (display "  /version        - Show version info\n")
   (display "  /tier           - Show model tier status\n")
+  (display "  /doctor         - Check dependencies and connections\n")
   (display "  /reload         - Hot-reload sage modules\n")
   (display "  /logs [n] [lvl] - Show recent log entries\n")
   (display "\nAgent commands:\n")
@@ -363,6 +364,90 @@
      *available-tiers*))
   #t)
 
+(define (cmd-doctor args)
+  "Check core dependencies and connections."
+  (define (check label thunk)
+    (catch #t
+      (lambda ()
+        (let ((result (thunk)))
+          (if result
+              (format #t "  ✓ ~a: ~a~%" label result)
+              (format #t "  ✗ ~a: FAIL~%" label))
+          result))
+      (lambda (key . err)
+        (format #t "  ✗ ~a: ~a~%" label key)
+        #f)))
+
+  (let ((host (ollama-host))
+        (model (ollama-model))
+        (pass-count 0)
+        (fail-count 0))
+
+    (display "=== sage doctor ===\n\n")
+
+    ;; Config
+    (display "Config:\n")
+    (check "SAGE_OLLAMA_HOST" (lambda () host))
+    (check "SAGE_MODEL" (lambda () model))
+    (check ".env loaded" (lambda ()
+      (if (config-get "OLLAMA_HOST") "yes" "no .env (using defaults)")))
+    (check "workspace" (lambda () (workspace)))
+
+    ;; Connectivity
+    (display "\nConnectivity:\n")
+    (let ((reachable (check "Ollama API" (lambda ()
+            (let* ((url (string-append host "/api/tags"))
+                   (result (http-get url))
+                   (code (if (pair? result) (car result) 0)))
+              (if (= code 200) "reachable" #f))))))
+      (when reachable
+        ;; Models
+        (display "\nModels:\n")
+        (catch #t
+          (lambda ()
+            (let ((models (ollama-list-models)))
+              (for-each
+               (lambda (m)
+                 (let ((name (assoc-ref m "name")))
+                   (format #t "  ~a ~a~%"
+                           (if (equal? name model) "→" " ")
+                           name)))
+               models)
+              (format #t "  (~a models available)~%" (length models))))
+          (lambda (key . err)
+            (format #t "  ✗ Could not list models~%")))))
+
+    ;; Tiers
+    (display "\nModel tiers:\n")
+    (if (null? *available-tiers*)
+        (display "  ✗ No tiers configured\n")
+        (for-each
+         (lambda (tier)
+           (format #t "  ~a: ~a (ceiling: ~a)~%"
+                   (tier-name tier) (tier-model tier) (tier-ceiling tier)))
+         *available-tiers*))
+
+    ;; Filesystem
+    (display "\nFilesystem:\n")
+    (check "log dir" (lambda ()
+      (let ((dir (string-append (workspace) "/.logs")))
+        (if (file-exists? dir) dir #f))))
+    (check "session dir" (lambda ()
+      (let ((dir (session-dir)))
+        (if (file-exists? dir) dir "not yet created"))))
+    (check "AGENTS.md" (lambda ()
+      (let ((path (find-agents-md)))
+        (if path (format #f "~a chars" (string-length (load-agents-md))) "not found"))))
+
+    ;; Tools
+    (display "\nTools:\n")
+    (check "registered tools" (lambda ()
+      (let ((tools (tools-to-schema)))
+        (format #f "~a tools" (length tools)))))
+
+    (display "\n=== done ===\n"))
+  #t)
+
 ;;; Slash Commands (defined after all cmd-* functions to avoid forward references)
 
 (define *commands*
@@ -393,7 +478,8 @@
     ("/continue"  . ,cmd-continue)
     ("/prefetch"  . ,cmd-prefetch)
     ("/tier"      . ,cmd-tier)
-    ("/tiers"     . ,cmd-tier)))
+    ("/tiers"     . ,cmd-tier)
+    ("/doctor"    . ,cmd-doctor)))
 
 ;;; Agent Loop
 
