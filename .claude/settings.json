@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gmake check)",
+      "Bash(gmake version)"
+    ]
+  }
+}

@@ -287,8 +287,8 @@
   (let ((host (or (config-get "OLLAMA_HOST") *default-ollama-host*)))
     (or (string-contains host "localhost")
         (string-contains host "127.0.0.1")
-        (string-contains host "host.lan")
-        (string-contains host ".local"))))
+        (string-contains host ".local")
+        (string-contains host ".lan"))))
 
 ;;; get-token-limit: Get appropriate token limit for current config
 ;;; Arguments:

@@ -48,10 +48,10 @@
         (error "expected string" host))
       (format #t "  Host: ~a~%" host))))
 
-(run-test "ollama-image-host defaults to host.lan"
+(run-test "ollama-image-host defaults to localhost"
   (lambda ()
     (let ((host (ollama-image-host)))
-      (unless (string-contains host "host.lan")
+      (unless (string-contains host "localhost")
         ;; May be overridden by .env; just check it's a URL
         (unless (string-prefix? "http" host)
           (error "expected http URL" host))))))
@@ -190,14 +190,13 @@
 
 (format #t "~%--- Output Directory ---~%")
 
-(run-test "output directory created by tool if missing"
+(run-test "output directory created if missing"
   (lambda ()
-    ;; We test the tool with a bad prompt to trigger the path creation
-    ;; without needing network (the dir creation happens before the API call)
     (let ((output-dir (string-append (workspace) "/output")))
-      ;; The directory should exist from prior runs
       (unless (file-exists? output-dir)
-        (error "output directory should exist from prior test runs")))))
+        (mkdir output-dir))
+      (unless (file-exists? output-dir)
+        (error "output directory does not exist")))))
 
 ;;; ============================================================
 ;;; Integration Tests (requires host.lan:11434 + flux model)

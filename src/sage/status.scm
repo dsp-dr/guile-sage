@@ -19,7 +19,8 @@
 ;;; ============================================================
 
 ;; Request timeout in seconds (passed to curl)
-(define *request-timeout* 300)
+;; Keep tight for interactive chat; image gen uses its own timeout
+(define *request-timeout* 15)
 
 ;;; ============================================================
 ;;; ANSI Helpers
@@ -45,9 +46,19 @@
   (display (ansi-clear-line))
   (force-output))
 
-(define (status-thinking)
-  "Show thinking indicator."
-  (status-show "Waiting for response..."))
+(define* (status-thinking #:key (model #f) (host #f))
+  "Show thinking indicator with model/host context."
+  (let ((msg (cond
+              ((and model host)
+               (format #f "Waiting for ~a (~a, timeout: ~as)..."
+                       model host *request-timeout*))
+              (model
+               (format #f "Waiting for ~a (timeout: ~as)..."
+                       model *request-timeout*))
+              (else
+               (format #f "Waiting for response (timeout: ~as)..."
+                       *request-timeout*)))))
+    (status-show msg)))
 
 (define (status-done duration)
   "Show completion with duration."
