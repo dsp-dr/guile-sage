@@ -67,6 +67,15 @@
      (check?
       (system "sh scripts/check-config.sh"))
      (else
+      ;; Guard against nested sessions (like Claude Code's CLAUDECODE check)
+      (let ((active (getenv "SAGE_SESSION_ACTIVE")))
+        (when (and active (not (string-null? active)))
+          (display "Error: sage cannot be launched inside another sage session.\n")
+          (display "Nested sessions share state and will corrupt the active session.\n")
+          (display "To bypass this check, unset the SAGE_SESSION_ACTIVE variable.\n")
+          (exit 1)))
+      ;; Mark this session as active for child processes
+      (setenv "SAGE_SESSION_ACTIVE" (number->string (getpid)))
       ;; Set model if provided
       (when model
         (setenv "SAGE_MODEL" model))

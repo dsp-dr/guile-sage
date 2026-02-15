@@ -141,43 +141,56 @@
                   (format #t "    - ~a~%" (assoc-ref m "name")))
                 models))))
 
-;;; Tool Prompt Tests
+;;; Tool API Format Tests
 
-(format #t "~%=== Tool Prompt Tests ===~%")
+(format #t "~%=== Tool API Tests ===~%")
 
-(run-test "format tool prompt"
+(run-test "tools-to-api-format wraps correctly"
   (lambda ()
     (let* ((tools `((("name" . "read_file")
                      ("description" . "Read contents of a file")
                      ("parameters" . (("type" . "object")
                                       ("properties" . (("path" . (("type" . "string")))))
                                       ("required" . #("path")))))))
-           (prompt (ollama-format-tool-prompt tools)))
-      (unless (string-contains prompt "read_file")
-        (error "expected tool name in prompt" prompt))
-      (unless (string-contains prompt "```tool")
-        (error "expected tool marker in prompt" prompt)))))
+           (api-tools (ollama-tools-to-api-format tools))
+           (first-tool (car api-tools))
+           (fn (assoc-ref first-tool "function")))
+      (unless (equal? (assoc-ref first-tool "type") "function")
+        (error "expected type=function"))
+      (unless (equal? (assoc-ref fn "name") "read_file")
+        (error "expected name=read_file")))))
 
-(run-test "parse tool call"
+(run-test "parse native tool call"
   (lambda ()
-    (let* ((content "Let me read that file.
-
-```tool
-{\"name\": \"read_file\", \"arguments\": {\"path\": \"test.txt\"}}
-```
-
-Done.")
-           (parsed (ollama-parse-tool-call content)))
+    (let* ((message `(("role" . "assistant")
+                      ("content" . "")
+                      ("tool_calls" . #((("function" .
+                                          (("name" . "write_file")
+                                           ("arguments" . (("path" . "test.txt")
+                                                           ("content" . "hello"))))))))))
+           (parsed (ollama-parse-tool-call message)))
       (unless parsed
         (error "expected parsed tool call"))
-      (unless (equal? (assoc-ref parsed "name") "read_file")
-        (error "expected read_file" (assoc-ref parsed "name")))
+      (unless (equal? (assoc-ref parsed "name") "write_file")
+        (error "expected write_file" (assoc-ref parsed "name")))
       (unless (equal? (assoc-ref (assoc-ref parsed "arguments") "path") "test.txt")
         (error "expected test.txt path")))))
 
+(run-test "parse content fallback tool call"
+  (lambda ()
+    (let* ((message `(("role" . "assistant")
+                      ("content" . "Let me read that.\n\n```tool\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"test.txt\"}}\n```")))
+           (parsed (ollama-parse-tool-call message)))
+      (unless parsed
+        (error "expected parsed tool call from content"))
+      (unless (equal? (assoc-ref parsed "name") "read_file")
+        (error "expected read_file")))))
+
 (run-test "parse no tool call"
   (lambda ()
-    (let ((parsed (ollama-parse-tool-call "Just a regular response.")))
+    (let* ((message `(("role" . "assistant")
+                      ("content" . "Just a regular response.")))
+           (parsed (ollama-parse-tool-call message)))
       (when parsed
         (error "expected #f for no tool call" parsed)))))
 

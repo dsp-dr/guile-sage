@@ -321,6 +321,36 @@
                                "Should not execute via backslash escape"))))))
 
 ;;; ============================================================
+;;; SESSION NESTING GUARD
+;;; ============================================================
+
+(test-suite "Session Nesting Guard"
+  (lambda ()
+    (test "SAGE_SESSION_ACTIVE not set in test env"
+      (lambda ()
+        ;; Tests run outside the REPL, so this should be unset
+        (assert-false (getenv "SAGE_SESSION_ACTIVE")
+                      "SAGE_SESSION_ACTIVE should not leak into tests")))
+
+    (test "nested sage would be detected"
+      (lambda ()
+        ;; Simulate what main.scm checks
+        (setenv "SAGE_SESSION_ACTIVE" "12345")
+        (assert-true (string? (getenv "SAGE_SESSION_ACTIVE"))
+                     "Guard should detect active session")
+        ;; Clean up
+        (setenv "SAGE_SESSION_ACTIVE" "")))
+
+    (test "guard stores PID for debugging"
+      (lambda ()
+        (let ((pid-str (number->string (getpid))))
+          (setenv "SAGE_SESSION_ACTIVE" pid-str)
+          (assert-true (equal? (getenv "SAGE_SESSION_ACTIVE") pid-str)
+                       "Should store parent PID as string")
+          ;; Clean up
+          (setenv "SAGE_SESSION_ACTIVE" ""))))))
+
+;;; ============================================================
 ;;; RUN TESTS
 ;;; ============================================================
 

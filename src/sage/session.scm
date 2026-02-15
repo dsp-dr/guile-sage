@@ -20,12 +20,14 @@
             session-get-messages
             session-get-context
             session-compact!
+            session-maybe-compact!
             session-clear!
             session-save
             session-load
             session-status
             session-list
             session-dir
+            session-total-tokens
             estimate-tokens
             format-session-status))
 
@@ -181,6 +183,35 @@
           (log-info "session" "Session compacted"
                     `(("after_messages" . ,(length new-messages))))
           (format #f "Compacted ~a messages (~a tokens)" to-remove old-tokens)))))
+
+;;; session-maybe-compact!: Auto-compact if tokens exceed threshold
+;;; Arguments:
+;;;   context-limit - the active model's context window size
+;;;   compact-fn - compaction function (messages #:target-tokens n) -> messages
+;;;   token-fn - token counting function (message) -> integer
+;;;   threshold-ratio - trigger at this fraction (default 0.8)
+;;; Returns: description string or #f if no compaction needed
+(define* (session-maybe-compact! context-limit compact-fn token-fn
+                                 #:key (threshold-ratio 0.8))
+  (if (not *session*)
+      #f
+      (let* ((current-tokens (session-total-tokens))
+             (threshold (inexact->exact (floor (* context-limit threshold-ratio)))))
+        (if (< current-tokens threshold)
+            #f
+            (let* ((messages (session-get-messages))
+                   (target (inexact->exact (floor (* context-limit 0.5))))
+                   (compacted (compact-fn messages #:target-tokens target))
+                   (new-tokens (fold + 0 (map token-fn compacted))))
+              ;; Replace messages in session
+              (set! *session*
+                    (assoc-set! *session* "messages" compacted))
+              (log-info "session" "Auto-compacted"
+                        `(("from_tokens" . ,current-tokens)
+                          ("to_tokens" . ,new-tokens)
+                          ("model_limit" . ,context-limit)))
+              (format #f "Auto-compacted: ~a -> ~a tokens"
+                      current-tokens new-tokens))))))
 
 ;;; session-clear!: Clear conversation history
 (define (session-clear!)
