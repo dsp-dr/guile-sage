@@ -56,12 +56,13 @@ clean:
 	find . -name "*~" -delete
 	rm -rf ~/.cache/guile/ccache
 
+# Directory creation rule
+%/:
+	install -d $@
+
 # Installation
-install: build
+install: build | $(BINDIR)/ $(GUILE_SITE_DIR)/sage/ $(GUILE_CCACHE_DIR)/sage/ $(DATADIR)/sage/prompts/
 	@echo "Installing guile-sage to $(PREFIX)..."
-	@mkdir -p $(BINDIR)
-	@mkdir -p $(GUILE_SITE_DIR)/sage
-	@mkdir -p $(GUILE_CCACHE_DIR)/sage
 	@# Install source files
 	@for f in $(SRCDIR)/sage/*.scm; do \
 		install -m 644 "$$f" $(GUILE_SITE_DIR)/sage/; \
@@ -73,7 +74,6 @@ install: build
 		fi; \
 	done
 	@# Install resources
-	@mkdir -p $(DATADIR)/sage/prompts
 	@if [ -d resources/prompts ]; then \
 		cp -r resources/prompts/* $(DATADIR)/sage/prompts/ 2>/dev/null || true; \
 	fi
