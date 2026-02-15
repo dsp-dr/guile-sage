@@ -15,6 +15,8 @@
   #:use-module (sage version)
   #:use-module (sage agent)
   #:use-module (sage context)
+  #:use-module (sage compaction)
+  #:use-module (sage model-tier)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 format)
   #:use-module (ice-9 readline)
@@ -28,6 +30,7 @@
 
 (define *running* #t)
 (define *debug* #f)
+(define *available-tiers* '())
 
 ;;; Dynamic Prompt
 
@@ -114,6 +117,7 @@
   (display "  /workspace      - Show workspace directory\n")
   (display "  /debug          - Toggle debug mode\n")
   (display "  /version        - Show version info\n")
+  (display "  /tier           - Show model tier status\n")
   (display "  /reload         - Hot-reload sage modules\n")
   (display "  /logs [n] [lvl] - Show recent log entries\n")
   (display "\nAgent commands:\n")
@@ -333,6 +337,32 @@
   (newline)
   #t)
 
+(define (cmd-tier args)
+  "Show current model tier, thresholds, and available models."
+  (let* ((tokens (session-total-tokens))
+         (current-tier (resolve-model-for-tokens tokens *available-tiers*)))
+    (format #t "Current tokens: ~a~%" tokens)
+    (format #t "Active tier: ~a (~a)~%"
+            (tier-name current-tier) (tier-model current-tier))
+    (format #t "Context limit: ~a~%"
+            (tier-context-limit current-tier))
+    (format #t "Tool calling: ~a~%~%"
+            (if (tier-supports-tools? current-tier) "yes" "no"))
+    (display "Available tiers:\n")
+    (for-each
+     (lambda (tier)
+       (format #t "  ~a: ~a (ceiling: ~a, context: ~a, tools: ~a)~a~%"
+               (tier-name tier)
+               (tier-model tier)
+               (tier-ceiling tier)
+               (tier-context-limit tier)
+               (if (tier-supports-tools? tier) "yes" "no")
+               (if (equal? (tier-name tier) (tier-name current-tier))
+                   " <-- active"
+                   "")))
+     *available-tiers*))
+  #t)
+
 ;;; Slash Commands (defined after all cmd-* functions to avoid forward references)
 
 (define *commands*
@@ -361,7 +391,9 @@
     ("/tasks"     . ,cmd-tasks)
     ("/pause"     . ,cmd-pause)
     ("/continue"  . ,cmd-continue)
-    ("/prefetch"  . ,cmd-prefetch)))
+    ("/prefetch"  . ,cmd-prefetch)
+    ("/tier"      . ,cmd-tier)
+    ("/tiers"     . ,cmd-tier)))
 
 ;;; Agent Loop
 
@@ -429,12 +461,38 @@
   ;; Add user message to session
   (session-add-message "user" input)
 
-  ;; Get context for API
-  (let* ((model (if *session*
-                    (or (assoc-ref *session* "model") (ollama-model))
-                    (ollama-model)))
-         (messages (session-get-context))
-         (tools (tools-to-schema)))
+  ;; Resolve model tier based on current token count
+  (let* ((tokens (session-total-tokens))
+         (tier (resolve-model-for-tokens tokens *available-tiers*))
+         (tier-model-name (tier-model tier))
+         (current-model (if *session*
+                            (or (assoc-ref *session* "model") (ollama-model))
+                            (ollama-model))))
+
+    ;; Switch model if tier changed
+    (when (and tier-model-name (not (equal? tier-model-name current-model)))
+      (format #t "\x1b[2m[model: ~a -> ~a (~a tier, ~a tokens)]\x1b[0m~%"
+              current-model tier-model-name (tier-name tier) tokens)
+      (when *session*
+        (set! *session*
+              (cons (cons "model" tier-model-name)
+                    (filter (lambda (p) (not (equal? (car p) "model")))
+                            *session*)))))
+
+    ;; Auto-compact if approaching context limit
+    (let ((compact-result (session-maybe-compact!
+                           (tier-context-limit tier)
+                           compact-auto
+                           message-tokens)))
+      (when compact-result
+        (format #t "\x1b[2m[~a]\x1b[0m~%" compact-result))
+
+      ;; Get context for API
+      (let* ((model (if *session*
+                      (or (assoc-ref *session* "model") (ollama-model))
+                      (ollama-model)))
+           (messages (session-get-context))
+           (tools (tools-to-schema)))
 
     (when *debug*
       (format #t "[DEBUG] Model: ~a~%" model)
@@ -452,7 +510,7 @@
       (lambda ()
         (let* ((response (ollama-chat-with-tools model messages tools))
                (message (assoc-ref response "message"))
-               (content (assoc-ref message "content"))
+               (content (or (assoc-ref message "content") ""))
                (usage (ollama-extract-token-usage response))
                (prompt-tokens (assoc-ref usage 'prompt_tokens))
                (completion-tokens (assoc-ref usage 'completion_tokens)))
@@ -460,8 +518,8 @@
           ;; Debug token usage
           (debug-tokens prompt-tokens completion-tokens)
 
-          ;; Check for tool calls
-          (let ((tool-call (ollama-parse-tool-call content)))
+          ;; Check for tool calls (native API or content fallback)
+          (let ((tool-call (ollama-parse-tool-call message)))
             (if tool-call
                 (begin
                   ;; Execute tool and add result
@@ -506,7 +564,7 @@
                   (format #t "~a~%" content))))))
 
       (lambda (key . args)
-        (format #t "Error: ~a ~a~%" key args)))))
+        (format #t "Error: ~a ~a~%" key args)))))))
 
 ;;; REPL Eval
 
@@ -543,6 +601,20 @@
 
   ;; Initialize tools
   (init-default-tools)
+
+  ;; Probe available models and configure tiers
+  (catch #t
+    (lambda ()
+      (let* ((models (ollama-list-models))
+             (model-names (map (lambda (m) (assoc-ref m "name")) models)))
+        (set! *available-tiers* (load-model-tiers model-names))
+        (log-info "repl" "Model tiers loaded"
+                  `(("tiers" . ,(length *available-tiers*))
+                    ("models" . ,(length models))))))
+    (lambda (key . args)
+      (set! *available-tiers* *model-tiers*)
+      (log-warn "repl" "Failed to probe models, using defaults"
+                `(("error" . ,(format #f "~a" key))))))
 
   ;; Check for debug mode
   (when (config-get "DEBUG")

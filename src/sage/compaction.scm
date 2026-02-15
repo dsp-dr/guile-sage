@@ -25,9 +25,10 @@
             evaluate-compaction
             compaction-score
             run-compaction-eval
-            ;; Utilities (for testing)
+            ;; Utilities (for testing/session)
             extract-topics
-            identify-intent))
+            identify-intent
+            message-tokens))
 
 ;;; ============================================================
 ;;; Message Importance Scoring

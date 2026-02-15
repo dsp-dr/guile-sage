@@ -21,7 +21,7 @@
             ollama-list-models
             ollama-chat
             ollama-chat-with-tools
-            ollama-format-tool-prompt
+            ollama-tools-to-api-format
             ollama-parse-tool-call
             ollama-extract-token-usage
             ollama-image-host
@@ -129,70 +129,105 @@
         (log-error "ollama" "Chat request failed" `(("code" . ,code) ("error" . ,resp-body)))
         (error "Chat request failed" code resp-body))))))
 
-;;; ollama-format-tool-prompt: Generate system prompt for tool calling
+;;; ollama-tools-to-api-format: Convert internal tool schema to Ollama API format
 ;;; Arguments:
-;;;   tools - List of tool definitions
-;;; Returns: System prompt string
-(define (ollama-format-tool-prompt tools)
-  (string-append
-   "You have access to the following tools:\n\n"
-   (string-join
-    (map (lambda (tool)
-           (format #f "- ~a: ~a\n  Parameters: ~a"
-                   (assoc-ref tool "name")
-                   (assoc-ref tool "description")
-                   (json-write-string (assoc-ref tool "parameters"))))
-         tools)
-    "\n\n")
-   "\n\nTo call a tool, respond with:\n"
-   "```tool\n{\"name\": \"tool_name\", \"arguments\": {...}}\n```"))
+;;;   tools - List of tool definitions (name, description, parameters)
+;;; Returns: List of Ollama-formatted tool objects
+(define (ollama-tools-to-api-format tools)
+  (map (lambda (tool)
+         `(("type" . "function")
+           ("function" . (("name" . ,(assoc-ref tool "name"))
+                          ("description" . ,(assoc-ref tool "description"))
+                          ("parameters" . ,(assoc-ref tool "parameters"))))))
+       tools))
 
-;;; ollama-chat-with-tools: Chat with tool calling support
+;;; ollama-chat-with-tools: Chat with native Ollama tool calling
 ;;; Arguments:
 ;;;   model - Model name string
 ;;;   messages - List of message alists
 ;;;   tools - List of tool definitions
 ;;; Returns: Response alist
 (define (ollama-chat-with-tools model messages tools)
-  (let* ((system-msg `(("role" . "system")
-                       ("content" . ,(ollama-format-tool-prompt tools))))
-         (all-messages (cons system-msg messages)))
-    (ollama-chat model all-messages)))
+  (let* ((url (string-append (ollama-host) "/api/chat"))
+         (api-tools (ollama-tools-to-api-format tools))
+         (request `(("model" . ,model)
+                    ("messages" . ,(list->vector messages))
+                    ("tools" . ,(list->vector api-tools))
+                    ("stream" . ,#f)))
+         (body (json-write-string request))
+         (start-time (current-time)))
 
-;;; ollama-parse-tool-call: Parse tool call from response
+    (log-api-request model "/api/chat" #:tokens (length messages))
+    (status-thinking #:model model #:host (ollama-host))
+
+    (let* ((result (http-post-with-timeout url body *request-timeout*
+                                           #:headers (ollama-auth-headers)))
+           (elapsed (- (time-second (current-time)) (time-second start-time)))
+           (code (if (pair? result) (car result) 0))
+           (resp-body (if (pair? result) (cdr result) "")))
+
+      (status-done elapsed)
+
+      (cond
+       ((= code 200)
+        (catch #t
+          (lambda ()
+            (let ((parsed (json-read-string resp-body)))
+              (let ((usage (ollama-extract-token-usage parsed)))
+                (log-api-response code #:tokens (+ (assoc-ref usage 'prompt_tokens)
+                                                   (assoc-ref usage 'completion_tokens))))
+              parsed))
+          (lambda (key . args)
+            (log-error "ollama" "Failed to parse API response"
+                       `(("body_preview" . ,(substring resp-body 0 (min 200 (string-length resp-body))))))
+            (error "Failed to parse API response" resp-body))))
+       ((= code 0)
+        (log-error "ollama" "API connection failed" `(("error" . ,resp-body)))
+        (error "API connection failed" resp-body))
+       (else
+        (log-error "ollama" "Chat request failed" `(("code" . ,code) ("error" . ,resp-body)))
+        (error "Chat request failed" code resp-body))))))
+
+;;; ollama-parse-tool-call: Extract tool call from Ollama response message
+;;; Checks native tool_calls first, falls back to ```tool content parsing
 ;;; Arguments:
-;;;   content - Response content string
-;;; Returns: Tool call alist or #f if no tool call found
-(define (ollama-parse-tool-call content)
-  (let ((match-start (string-contains content "```tool\n")))
-    (if match-start
-        (let* ((json-start (+ match-start 8))  ; length of "```tool\n"
-               (json-end (string-contains content "```" json-start)))
-          (if json-end
-              (let ((json-str (substring content json-start json-end)))
-                (log-debug "ollama" "Parsing tool call"
-                           `(("json_preview" . ,(substring json-str 0 (min 100 (string-length json-str))))))
-                (catch #t
-                  (lambda ()
-                    (let ((parsed (json-read-string (string-trim-both json-str))))
-                      (log-info "ollama" "Tool call parsed successfully"
-                                `(("tool" . ,(assoc-ref parsed "name"))))
-                      parsed))
-                  (lambda (key . args)
-                    (log-warn "ollama" "Malformed tool call JSON"
-                              `(("json" . ,(string-trim-both json-str))
-                                ("error" . ,(format #f "~a ~a" key args))))
-                    (format (current-error-port)
-                            "Warning: Malformed tool call JSON: ~a~%"
-                            (string-trim-both json-str))
-                    #f)))
-              (begin
-                (log-warn "ollama" "Tool call block not closed"
-                          `(("content_preview" . ,(substring content match-start
-                                                             (min (+ match-start 100)
-                                                                  (string-length content))))))
-                #f)))
-        #f)))
+;;;   message - Response message alist (has "content", may have "tool_calls")
+;;; Returns: Tool call alist with "name" and "arguments", or #f
+(define (ollama-parse-tool-call message)
+  (let ((tool-calls (assoc-ref message "tool_calls")))
+    (if (and tool-calls (vector? tool-calls) (> (vector-length tool-calls) 0))
+        ;; Native Ollama tool calling
+        (let* ((tc (vector-ref tool-calls 0))
+               (fn (assoc-ref tc "function")))
+          (if fn
+              (let ((name (assoc-ref fn "name"))
+                    (args (assoc-ref fn "arguments")))
+                (log-info "ollama" "Native tool call"
+                          `(("tool" . ,name)))
+                `(("name" . ,name)
+                  ("arguments" . ,args)))
+              #f))
+        ;; Fallback: parse ```tool blocks from content
+        (let ((content (or (assoc-ref message "content") "")))
+          (let ((match-start (string-contains content "```tool\n")))
+            (if match-start
+                (let* ((json-start (+ match-start 8))
+                       (json-end (string-contains content "```" json-start)))
+                  (if json-end
+                      (catch #t
+                        (lambda ()
+                          (let ((parsed (json-read-string
+                                         (string-trim-both
+                                           (substring content json-start json-end)))))
+                            (log-info "ollama" "Parsed tool call from content"
+                                      `(("tool" . ,(assoc-ref parsed "name"))))
+                            parsed))
+                        (lambda (key . args)
+                          (log-warn "ollama" "Malformed tool call JSON"
+                                    `(("error" . ,(format #f "~a ~a" key args))))
+                          #f))
+                      #f))
+                #f))))))
 
 ;;; ollama-extract-token-usage: Extract token usage from Ollama response
 ;;; Arguments:
