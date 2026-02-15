@@ -25,7 +25,7 @@ GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run init check-config help docs publish run-yolo check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push
+.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push
 
 all: $(OBJECTS)
 
@@ -42,7 +42,7 @@ repl:
 	$(GUILE) -L $(SRCDIR)
 
 run:
-	$(GUILE) -L $(SRCDIR) -c '(use-modules (sage repl)) (repl-start)'
+	SAGE_YOLO_MODE=1 $(GUILE) -L $(SRCDIR) -c '(use-modules (sage repl)) (repl-start)'
 
 check:
 	@for test in $(TESTDIR)/test-*.scm; do \
@@ -153,9 +153,9 @@ docs/%.html: docs/%.org
 publish: docs
 	@echo "Documentation built in docs/"
 
-# YOLO mode
-run-yolo:
-	SAGE_YOLO_MODE=1 $(GUILE) -L $(SRCDIR) -c '(use-modules (sage repl)) (repl-start)'
+# Run without YOLO (read-only tools only)
+run-safe:
+	$(GUILE) -L $(SRCDIR) -c '(use-modules (sage repl)) (repl-start)'
 
 # Test with metrics
 check-verbose:
@@ -250,8 +250,8 @@ help:
 	@echo "  install-hooks - Install git pre-commit hooks"
 	@echo "  check-config  - Check configuration"
 	@echo "  repl          - Start interactive REPL"
-	@echo "  run           - Run sage CLI"
-	@echo "  run-yolo      - Run sage CLI in YOLO mode"
+	@echo "  run           - Run sage CLI (YOLO mode)"
+	@echo "  run-safe      - Run sage CLI (read-only tools only)"
 	@echo "  check         - Run tests"
 	@echo "  check-verbose - Run tests with metrics"
 	@echo "  uat           - Run UAT tests"
