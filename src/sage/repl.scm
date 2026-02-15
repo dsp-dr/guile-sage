@@ -462,15 +462,19 @@
   (session-add-message "user" input)
 
   ;; Resolve model tier based on current token count
+  ;; Only switch to tiers that support tool calling (REPL always uses tools)
   (let* ((tokens (session-total-tokens))
          (tier (resolve-model-for-tokens tokens *available-tiers*))
-         (tier-model-name (tier-model tier))
          (current-model (if *session*
                             (or (assoc-ref *session* "model") (ollama-model))
-                            (ollama-model))))
+                            (ollama-model)))
+         (tier-model-name (if (tier-supports-tools? tier)
+                              (tier-model tier)
+                              current-model)))
 
-    ;; Switch model if tier changed
-    (when (and tier-model-name (not (equal? tier-model-name current-model)))
+    ;; Switch model if tier changed and tier supports tools
+    (when (and (not (equal? tier-model-name current-model))
+               (tier-supports-tools? tier))
       (format #t "\x1b[2m[model: ~a -> ~a (~a tier, ~a tokens)]\x1b[0m~%"
               current-model tier-model-name (tier-name tier) tokens)
       (when *session*
