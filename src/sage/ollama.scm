@@ -93,10 +93,11 @@
     ;; Log the API request
     (log-api-request model "/api/chat" #:tokens (length messages))
 
-    ;; Show status
-    (status-thinking)
+    ;; Show status with context
+    (status-thinking #:model model #:host (ollama-host))
 
-    (let* ((result (http-post url body #:headers (ollama-auth-headers)))
+    (let* ((result (http-post-with-timeout url body *request-timeout*
+                                           #:headers (ollama-auth-headers)))
            (elapsed (- (time-second (current-time)) (time-second start-time)))
            (code (if (pair? result) (car result) 0))
            (resp-body (if (pair? result) (cdr result) "")))
@@ -215,10 +216,10 @@
 ;;; ============================================================
 
 ;;; ollama-image-host: Get configured Ollama image generation host
-;;; Returns: Host URL string (defaults to local mac.lan)
+;;; Returns: Host URL string (defaults to localhost)
 (define (ollama-image-host)
   (or (config-get "OLLAMA_IMAGE_HOST")
-      "http://mac.lan:11434"))
+      *default-ollama-host*))
 
 ;;; ollama-image-model: Get configured image generation model
 ;;; Returns: Model name string
@@ -253,7 +254,7 @@
                 ("prompt" . ,prompt)
                 ("output" . ,output-path)))
 
-    (status-thinking)
+    (status-thinking #:model (ollama-image-model) #:host (ollama-image-host))
 
     ;; Image generation can take a while; use 10 minute timeout via curl
     (let* ((result (http-post-with-timeout url body 600))

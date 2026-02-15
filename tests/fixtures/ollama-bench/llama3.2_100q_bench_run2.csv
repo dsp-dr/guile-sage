@@ -1,0 +1,101 @@
+id,category,context_level,context_words,prompt,elapsed_s,response_words,status
+49,trivial,none,0,Name a color.,1.64,1,OK
+27,concept,medium,500,Define recursion in one sentence.,3.14,38,OK
+2,code-gen,small,100,Write a Scheme expression that reverses a list.,4.93,97,OK
+68,creative,large,1500,What would a Scheme programmer say to a Python pro,15.02,0,CURL_ERR
+46,code-gen,small,100,Write a one-line Python lambda that doubles a numb,1.4,5,OK
+69,trivial,none,0,Name a color.,0.31,1,OK
+96,creative,large,1500,Describe a sunset in exactly 10 words.,5.58,10,OK
+44,creative,large,1500,Invent a name for a new sorting algorithm.,8.82,99,OK
+23,concept,medium,500,What is the difference between a stack and a queue,12.67,297,OK
+76,creative,large,1500,Describe a sunset in exactly 10 words.,4.52,10,OK
+9,trivial,none,0,Name a color.,0.3,1,OK
+56,creative,large,1500,Describe a sunset in exactly 10 words.,4.47,10,OK
+19,concept,medium,500,What is Big O notation?,13.66,353,OK
+38,code-gen,small,100,Write a bash one-liner to count lines in a file.,2.35,52,OK
+7,concept,medium,500,Define recursion in one sentence.,2.3,31,OK
+33,trivial,none,0,What is 42*8?,0.53,8,OK
+41,trivial,none,0,What is 20+69?,0.42,5,OK
+91,concept,medium,500,What is a mutex?,10.62,284,OK
+60,creative,large,1500,Write a haiku about debugging.,4.68,13,OK
+82,code-gen,small,100,Write a Scheme expression that reverses a list.,4.65,113,OK
+92,creative,large,1500,Name three fictional programming languages.,8.24,112,OK
+5,trivial,none,0,What day comes after Monday?,1.49,31,OK
+66,code-gen,small,100,Write a one-line Python lambda that doubles a numb,2.03,35,OK
+86,code-gen,small,100,Write a one-line Python lambda that doubles a numb,1.15,18,OK
+11,concept,medium,500,What is a mutex?,9.2,233,OK
+72,creative,large,1500,Name three fictional programming languages.,8.29,86,OK
+48,creative,large,1500,What would a Scheme programmer say to a Python pro,12.8,194,OK
+4,creative,large,1500,Invent a name for a new sorting algorithm.,9.59,120,OK
+21,trivial,none,0,What is 17+49?,0.59,8,OK
+42,code-gen,small,100,Write a Scheme expression that reverses a list.,5.58,127,OK
+12,creative,large,1500,Name three fictional programming languages.,9.3,113,OK
+88,creative,large,1500,What would a Scheme programmer say to a Python pro,15.02,0,CURL_ERR
+95,concept,medium,500,What is referential transparency?,10.23,251,OK
+74,code-gen,small,100,Write a SQL query to select all users.,5.31,129,OK
+3,concept,medium,500,What is the difference between a stack and a queue,11.68,291,OK
+29,trivial,none,0,Name a color.,0.37,1,OK
+51,concept,medium,500,What is a mutex?,8.09,203,OK
+53,trivial,none,0,What is 52*28?,0.47,5,OK
+99,concept,medium,500,What is Big O notation?,11.09,304,OK
+13,trivial,none,0,What is 24*38?,0.59,9,OK
+37,trivial,none,0,Is 81 greater than 40?,0.51,6,OK
+18,code-gen,small,100,Write a bash one-liner to count lines in a file.,3.75,93,OK
+57,trivial,none,0,Is 51 greater than 87?,0.47,6,OK
+97,trivial,none,0,Is 98 greater than 52?,0.47,6,OK
+67,concept,medium,500,Define recursion in one sentence.,2.58,40,OK
+17,trivial,none,0,Is 67 greater than 98?,0.51,6,OK
+6,code-gen,small,100,Write a one-line Python lambda that doubles a numb,0.86,7,OK
+85,trivial,none,0,What day comes after Monday?,0.25,1,OK
+98,code-gen,small,100,Write a bash one-liner to count lines in a file.,2.31,52,OK
+36,creative,large,1500,Describe a sunset in exactly 10 words.,4.75,10,OK
+61,trivial,none,0,What is 23+7?,0.46,5,OK
+58,code-gen,small,100,Write a bash one-liner to count lines in a file.,4.06,102,OK
+77,trivial,none,0,Is 40 greater than 79?,0.78,14,OK
+10,code-gen,small,100,Write a JSON object with keys name and age.,1.45,20,OK
+93,trivial,none,0,What is 4*74?,0.51,6,OK
+54,code-gen,small,100,Write a SQL query to select all users.,5.83,132,OK
+16,creative,large,1500,Describe a sunset in exactly 10 words.,4.54,10,OK
+43,concept,medium,500,What is the difference between a stack and a queue,13.14,319,OK
+22,code-gen,small,100,Write a Scheme expression that reverses a list.,4.98,100,OK
+63,concept,medium,500,What is the difference between a stack and a queue,10.92,275,OK
+25,trivial,none,0,What day comes after Monday?,0.55,8,OK
+34,code-gen,small,100,Write a SQL query to select all users.,5.42,128,OK
+71,concept,medium,500,What is a mutex?,10.7,278,OK
+84,creative,large,1500,Invent a name for a new sorting algorithm.,15.03,0,CURL_ERR
+26,code-gen,small,100,Write a one-line Python lambda that doubles a numb,0.83,7,OK
+70,code-gen,small,100,Write a JSON object with keys name and age.,1.42,19,OK
+64,creative,large,1500,Invent a name for a new sorting algorithm.,8.45,103,OK
+65,trivial,none,0,What day comes after Monday?,1.48,31,OK
+35,concept,medium,500,What is referential transparency?,12.14,318,OK
+20,creative,large,1500,Write a haiku about debugging.,4.44,11,OK
+55,concept,medium,500,What is referential transparency?,9.29,224,OK
+39,concept,medium,500,What is Big O notation?,13.0,355,OK
+73,trivial,none,0,What is 35*80?,0.46,5,OK
+83,concept,medium,500,What is the difference between a stack and a queue,9.65,255,OK
+78,code-gen,small,100,Write a bash one-liner to count lines in a file.,2.24,52,OK
+14,code-gen,small,100,Write a SQL query to select all users.,5.46,140,OK
+31,concept,medium,500,What is a mutex?,9.41,247,OK
+59,concept,medium,500,What is Big O notation?,11.79,311,OK
+62,code-gen,small,100,Write a Scheme expression that reverses a list.,6.11,133,OK
+79,concept,medium,500,What is Big O notation?,11.09,281,OK
+15,concept,medium,500,What is referential transparency?,11.43,271,OK
+87,concept,medium,500,Define recursion in one sentence.,2.18,28,OK
+100,creative,large,1500,Write a haiku about debugging.,4.31,10,OK
+45,trivial,none,0,What day comes after Monday?,0.42,7,OK
+52,creative,large,1500,Name three fictional programming languages.,7.53,99,OK
+81,trivial,none,0,What is 97+99?,0.54,8,OK
+50,code-gen,small,100,Write a JSON object with keys name and age.,1.34,19,OK
+24,creative,large,1500,Invent a name for a new sorting algorithm.,7.25,81,OK
+90,code-gen,small,100,Write a JSON object with keys name and age.,1.4,20,OK
+75,concept,medium,500,What is referential transparency?,10.75,286,OK
+89,trivial,none,0,Name a color.,0.27,1,OK
+80,creative,large,1500,Write a haiku about debugging.,4.36,11,OK
+40,creative,large,1500,Write a haiku about debugging.,4.57,12,OK
+8,creative,large,1500,What would a Scheme programmer say to a Python pro,15.02,0,CURL_ERR
+1,trivial,none,0,What is 82+15?,0.54,8,OK
+32,creative,large,1500,Name three fictional programming languages.,7.46,75,OK
+47,concept,medium,500,Define recursion in one sentence.,2.72,38,OK
+30,code-gen,small,100,Write a JSON object with keys name and age.,1.3,15,OK
+94,code-gen,small,100,Write a SQL query to select all users.,3.93,84,OK
+28,creative,large,1500,What would a Scheme programmer say to a Python pro,15.03,0,CURL_ERR
