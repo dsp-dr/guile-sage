@@ -19,8 +19,9 @@
 ;;; ============================================================
 
 ;; Request timeout in seconds (passed to curl)
-;; Keep tight for interactive chat; image gen uses its own timeout
-(define *request-timeout* 15)
+;; 30s accommodates tool-rich requests (~25 tools, ~1800 prompt tokens)
+;; Image gen uses its own timeout (600s)
+(define *request-timeout* 30)
 
 ;;; ============================================================
 ;;; ANSI Helpers
