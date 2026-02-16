@@ -15,10 +15,12 @@
   #:use-module (ice-9 regex)
   #:use-module (ice-9 format)
   #:use-module (ice-9 receive)
+  #:use-module (ice-9 popen)
   #:use-module (srfi srfi-1)
   #:export (http-get
             http-post
             http-post-with-timeout
+            http-post-streaming
             json-read-string
             json-write-string
             string-replace-substring
@@ -312,6 +314,60 @@
       (http-post-curl url body #:headers headers #:timeout timeout))
     (lambda (key . args)
       (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
+
+;;; http-post-streaming: POST with streaming NDJSON response
+;;; Reads line-by-line from curl's unbuffered output, parsing each as JSON.
+;;; Arguments:
+;;;   url - Target URL
+;;;   body - Request body string (JSON)
+;;;   on-chunk - Callback (chunk-alist) called for each parsed JSON line
+;;;   timeout - Max request time in seconds (default 30)
+;;;   headers - Additional headers as alist (default '())
+;;; Returns: The final chunk (where "done" is #t), or #f
+(define* (http-post-streaming url body on-chunk
+                              #:key (timeout 30) (headers '()))
+  (let* ((tmp-file (make-temp-file "sage-stream"))
+         (dummy (call-with-output-file tmp-file
+                  (lambda (port) (display body port))))
+         (header-args (string-join
+                       (cons "-H 'Content-Type: application/json'"
+                             (map (lambda (h)
+                                    (format #f "-H '~a: ~a'"
+                                            (shell-escape (car h))
+                                            (shell-escape (cdr h))))
+                                  headers))
+                       " "))
+         (cmd (format #f "curl -sN --max-time ~a -X POST ~a -d '@~a' '~a'"
+                      timeout header-args tmp-file
+                      (shell-escape url)))
+         (pipe (open-input-pipe cmd))
+         (final-chunk #f))
+    (catch #t
+      (lambda ()
+        (let loop ()
+          (let ((line (read-line pipe)))
+            (unless (eof-object? line)
+              (let ((trimmed (string-trim-both line)))
+                (unless (string-null? trimmed)
+                  (catch #t
+                    (lambda ()
+                      (let ((chunk (json-read-string trimmed)))
+                        (on-chunk chunk)
+                        (when (and (list? chunk)
+                                   (eq? #t (assoc-ref chunk "done")))
+                          (set! final-chunk chunk))))
+                    (lambda (key . args)
+                      ;; Skip malformed JSON lines
+                      #f))))
+              (loop)))))
+      (lambda (key . args)
+        ;; Ensure cleanup on error
+        #f))
+    (close-pipe pipe)
+    (catch #t
+      (lambda () (delete-file tmp-file))
+      (lambda args #f))
+    final-chunk))
 
 ;;; ============================================================
 ;;; String Utilities

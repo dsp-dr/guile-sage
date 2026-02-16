@@ -20,6 +20,7 @@
             ollama-auth-headers
             ollama-list-models
             ollama-chat
+            ollama-chat-streaming
             ollama-chat-with-tools
             ollama-tools-to-api-format
             ollama-parse-tool-call
@@ -128,6 +129,64 @@
        (else
         (log-error "ollama" "Chat request failed" `(("code" . ,code) ("error" . ,resp-body)))
         (error "Chat request failed" code resp-body))))))
+
+;;; ollama-chat-streaming: Send streaming chat request
+;;; Calls on-token with each content fragment as it arrives.
+;;; Arguments:
+;;;   model - Model name string
+;;;   messages - List of message alists
+;;;   on-token - Callback (string) for each token
+;;;   tools - Tool definitions (optional, for request context)
+;;; Returns: Response alist compatible with non-streaming version
+(define* (ollama-chat-streaming model messages on-token #:key (tools '()))
+  (let* ((url (string-append (ollama-host) "/api/chat"))
+         (api-tools (if (null? tools) '() (ollama-tools-to-api-format tools)))
+         (request `(("model" . ,model)
+                    ("messages" . ,(list->vector messages))
+                    ,@(if (null? api-tools)
+                          '()
+                          `(("tools" . ,(list->vector api-tools))))
+                    ("stream" . ,#t)))
+         (body (json-write-string request))
+         (start-time (current-time))
+         (accumulated-content "")
+         (final-response #f))
+
+    (log-api-request model "/api/chat" #:tokens (length messages))
+
+    (let ((result (http-post-streaming
+                   url body
+                   (lambda (chunk)
+                     ;; Extract token content from chunk
+                     (let* ((message (assoc-ref chunk "message"))
+                            (content (and message (assoc-ref message "content"))))
+                       (when (and content (string? content) (not (string-null? content)))
+                         (set! accumulated-content
+                               (string-append accumulated-content content))
+                         (on-token content)))
+                     ;; Capture final chunk for metadata
+                     (when (and (list? chunk) (eq? #t (assoc-ref chunk "done")))
+                       (set! final-response chunk)))
+                   #:timeout *request-timeout*
+                   #:headers (ollama-auth-headers))))
+
+      (let* ((elapsed (- (time-second (current-time)) (time-second start-time)))
+             ;; Build a response alist compatible with non-streaming format
+             (response (or final-response '()))
+             (usage (ollama-extract-token-usage response)))
+        (log-api-response 200 #:tokens (+ (assoc-ref usage 'prompt_tokens)
+                                           (assoc-ref usage 'completion_tokens)))
+        ;; Return response with accumulated content in message
+        `(("message" . (("role" . "assistant")
+                        ("content" . ,accumulated-content)
+                        ,@(let ((tc (and final-response
+                                         (assoc-ref (assoc-ref final-response "message")
+                                                    "tool_calls"))))
+                            (if tc `(("tool_calls" . ,tc)) '()))))
+          ("done" . ,#t)
+          ("prompt_eval_count" . ,(assoc-ref usage 'prompt_tokens))
+          ("eval_count" . ,(assoc-ref usage 'completion_tokens))
+          ("elapsed" . ,elapsed))))))
 
 ;;; ollama-tools-to-api-format: Convert internal tool schema to Ollama API format
 ;;; Arguments:
