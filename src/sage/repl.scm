@@ -130,7 +130,7 @@
   (display "  /tasks          - List pending agent tasks\n")
   (display "  /pause          - Pause agent loop\n")
   (display "  /continue       - Continue agent loop\n")
-  (display "  /prefetch       - Show/reload AGENTS.md context\n")
+  (display "  /prefetch       - Show/reload SAGE.md context\n")
   #t)
 
 (define (cmd-exit args)
@@ -338,11 +338,11 @@
   #t)
 
 (define (cmd-prefetch args)
-  "Show or reload AGENTS.md context."
+  "Show or reload SAGE.md context."
   (if (string=? (string-trim-both args) "reload")
       (begin
         (load-agents-context)
-        (display "AGENTS.md reloaded.\n"))
+        (display "SAGE.md reloaded.\n"))
       (display (context-status)))
   (newline)
   #t)
@@ -444,9 +444,11 @@
     (check "session dir" (lambda ()
       (let ((dir (session-dir)))
         (if (file-exists? dir) dir "not yet created"))))
-    (check "AGENTS.md" (lambda ()
-      (let ((path (find-agents-md)))
-        (if path (format #f "~a chars" (string-length (load-agents-md))) "not found"))))
+    (check "SAGE.md" (lambda ()
+      (let ((path (string-append (getcwd) "/SAGE.md")))
+        (if (file-exists? path)
+            (format #f "~a chars" (stat:size (stat path)))
+            "not found"))))
 
     ;; Tools
     (display "\nTools:\n")
@@ -783,7 +785,7 @@
    (else
     (session-create)))
 
-  ;; Load AGENTS.md into session context
+  ;; Load SAGE.md into session context
   (load-agents-context)
 
   ;; Welcome message
