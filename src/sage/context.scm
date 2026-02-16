@@ -2,7 +2,8 @@
 
 ;;; Commentary:
 ;;
-;; Loads AGENTS.md into session context on startup.
+;; Loads system prompt into session context on startup.
+;; Prefers SAGE.md (lean, tool-focused) over AGENTS.md (full agent docs).
 ;; Pure Guile - no shell calls.
 
 (define-module (sage context)
@@ -16,7 +17,7 @@
             context-status))
 
 ;;; State
-(define *agents-loaded?* #f)
+(define *context-source* #f)
 
 ;;; workspace-or-cwd: Get workspace or current directory
 (define (workspace-or-cwd)
@@ -24,28 +25,36 @@
       (config-get "SAGE_WORKSPACE")
       (getcwd)))
 
-;;; load-agents-context: Load AGENTS.md into session
+;;; load-context-file: Load a single context file into session
+(define (load-context-file path label)
+  "Load a context file and add to session as system message.
+Returns #t on success, #f on failure."
+  (if (file-exists? path)
+      (catch #t
+        (lambda ()
+          (let ((content (call-with-input-file path get-string-all)))
+            (session-add-message "system"
+                                 (string-append
+                                  "=== " label " ===\n"
+                                  content))
+            (set! *context-source* label)
+            (log-info "context" (format #f "Loaded ~a" label)
+                      `(("chars" . ,(string-length content))
+                        ("path" . ,path)))
+            #t))
+        (lambda (key . args)
+          (log-warn "context" (format #f "Failed to read ~a" label)
+                    `(("error" . ,(format #f "~a" key))))
+          #f))
+      #f))
+
+;;; load-agents-context: Load SAGE.md into session
 (define (load-agents-context)
-  "Load AGENTS.md and add to session as system message."
-  (let ((path (string-append (workspace-or-cwd) "/AGENTS.md")))
-    (if (file-exists? path)
-        (catch #t
-          (lambda ()
-            (let ((content (call-with-input-file path get-string-all)))
-              (session-add-message "system"
-                                   (string-append
-                                    "=== AGENTS.md ===\n"
-                                    content))
-              (set! *agents-loaded?* #t)
-              (log-info "context" "Loaded AGENTS.md"
-                        `(("chars" . ,(string-length content))))
-              #t))
-          (lambda (key . args)
-            (log-warn "context" "Failed to read AGENTS.md"
-                      `(("error" . ,(format #f "~a" key))))
-            #f))
+  "Load SAGE.md into session as system message."
+  (let ((base (workspace-or-cwd)))
+    (or (load-context-file (string-append base "/SAGE.md") "SAGE.md")
         (begin
-          (log-debug "context" "No AGENTS.md found")
+          (log-debug "context" "No SAGE.md found")
           #f))))
 
 ;;; Backward compatibility alias
@@ -54,6 +63,6 @@
 ;;; context-status: Show context status
 (define (context-status)
   "Return status of loaded context."
-  (if *agents-loaded?*
-      "AGENTS.md loaded into context."
-      "No AGENTS.md loaded."))
+  (if *context-source*
+      (format #f "~a loaded into context." *context-source*)
+      "No context loaded."))
