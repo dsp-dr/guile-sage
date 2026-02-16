@@ -12,6 +12,9 @@
             status-clear
             status-thinking
             status-done
+            status-stream-start
+            status-stream-token
+            status-stream-end
             format-duration))
 
 ;;; ============================================================
@@ -65,6 +68,28 @@
   "Show completion with duration."
   (status-clear)
   (display (ansi-dim (format #f "✓ Response received (~a)\n" (format-duration duration))))
+  (force-output))
+
+;;; ============================================================
+;;; Streaming Display
+;;; ============================================================
+
+(define (status-stream-start model)
+  "Signal start of streaming response."
+  (status-clear)
+  (display (ansi-dim (format #f "[streaming ~a] " model)))
+  (force-output))
+
+(define (status-stream-token token-text)
+  "Display a streaming token."
+  (display token-text)
+  (force-output))
+
+(define (status-stream-end token-count duration)
+  "Finalize streaming display."
+  (newline)
+  (display (ansi-dim (format #f "--- ~a tokens, ~a ---" token-count (format-duration duration))))
+  (newline)
   (force-output))
 
 ;;; ============================================================

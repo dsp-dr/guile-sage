@@ -17,7 +17,9 @@
   #:use-module (sage context)
   #:use-module (sage compaction)
   #:use-module (sage model-tier)
+  #:use-module (sage status)
   #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-19)
   #:use-module (ice-9 format)
   #:use-module (ice-9 readline)
   #:use-module (ice-9 rdelim)
@@ -30,6 +32,7 @@
 
 (define *running* #t)
 (define *debug* #f)
+(define *streaming* (not (equal? "0" (or (getenv "SAGE_STREAMING") ""))))
 (define *available-tiers* '())
 
 ;;; Dynamic Prompt
@@ -118,6 +121,7 @@
   (display "  /debug          - Toggle debug mode\n")
   (display "  /version        - Show version info\n")
   (display "  /tier           - Show model tier status\n")
+  (display "  /stream         - Toggle streaming mode\n")
   (display "  /doctor         - Check dependencies and connections\n")
   (display "  /reload         - Hot-reload sage modules\n")
   (display "  /logs [n] [lvl] - Show recent log entries\n")
@@ -243,6 +247,11 @@
 (define (cmd-debug args)
   (set! *debug* (not *debug*))
   (format #t "Debug mode: ~a~%" (if *debug* "ON" "OFF"))
+  #t)
+
+(define (cmd-stream args)
+  (set! *streaming* (not *streaming*))
+  (format #t "Streaming: ~a~%" (if *streaming* "ON" "OFF"))
   #t)
 
 (define (cmd-version args)
@@ -468,6 +477,7 @@
     ("/tools"     . ,cmd-tools)
     ("/workspace" . ,cmd-workspace)
     ("/debug"     . ,cmd-debug)
+    ("/stream"    . ,cmd-stream)
     ("/version"   . ,cmd-version)
     ("/reload"    . ,cmd-reload)
     ("/refresh"   . ,cmd-reload)
@@ -595,63 +605,113 @@
         (format #t "[DEBUG] Tokens - prompt: ~a, completion: ~a~%"
                 prompt-toks completion-toks)))
 
-    ;; Call Ollama with tools
+    ;; Call Ollama - streaming or non-streaming
     (catch #t
       (lambda ()
-        (let* ((response (ollama-chat-with-tools model messages tools))
-               (message (assoc-ref response "message"))
-               (content (or (assoc-ref message "content") ""))
-               (usage (ollama-extract-token-usage response))
-               (prompt-tokens (assoc-ref usage 'prompt_tokens))
-               (completion-tokens (assoc-ref usage 'completion_tokens)))
+        (if *streaming*
+            ;; --- Streaming path ---
+            (let ((start-time (current-time)))
+              (status-stream-start model)
+              (let* ((response (ollama-chat-streaming
+                                model messages
+                                status-stream-token
+                                #:tools tools))
+                     (elapsed (- (time-second (current-time))
+                                 (time-second start-time)))
+                     (message (assoc-ref response "message"))
+                     (content (or (assoc-ref message "content") ""))
+                     (usage (ollama-extract-token-usage response))
+                     (prompt-tokens (assoc-ref usage 'prompt_tokens))
+                     (completion-tokens (assoc-ref usage 'completion_tokens)))
 
-          ;; Debug token usage
-          (debug-tokens prompt-tokens completion-tokens)
+                (status-stream-end completion-tokens elapsed)
+                (debug-tokens prompt-tokens completion-tokens)
 
-          ;; Check for tool calls (native API or content fallback)
-          (let ((tool-call (ollama-parse-tool-call message)))
-            (if tool-call
-                (begin
-                  ;; Execute tool and add result
-                  (let* ((tool-name (assoc-ref tool-call "name"))
-                         (tool-args (assoc-ref tool-call "arguments"))
-                         (result (execute-tool tool-name tool-args)))
-                    (when *debug*
-                      (format #t "[DEBUG] Tool: ~a~%" tool-name)
-                      (format #t "[DEBUG] Args: ~a~%" tool-args))
+                ;; Check for tool calls in streamed response
+                (let ((tool-call (ollama-parse-tool-call message)))
+                  (if tool-call
+                      ;; Tool call found -- execute and do non-streaming follow-up
+                      (let* ((tool-name (assoc-ref tool-call "name"))
+                             (tool-args (assoc-ref tool-call "arguments"))
+                             (result (execute-tool tool-name tool-args)))
+                        (when *debug*
+                          (format #t "[DEBUG] Tool: ~a~%" tool-name)
+                          (format #t "[DEBUG] Args: ~a~%" tool-args))
 
-                    ;; Add assistant message with tool call (with actual token count)
-                    (session-add-message "assistant" content
-                                         #:tokens completion-tokens
-                                         #:tool-call #t)
+                        (session-add-message "assistant" content
+                                             #:tokens completion-tokens
+                                             #:tool-call #t)
 
-                    ;; Display tool execution
-                    (format #t "~a~%" content)
-                    (format #t "~%[Tool: ~a]~%" tool-name)
-                    (format #t "~a~%" result)
+                        (format #t "~%[Tool: ~a]~%" tool-name)
+                        (format #t "~a~%" result)
 
-                    ;; Add tool result and get follow-up
-                    (session-add-message "user"
-                                        (format #f "Tool result for ~a:\n~a"
-                                                tool-name result))
+                        (session-add-message "user"
+                                            (format #f "Tool result for ~a:\n~a"
+                                                    tool-name result))
 
-                    ;; Get follow-up response
-                    (let* ((follow-up (ollama-chat model (session-get-context)))
-                           (follow-msg (assoc-ref follow-up "message"))
-                           (follow-content (assoc-ref follow-msg "content"))
-                           (follow-usage (ollama-extract-token-usage follow-up))
-                           (follow-completion (assoc-ref follow-usage 'completion_tokens)))
-                      (debug-tokens (assoc-ref follow-usage 'prompt_tokens)
-                                    follow-completion)
-                      (session-add-message "assistant" follow-content
-                                           #:tokens follow-completion)
-                      (format #t "~%~a~%" follow-content))))
+                        ;; Non-streaming follow-up after tool execution
+                        (let* ((follow-up (ollama-chat model (session-get-context)))
+                               (follow-msg (assoc-ref follow-up "message"))
+                               (follow-content (assoc-ref follow-msg "content"))
+                               (follow-usage (ollama-extract-token-usage follow-up))
+                               (follow-completion (assoc-ref follow-usage 'completion_tokens)))
+                          (debug-tokens (assoc-ref follow-usage 'prompt_tokens)
+                                        follow-completion)
+                          (session-add-message "assistant" follow-content
+                                               #:tokens follow-completion)
+                          (format #t "~%~a~%" follow-content)))
 
-                ;; No tool call, just display response
-                (begin
-                  (session-add-message "assistant" content
-                                       #:tokens completion-tokens)
-                  (format #t "~a~%" content))))))
+                      ;; No tool call -- content already displayed via streaming
+                      (session-add-message "assistant" content
+                                           #:tokens completion-tokens)))))
+
+            ;; --- Non-streaming path (existing behavior) ---
+            (let* ((response (ollama-chat-with-tools model messages tools))
+                   (message (assoc-ref response "message"))
+                   (content (or (assoc-ref message "content") ""))
+                   (usage (ollama-extract-token-usage response))
+                   (prompt-tokens (assoc-ref usage 'prompt_tokens))
+                   (completion-tokens (assoc-ref usage 'completion_tokens)))
+
+              (debug-tokens prompt-tokens completion-tokens)
+
+              (let ((tool-call (ollama-parse-tool-call message)))
+                (if tool-call
+                    (begin
+                      (let* ((tool-name (assoc-ref tool-call "name"))
+                             (tool-args (assoc-ref tool-call "arguments"))
+                             (result (execute-tool tool-name tool-args)))
+                        (when *debug*
+                          (format #t "[DEBUG] Tool: ~a~%" tool-name)
+                          (format #t "[DEBUG] Args: ~a~%" tool-args))
+
+                        (session-add-message "assistant" content
+                                             #:tokens completion-tokens
+                                             #:tool-call #t)
+
+                        (format #t "~a~%" content)
+                        (format #t "~%[Tool: ~a]~%" tool-name)
+                        (format #t "~a~%" result)
+
+                        (session-add-message "user"
+                                            (format #f "Tool result for ~a:\n~a"
+                                                    tool-name result))
+
+                        (let* ((follow-up (ollama-chat model (session-get-context)))
+                               (follow-msg (assoc-ref follow-up "message"))
+                               (follow-content (assoc-ref follow-msg "content"))
+                               (follow-usage (ollama-extract-token-usage follow-up))
+                               (follow-completion (assoc-ref follow-usage 'completion_tokens)))
+                          (debug-tokens (assoc-ref follow-usage 'prompt_tokens)
+                                        follow-completion)
+                          (session-add-message "assistant" follow-content
+                                               #:tokens follow-completion)
+                          (format #t "~%~a~%" follow-content))))
+
+                    (begin
+                      (session-add-message "assistant" content
+                                           #:tokens completion-tokens)
+                      (format #t "~a~%" content)))))))
 
       (lambda (key . args)
         (format #t "Error: ~a ~a~%" key args)))))))
