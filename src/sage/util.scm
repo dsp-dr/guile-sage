@@ -337,7 +337,9 @@
                                             (shell-escape (cdr h))))
                                   headers))
                        " "))
-         (cmd (format #f "curl -sN --max-time ~a -X POST ~a -d '@~a' '~a'"
+         ;; Use --connect-timeout for initial connection, not --max-time
+         ;; which would kill a streaming response mid-flow
+         (cmd (format #f "curl -sN --connect-timeout ~a -X POST ~a -d '@~a' '~a'"
                       timeout header-args tmp-file
                       (shell-escape url)))
          (pipe (open-input-pipe cmd))
