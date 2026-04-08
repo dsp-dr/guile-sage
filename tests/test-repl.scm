@@ -14,28 +14,8 @@
              (srfi srfi-1)
              (ice-9 format))
 
-;;; Test Framework
-
-(define *tests-run* 0)
-(define *tests-passed* 0)
-
-(define (run-test name thunk)
-  (set! *tests-run* (1+ *tests-run*))
-  (catch #t
-    (lambda ()
-      (thunk)
-      (set! *tests-passed* (1+ *tests-passed*))
-      (format #t "PASS: ~a~%" name))
-    (lambda (key . args)
-      (format #t "FAIL: ~a - ~a: ~a~%" name key args))))
-
-(define (assert-true val msg)
-  (unless val (error msg)))
-
-(define (assert-false val msg)
-  (when val (error msg)))
-
-;;; Setup
+;;; Load shared SRFI-64 test harness
+(load (string-append (dirname (current-filename)) "/test-harness.scm"))
 
 (format #t "~%=== REPL Commands Tests ===~%")
 
@@ -118,8 +98,7 @@
 
 ;;; Summary
 
-(format #t "~%=== Summary ===~%")
-(format #t "Tests: ~a/~a passed~%" *tests-passed* *tests-run*)
+(test-summary)
 (if (= *tests-passed* *tests-run*)
     (format #t "All tests passed!~%")
     (begin

@@ -12,26 +12,8 @@
              (srfi srfi-1)
              (ice-9 format))
 
-;;; Test Framework
-(define *tests-run* 0)
-(define *tests-passed* 0)
-
-(define (test name thunk)
-  (set! *tests-run* (1+ *tests-run*))
-  (catch #t
-    (lambda ()
-      (thunk)
-      (set! *tests-passed* (1+ *tests-passed*))
-      (format #t "PASS: ~a~%" name))
-    (lambda (key . args)
-      (format #t "FAIL: ~a (~a)~%" name key))))
-
-(define (assert-true val msg)
-  (unless val (error msg)))
-
-(define (assert-not-contains str substr msg)
-  (when (and (string? str) (string-contains str substr))
-    (error msg)))
+;;; Load shared SRFI-64 test harness
+(load (string-append (dirname (current-filename)) "/test-harness.scm"))
 
 ;;; ============================================================
 ;;; Test Data with Secrets
@@ -119,7 +101,6 @@
 ;;; Summary
 ;;; ============================================================
 
-(format #t "~%=== Test Summary ===~%")
-(format #t "Tests: ~a/~a passed~%" *tests-passed* *tests-run*)
+(test-summary)
 
 (exit (if (= *tests-passed* *tests-run*) 0 1))

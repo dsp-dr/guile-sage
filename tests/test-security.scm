@@ -12,53 +12,8 @@
              (ice-9 format)
              (ice-9 regex))
 
-;;; ============================================================
-;;; Test Framework (inline for simplicity)
-;;; ============================================================
-
-(define *tests-run* 0)
-(define *tests-passed* 0)
-(define *tests-failed* 0)
-(define *current-suite* "default")
-
-(define (test-suite name thunk)
-  (set! *current-suite* name)
-  (format #t "~%=== ~a ===~%" name)
-  (thunk))
-
-(define (test name thunk)
-  (set! *tests-run* (1+ *tests-run*))
-  (catch #t
-    (lambda ()
-      (thunk)
-      (set! *tests-passed* (1+ *tests-passed*))
-      (format #t "PASS: ~a~%" name))
-    (lambda (key . args)
-      (set! *tests-failed* (1+ *tests-failed*))
-      (format #t "FAIL: ~a (~a)~%" name key))))
-
-(define (assert-true val msg)
-  (unless val (error msg)))
-
-(define (assert-false val msg)
-  (when val (error msg)))
-
-(define (assert-contains str substr msg)
-  (unless (and (string? str) (string-contains str substr))
-    (error msg)))
-
-(define (assert-not-contains str substr msg)
-  (when (and (string? str) (string-contains str substr))
-    (error msg)))
-
-(define (test-summary)
-  (format #t "~%=== Security Test Summary ===~%")
-  (format #t "Tests: ~a/~a passed~%" *tests-passed* *tests-run*)
-  (when (> *tests-failed* 0)
-    (format #t "WARNING: ~a security tests failed!~%" *tests-failed*)))
-
-;;; Initialize tools
-(init-default-tools)
+;;; Load shared SRFI-64 test harness
+(load (string-append (dirname (current-filename)) "/test-harness.scm"))
 
 ;;; ============================================================
 ;;; PATH TRAVERSAL ATTACKS
