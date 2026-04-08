@@ -12,29 +12,8 @@
              (ice-9 format)
              (srfi srfi-1))
 
-;;; ============================================================
-;;; Test Framework
-;;; ============================================================
-
-(define *tests-run* 0)
-(define *tests-passed* 0)
-
-(define (test name thunk)
-  (set! *tests-run* (1+ *tests-run*))
-  (catch #t
-    (lambda ()
-      (thunk)
-      (set! *tests-passed* (1+ *tests-passed*))
-      (format #t "PASS: ~a~%" name))
-    (lambda (key . args)
-      (format #t "FAIL: ~a (~a)~%" name key))))
-
-(define (assert-true val msg)
-  (unless val (error msg)))
-
-(define (assert-equal actual expected msg)
-  (unless (equal? actual expected)
-    (error (format #f "~a: got ~s, expected ~s" msg actual expected))))
+;;; Load shared SRFI-64 test harness
+(load (string-append (dirname (current-filename)) "/test-harness.scm"))
 
 ;;; ============================================================
 ;;; Test Data: Synthetic Conversation
@@ -211,7 +190,6 @@
 ;;; Summary
 ;;; ============================================================
 
-(format #t "~%=== Test Summary ===~%")
-(format #t "Tests: ~a/~a passed~%" *tests-passed* *tests-run*)
+(test-summary)
 
 (exit (if (= *tests-passed* *tests-run*) 0 1))
