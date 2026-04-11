@@ -27,7 +27,12 @@
             ollama-extract-token-usage
             ollama-image-host
             ollama-image-model
-            ollama-generate-image))
+            ollama-generate-image
+            ;; Model availability + fallback (graceful removal handling)
+            chat-capable-model?
+            model-available?
+            select-fallback-model
+            ollama-error-message))
 
 ;;; ollama-host: Get configured Ollama host
 ;;; Returns: Host URL string
@@ -76,6 +81,95 @@
           (error "Failed to parse models response" body))))
      (else
       (error "Failed to list models" code body)))))
+
+;;; ============================================================
+;;; Model availability + graceful fallback
+;;; ============================================================
+;;;
+;;; When a configured model has been removed locally (e.g. `ollama rm
+;;; mistral:latest` to free disk), sage should not crash on the first
+;;; chat turn. These helpers detect that case and pick a sensible
+;;; substitute from whatever is still installed.
+
+;;; chat-capable-model?: Is this model usable for /api/chat?
+;;; Filters out embedding models and image generation models so we
+;;; never auto-fall-back to nomic-embed-text or x/flux2-klein.
+;;; Arguments:
+;;;   model-info - one entry from ollama-list-models (alist)
+;;; Returns: #t if the model can serve chat completions
+(define (chat-capable-model? model-info)
+  (let* ((details (or (assoc-ref model-info "details") '()))
+         (family  (or (assoc-ref details "family") ""))
+         (format  (or (assoc-ref details "format") "")))
+    (and
+     ;; Image generation models come as safetensors, not gguf
+     (not (equal? format "safetensors"))
+     ;; Embedding model families
+     (not (string-contains family "bert"))
+     (not (string-contains family "embed"))
+     ;; Non-empty family — empty means unknown/specialized
+     (not (string-null? family)))))
+
+;;; model-available?: Is the named model in the available list?
+;;; Arguments:
+;;;   name             - model name string (e.g. "llama3.2:latest")
+;;;   available-models - list of model info alists from ollama-list-models
+(define (model-available? name available-models)
+  (and (find (lambda (m) (equal? (assoc-ref m "name") name))
+             available-models)
+       #t))
+
+;;; model-size: Extract the model size in bytes (or +inf.0 if missing).
+;;; Used to sort fallback candidates so we prefer the smallest/fastest.
+(define (model-size model-info)
+  (let ((s (assoc-ref model-info "size")))
+    (if (number? s) s +inf.0)))
+
+;;; select-fallback-model: Pick the best available chat model.
+;;; Arguments:
+;;;   preferred        - desired model name (string)
+;;;   available-models - list from ollama-list-models
+;;; Returns: a model name string, or #f if nothing usable exists.
+;;;
+;;; Selection order:
+;;;   1. The preferred model, if installed
+;;;   2. The smallest chat-capable model (sorted by size in bytes)
+;;;   3. The first model in the available list (last-resort)
+;;;   4. #f
+;;;
+;;; Why "smallest first": after `ollama rm` the user wants to keep
+;;; iterating, and a smaller model is faster to load and produces
+;;; tighter feedback loops. Ollama returns models in modification-
+;;; time order, which is rarely what we want here.
+(define (select-fallback-model preferred available-models)
+  (cond
+   ((null? available-models) #f)
+   ((model-available? preferred available-models) preferred)
+   (else
+    (let ((chat-models (filter chat-capable-model? available-models)))
+      (cond
+       ((not (null? chat-models))
+        (let ((sorted (sort chat-models
+                            (lambda (a b) (< (model-size a) (model-size b))))))
+          (assoc-ref (car sorted) "name")))
+       (else
+        (assoc-ref (car available-models) "name")))))))
+
+;;; ollama-error-message: Extract a human-friendly message from an
+;;; Ollama error response body. The body is JSON like {"error":"..."}
+;;; or sometimes a plain string. Returns a fallback if parsing fails.
+;;; Arguments:
+;;;   body - response body string
+;;; Returns: short error message string
+(define (ollama-error-message body)
+  (catch #t
+    (lambda ()
+      (if (or (not body) (string-null? body))
+          "(empty response)"
+          (let ((parsed (json-read-string body)))
+            (or (and (pair? parsed) (assoc-ref parsed "error"))
+                body))))
+    (lambda args (or body "(unparseable response)"))))
 
 ;;; ollama-chat: Send chat completion request
 ;;; Arguments:
@@ -126,6 +220,15 @@
        ((= code 0)
         (log-error "ollama" "API connection failed" `(("error" . ,resp-body)))
         (error "API connection failed" resp-body))
+       ((= code 404)
+        ;; Model not found locally — common after `ollama rm`. Surface
+        ;; a clean message instead of a generic chat-request failure
+        ;; so the REPL can prompt the user to pick another model.
+        (let ((msg (ollama-error-message resp-body)))
+          (log-error "ollama" "Model not found"
+                     `(("model" . ,model) ("error" . ,msg)))
+          (status-clear)
+          (error 'model-not-found model msg)))
        (else
         (log-error "ollama" "Chat request failed" `(("code" . ,code) ("error" . ,resp-body)))
         (error "Chat request failed" code resp-body))))))
@@ -150,6 +253,10 @@
          (body (json-write-string request))
          (start-time (current-time))
          (accumulated-content "")
+         ;; tool_calls can arrive in any chunk (Ollama puts them in the
+         ;; first chunk for llama3.2 and clears the message in done:true).
+         ;; We must capture them whenever they appear, NOT only on done.
+         (accumulated-tool-calls #f)
          (final-response #f))
 
     (log-api-request model "/api/chat" #:tokens (length messages))
@@ -157,14 +264,19 @@
     (let ((result (http-post-streaming
                    url body
                    (lambda (chunk)
-                     ;; Extract token content from chunk
                      (let* ((message (assoc-ref chunk "message"))
-                            (content (and message (assoc-ref message "content"))))
+                            (content (and message (assoc-ref message "content")))
+                            (tcs (and message (assoc-ref message "tool_calls"))))
+                       ;; Stream content tokens
                        (when (and content (string? content) (not (string-null? content)))
                          (set! accumulated-content
                                (string-append accumulated-content content))
-                         (on-token content)))
-                     ;; Capture final chunk for metadata
+                         (on-token content))
+                       ;; Capture tool_calls from ANY chunk (first chunk
+                       ;; for llama3.2; rare for them to span chunks)
+                       (when tcs
+                         (set! accumulated-tool-calls tcs)))
+                     ;; Capture final chunk for metadata (timings, eval_count)
                      (when (and (list? chunk) (eq? #t (assoc-ref chunk "done")))
                        (set! final-response chunk)))
                    #:timeout *request-timeout*
@@ -176,13 +288,12 @@
              (usage (ollama-extract-token-usage response)))
         (log-api-response 200 #:tokens (+ (assoc-ref usage 'prompt_tokens)
                                            (assoc-ref usage 'completion_tokens)))
-        ;; Return response with accumulated content in message
+        ;; Return response with accumulated content + accumulated tool_calls
         `(("message" . (("role" . "assistant")
                         ("content" . ,accumulated-content)
-                        ,@(let ((tc (and final-response
-                                         (assoc-ref (assoc-ref final-response "message")
-                                                    "tool_calls"))))
-                            (if tc `(("tool_calls" . ,tc)) '()))))
+                        ,@(if accumulated-tool-calls
+                              `(("tool_calls" . ,accumulated-tool-calls))
+                              '())))
           ("done" . ,#t)
           ("prompt_eval_count" . ,(assoc-ref usage 'prompt_tokens))
           ("eval_count" . ,(assoc-ref usage 'completion_tokens))
@@ -243,6 +354,15 @@
        ((= code 0)
         (log-error "ollama" "API connection failed" `(("error" . ,resp-body)))
         (error "API connection failed" resp-body))
+       ((= code 404)
+        ;; Model not found locally — common after `ollama rm`. Surface
+        ;; a clean message instead of a generic chat-request failure
+        ;; so the REPL can prompt the user to pick another model.
+        (let ((msg (ollama-error-message resp-body)))
+          (log-error "ollama" "Model not found"
+                     `(("model" . ,model) ("error" . ,msg)))
+          (status-clear)
+          (error 'model-not-found model msg)))
        (else
         (log-error "ollama" "Chat request failed" `(("code" . ,code) ("error" . ,resp-body)))
         (error "Chat request failed" code resp-body))))))
@@ -253,11 +373,19 @@
 ;;;   message - Response message alist (has "content", may have "tool_calls")
 ;;; Returns: Tool call alist with "name" and "arguments", or #f
 (define (ollama-parse-tool-call message)
-  (let ((tool-calls (assoc-ref message "tool_calls")))
-    (if (and tool-calls (vector? tool-calls) (> (vector-length tool-calls) 0))
+  (let* ((tool-calls (assoc-ref message "tool_calls"))
+         ;; util.scm's JSON parser returns arrays as LISTS, but other
+         ;; callers may pass vectors. Accept both shapes uniformly.
+         (first-tc (cond
+                    ((and tool-calls (vector? tool-calls)
+                          (> (vector-length tool-calls) 0))
+                     (vector-ref tool-calls 0))
+                    ((and tool-calls (pair? tool-calls))
+                     (car tool-calls))
+                    (else #f))))
+    (if first-tc
         ;; Native Ollama tool calling
-        (let* ((tc (vector-ref tool-calls 0))
-               (fn (assoc-ref tc "function")))
+        (let ((fn (assoc-ref first-tc "function")))
           (if fn
               (let ((name (assoc-ref fn "name"))
                     (args (assoc-ref fn "arguments")))
