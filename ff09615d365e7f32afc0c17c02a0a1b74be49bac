@@ -1,0 +1,85 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Late-bound module-ref pattern attribution: commit b39f0e4 by Daria Pascal
+  (which fixed the same Guile binding race for context.scm reading
+  *session* — same workaround applies here for the session_id label)
+
+## Testing
+- Live verified end-to-end via tmux session 'sage-otel':
+  1. session counter: guile_sage_session_count_total{session_id=session-NNN}
+     lands in Prometheus on REPL start
+  2. token counters: input/output land per chat turn after flush
+  3. cost counter: stays at 0 for local mistral/llama3.2 (correct,
+     Ollama is free)
+  4. active.time user counter: incremented during readline wait
+  5. tool_decision counter: incremented after a successful write_file
+     via llama3.2 streaming tool call
+- The 'model-not-found friendly error path was NOT live-tested in
+  this commit (depends on the fallback in ollama.scm which catches
+  it before chat). But unit-tested by the test-model-fallback suite.
+- gmake check: 34/37 baseline (3 known security failures), no new
+  regressions.
+
+## Issues
+- bd: none yet
+- github: none
+
+## Conjecture (CPRR)
+1. Wiring telemetry into the REPL hot path will not measurably
+   degrade chat latency on the LAN. POST round trip to nexus is
+   ~10-20ms vs the multi-second LLM turn.
+2. The session_id label is high-cardinality but bounded (one new
+   value per /exit). Acceptable for Prometheus retention.
+3. The active.time/user counter is wall-clock time on readline,
+   which conflates \"thinking\" with \"AFK\". Not ideal but matches
+   the Claude Code dashboard's CLI vs User panel semantics.
+4. tool_decision should fire on the reject path even though no
+   real reject path exists in YOLO mode. Future-proofing for
+   when permission gates ship.
+
+## Validation
+1. Visual: chat round-trip in tmux still feels snappy. http.jsonl
+   shows telemetry POSTs at 10-20ms (commits 5+6 enable this view).
+2. Prometheus has multiple session_id values from this session
+   without label-explosion warnings.
+3. Active.time user counter showed 8s after waiting 8s on the
+   prompt — direct correspondence.
+4. Verified by code review only (no permission denial in YOLO).
+
+## Refutation / known limits
+- The follow-up non-streaming chat inside the streaming tool-call
+  branch (when handle-chat dispatches to ollama-chat) does NOT
+  flush telemetry. The tool_decision counter from execute-tool
+  sits in memory until the NEXT user turn (or /exit). We hit this
+  during the smoke test and worked around by /exit'ing. Filed in
+  release notes as a follow-up.
+- The active.time CLI counter is wrapped around the WHOLE
+  repl-eval call including command parsing and tool dispatch. If
+  the user issues a /command (no LLM call), the time is still
+  attributed to type=cli. Probably acceptable but worth noting.
+- 'model-not-found friendly catch only handles the symbol thrown
+  by ollama.scm. Other error paths in the chat code still fall
+  through to the generic format printer. Fine for now; the
+  telemetry-flush failure path is silent on purpose.
+- Late-bound module-ref for *session* is a workaround for a Guile
+  module binding race. The right long-term fix is a session-id
+  accessor function exported from (sage session) so callers don't
+  need to module-ref a mutable variable.
+
+## Meta - research / context / deep-dives
+- Related: src/sage/context.scm:103 (the original late-bound
+  workaround) and commit b39f0e4 which introduced it. There are
+  almost certainly other places in the codebase that read mutable
+  module-level state from another module and would benefit from
+  the same fix. Worth a grep audit.
+- Eval idea: load test the telemetry hot path with a synthetic
+  benchmark — 1000 inc-counter! + 100 telemetry-flush! calls —
+  to confirm it doesn't allocate excessively or block.
+- Open question: should telemetry-flush! be debounced (only flush
+  if N seconds have passed since the last flush) so a chat turn
+  with multiple tool calls doesn't flush 5 times? Probably yes
+  for a future optimisation.
+- Worth reading: how Claude Code structures its similar wiring —
+  it presumably batches per-session and flushes on shutdown only.
+  See com.anthropic.claude_code OTel scope behavior.
