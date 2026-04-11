@@ -1,0 +1,63 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Discovered during the model removal work in commit 0a7f24c
+
+## Testing
+- 13/13 in test-model-tier.scm pass after the assertion updates
+- Direct curl test against /api/chat with tools confirmed llama3.2
+  returns native tool_calls (see commit 0a7f24c notes for the bytes)
+
+## Issues
+- bd: none
+- github: none
+
+## Conjecture (CPRR)
+- Hypothesis 1: llama3.2 supports native tool calling per Meta's
+  release notes for the 1B/3B variants. The hard-coded
+  ('tools? . #f) was either a copy-paste from an older llama2 era
+  config or a misreading of which tier the flag applied to.
+- Hypothesis 2: qwen2.5-coder:7b is the right standard-tier
+  fallback now that mistral is removed: tool-capable, code-aware,
+  available, and the next size up from llama3.2 in our matrix.
+
+## Validation
+- Hypothesis 1: direct curl to localhost:11434/api/chat with a
+  get_weather tool definition returned a clean tool_calls payload
+  with name=get_weather, arguments={city:Tokyo}. Captured in the
+  notes for commit 0a7f24c.
+- Hypothesis 2: ollama list still shows qwen2.5-coder:7b at 4.7 GB.
+  Benchmarked at 22.9 t/s eval, 3.6s total for a square-function
+  prompt. Slower than llama3.2 (41.9 t/s) but reliable.
+
+## Refutation / known limits
+- llama3.2 STILL sometimes text-formats tool calls instead of using
+  the native field — we proved this in tmux. The 'tools? flag
+  declares a CAPABILITY, not a guarantee. Sage needs the model
+  to actually exercise the capability on each turn.
+- qwen2.5-coder:7b also occasionally text-formats. Both small models
+  on this hardware are stochastic. The user noted the analogy:
+  \"like training a toddler.\" Documented in RELEASE-0.6.0.org as
+  the >= 3B model selection rationale.
+- The MODEL_TIER_CEILING_FAST default (2000) is unchanged but may
+  be wrong now that llama3.2 actually does tool calls. If a tool
+  call requires extra context, the auto-switch to standard might
+  fire prematurely. Untested in this commit.
+
+## Meta - research / context / deep-dives
+- Eval idea: run the same tool-call prompt 20 times against
+  llama3.2 and count how often it produces native tool_calls vs
+  inline JSON text. Establishes the baseline reliability number
+  the user is likely to ask about.
+- Compare across families: llama3.2:1b, llama3.2:3b (which is
+  ~latest), qwen2.5:0.5b, qwen2.5-coder:0.5b. The user specifically
+  asked about a possible \"qwen3.5:0.6\" with tool support — that
+  doesn't exist as a tag, but qwen2.5:0.5b is the closest small
+  tool-capable option. Worth pulling and benchmarking.
+- The fallback parser (ollama-parse-tool-call) only catches
+  ```tool fenced blocks. A future enhancement could detect raw
+  JSON-shaped tool calls in streamed text. Brittle but might
+  recover the unreliable cases.
+- Related: docs/MCP-CONTRACT.org (in progress) will document MCP's
+  tool-calling contract — likely a more rigorous protocol than
+  Ollama's, since MCP servers must declare tools/list up front.
