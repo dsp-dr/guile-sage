@@ -37,9 +37,10 @@
      ("model" . "llama3.2:latest")
      ("ceiling" . 2000)
      ("context-limit" . 8000)
-     ("tools?" . #f))
+     ;; llama3.2 (1B/3B) supports native tool calling per Meta/Ollama
+     ("tools?" . #t))
     (("name" . "standard")
-     ("model" . "mistral:latest")
+     ("model" . "qwen2.5-coder:7b")
      ("ceiling" . 6000)
      ("context-limit" . 8000)
      ("tools?" . #t))))
@@ -77,7 +78,7 @@
 ;;; Returns: filtered list of tier alists
 (define* (load-model-tiers #:optional (available-model-names '()))
   (let* ((fast-model (or (config-get "MODEL_TIER_FAST") "llama3.2:latest"))
-         (standard-model (or (config-get "MODEL_TIER_STANDARD") "mistral:latest"))
+         (standard-model (or (config-get "MODEL_TIER_STANDARD") "qwen2.5-coder:7b"))
          (fast-ceiling (or (and=> (config-get "MODEL_TIER_CEILING_FAST") string->number)
                            2000))
          (standard-ceiling (or (and=> (config-get "MODEL_TIER_CEILING_STANDARD") string->number)
@@ -86,7 +87,8 @@
                    ("model" . ,fast-model)
                    ("ceiling" . ,fast-ceiling)
                    ("context-limit" . ,(get-token-limit fast-model))
-                   ("tools?" . #f))
+                   ;; llama3.2 supports tools natively; user override via env still wins
+                   ("tools?" . #t))
                   (("name" . "standard")
                    ("model" . ,standard-model)
                    ("ceiling" . ,standard-ceiling)
