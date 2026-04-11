@@ -23,3 +23,7 @@ output/
 
 # Git worktrees (parallel development branches)
 worktrees/
+
+# Sage tool-call demo / project hygiene
+pwned.txt
+tmp/
