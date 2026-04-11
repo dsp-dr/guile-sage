@@ -1,0 +1,42 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+
+## Testing
+- Manually verified `git status` no longer flags tmp/ or pwned.txt after this commit
+- No test suite impact (gitignore change only)
+
+## Issues
+- bd: none
+- github: none
+
+## Conjecture (CPRR)
+- Hypothesis: tmp/ and pwned.txt are working artifacts the user did not
+  intend to track. tmp/ is created by the dashboard mutator script and
+  by sage's own write_file tool calls during testing. pwned.txt is a
+  5-byte test leftover (\"pwned\\n\") whose origin is unknown but is
+  unlikely to be production code.
+
+## Validation
+- pwned.txt is 5 bytes and contains the literal string \"pwned\"
+- tmp/ contains: ai-tools-dashboard.{before,after}.json, dashboard-add-guile-sage.py,
+  sage-test*.scm (artifacts from earlier sage smoke tests)
+- Neither is referenced by any source file under src/
+
+## Refutation / known limits
+- pwned.txt could in principle be a deliberate marker for something we
+  did not investigate. If a future agent finds it documented somewhere,
+  the gitignore entry should be removed.
+- The dashboard mutator script in tmp/dashboard-add-guile-sage.py is
+  USEFUL but lives in tmp/ which is now gitignored. A follow-up should
+  move it to scripts/.
+
+## Meta - research / context / deep-dives
+- Related: scripts/ already contains useful Python utilities
+  (generate-synthetic-session.py). The dashboard mutator belongs there.
+- The .gitignore convention in this repo uses bare patterns; some
+  projects prefer leading-slash anchors. We followed local convention.
+- Open question: should sage's write_file path-resolution be smarter
+  so it doesn't dump artifacts in workspace-relative tmp/ when the
+  caller intended /tmp/? Filed as a 0.6.0 known follow-up in the
+  release notes.
