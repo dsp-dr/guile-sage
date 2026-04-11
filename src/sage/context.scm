@@ -25,7 +25,11 @@
             context-format-usage
             context-window-status
             ;; Warning thresholds
-            *context-thresholds*))
+            *context-thresholds*
+            ;; Warning/suggestion logic
+            context-warnings
+            context-format-warnings
+            reset-fired-thresholds!))
 
 ;;; State
 (define *context-source* #f)
@@ -188,3 +192,54 @@ Returns #t on success, #f on failure."
                        (else ""))))
     (format #f "Context window: [~a] ~a%~a~%  ~a / ~a tokens"
             bar pct level-label tokens limit)))
+
+;;; ============================================================
+;;; Warning and Suggestion Messages
+;;; ============================================================
+
+;;; context-warnings: Generate user-facing warning strings for crossed thresholds
+;;; Arguments:
+;;;   model - Optional model name for limit lookup
+;;; Returns: List of warning strings (empty if no new thresholds crossed)
+(define* (context-warnings #:optional (model #f))
+  (let ((crossed (context-check-thresholds model)))
+    (map (lambda (threshold)
+           (let* ((level (assoc-ref threshold "level"))
+                  (tokens (assoc-ref threshold "tokens"))
+                  (limit (assoc-ref threshold "limit"))
+                  (pct (inexact->exact
+                        (round (* 100.0 (exact->inexact
+                                         (assoc-ref threshold "ratio")))))))
+             (cond
+              ((equal? level "critical")
+               (format #f "~a Context window ~a% full (~a/~a tokens). Context may be truncated. Run /compact now."
+                       "[!]" pct tokens limit))
+              ((equal? level "high")
+               (format #f "~a Context window ~a% full (~a/~a tokens). Consider running /compact to free space."
+                       "[!]" pct tokens limit))
+              ((equal? level "warning")
+               (format #f "~a Context window ~a% full (~a/~a tokens)."
+                       "[*]" pct tokens limit))
+              (else
+               (format #f "[*] Context window at ~a% (~a/~a tokens)."
+                       pct tokens limit)))))
+         crossed)))
+
+;;; context-format-warnings: Format warnings for REPL display with ANSI colors
+;;; Arguments:
+;;;   model - Optional model name for limit lookup
+;;; Returns: Single string with newlines, or "" if no warnings
+(define* (context-format-warnings #:optional (model #f))
+  (let ((warnings (context-warnings model)))
+    (if (null? warnings)
+        ""
+        (string-join
+         (map (lambda (w)
+                ;; Use yellow for warnings, red for high/critical
+                (cond
+                 ((string-contains w "[!]")
+                  (format #f "\x1b[1;31m~a\x1b[0m" w))  ; bold red
+                 (else
+                  (format #f "\x1b[33m~a\x1b[0m" w))))   ; yellow
+              warnings)
+         "\n"))))
