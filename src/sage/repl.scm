@@ -18,6 +18,7 @@
   #:use-module (sage compaction)
   #:use-module (sage model-tier)
   #:use-module (sage status)
+  #:use-module (sage commands)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-19)
   #:use-module (ice-9 format)
@@ -125,6 +126,10 @@
   (display "  /doctor         - Check dependencies and connections\n")
   (display "  /reload         - Hot-reload sage modules\n")
   (display "  /logs [n] [lvl] - Show recent log entries\n")
+  (display "\nCustom commands:\n")
+  (display "  /commands       - List all commands (built-in + custom)\n")
+  (display "  /define-command - Define custom command: /define-command <name> <expr>\n")
+  (display "  /undefine-command - Remove custom command\n")
   (display "\nAgent commands:\n")
   (display "  /agent [mode]   - Show/set agent mode (interactive|autonomous|yolo)\n")
   (display "  /tasks          - List pending agent tasks\n")
@@ -459,6 +464,48 @@
     (display "\n=== done ===\n"))
   #t)
 
+;;; Custom Command Handlers
+
+(define (cmd-define-command args)
+  "Define a custom slash command: /define-command <name> <scheme-expr>"
+  (let* ((trimmed (string-trim-both args))
+         (space (string-index trimmed #\space)))
+    (if space
+        (let ((name (substring trimmed 0 space))
+              (expr (string-trim-both (substring trimmed space))))
+          (define-custom-command! name expr)
+          (format #t "Defined custom command: /~a~%" name))
+        (display "Usage: /define-command <name> <scheme-expression>\n")))
+  #t)
+
+(define (cmd-undefine-command args)
+  "Remove a custom slash command: /undefine-command <name>"
+  (let ((name (string-trim-both args)))
+    (if (string-null? name)
+        (display "Usage: /undefine-command <name>\n")
+        (if (undefine-custom-command! name)
+            (format #t "Removed custom command: /~a~%" name)
+            (format #t "No custom command named: /~a~%" name))))
+  #t)
+
+(define (cmd-commands args)
+  "List all commands (built-in + custom)."
+  (display "Built-in commands:\n")
+  (for-each
+   (lambda (cmd-pair)
+     (format #t "  ~a~%" (car cmd-pair)))
+   *commands*)
+  (let ((custom (list-custom-commands)))
+    (if (null? custom)
+        (display "\nNo custom commands defined.\n")
+        (begin
+          (display "\nCustom commands:\n")
+          (for-each
+           (lambda (pair)
+             (format #t "  /~a => ~a~%" (car pair) (cdr pair)))
+           custom))))
+  #t)
+
 ;;; Slash Commands (defined after all cmd-* functions to avoid forward references)
 
 (define *commands*
@@ -491,7 +538,10 @@
     ("/prefetch"  . ,cmd-prefetch)
     ("/tier"      . ,cmd-tier)
     ("/tiers"     . ,cmd-tier)
-    ("/doctor"    . ,cmd-doctor)))
+    ("/doctor"    . ,cmd-doctor)
+    ("/define-command"   . ,cmd-define-command)
+    ("/undefine-command" . ,cmd-undefine-command)
+    ("/commands"  . ,cmd-commands)))
 
 ;;; Agent Loop
 
@@ -545,11 +595,21 @@
         (let ((handler (assoc-ref *commands* cmd)))
           (if handler
               (handler args)
-              (begin
-                (log-warn "repl" "Unknown command" `(("cmd" . ,cmd)))
-                (format #t "Unknown command: ~a~%" cmd)
-                (display "Type /help for available commands.\n")
-                #t))))
+              ;; Try custom commands (strip leading /)
+              (let ((custom-name (substring cmd 1)))
+                (if (get-custom-command custom-name)
+                    (begin
+                      (log-debug "repl" (format #f "Custom command: ~a" cmd))
+                      (let ((result (execute-custom-command custom-name)))
+                        (when (string? result)
+                          (display result)
+                          (newline)))
+                      #t)
+                    (begin
+                      (log-warn "repl" "Unknown command" `(("cmd" . ,cmd)))
+                      (format #t "Unknown command: ~a~%" cmd)
+                      (display "Type /help for available commands.\n")
+                      #t))))))
       #f))
 
 ;;; Chat Handler
@@ -753,6 +813,12 @@
 
   ;; Initialize tools
   (init-default-tools)
+
+  ;; Load custom commands
+  (let ((n (load-custom-commands!)))
+    (when (> n 0)
+      (log-info "repl" (format #f "Loaded ~a custom command~a" n
+                                (if (= n 1) "" "s")))))
 
   ;; Probe available models and configure tiers
   (catch #t
