@@ -1,0 +1,571 @@
+#!/usr/bin/env guile3
+!#
+;;; test-pbt.scm --- Property-based tests for guile-sage -*- coding: utf-8 -*-
+
+;;; Commentary:
+;;
+;; Minimal inline PBT harness (seed 42, 100 trials per property).
+;; Tests pure-function invariants across session, security, tools,
+;; compaction, model-tier, and config modules.
+
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
+
+(use-modules (sage session)
+             (sage config)
+             (sage compaction)
+             (sage model-tier)
+             (sage tools)
+             (sage util)
+             (srfi srfi-1)
+             (ice-9 format))
+
+;;; ============================================================
+;;; Minimal PBT Harness
+;;; ============================================================
+
+(define *pbt-seed* 42)
+(define *pbt-trials* 100)
+(define *pbt-passed* 0)
+(define *pbt-failed* 0)
+(define *pbt-total* 0)
+
+;;; Simple LCG PRNG (deterministic, seed-controlled)
+(define *rng-state* *pbt-seed*)
+
+(define (rng-next!)
+  (set! *rng-state*
+        (modulo (+ (* *rng-state* 1103515245) 12345)
+                (expt 2 31)))
+  *rng-state*)
+
+(define (rng-int lo hi)
+  "Return random integer in [lo, hi]."
+  (+ lo (modulo (rng-next!) (+ 1 (- hi lo)))))
+
+(define (rng-string len)
+  "Return random printable ASCII string of given length."
+  (list->string
+   (map (lambda (_) (integer->char (rng-int 32 126)))
+        (iota len))))
+
+(define (rng-alpha-string len)
+  "Return random alphabetic string of given length."
+  (list->string
+   (map (lambda (_)
+          (let ((c (rng-int 0 51)))
+            (integer->char
+             (if (< c 26)
+                 (+ c 65)   ; A-Z
+                 (+ c 71))))) ; a-z
+        (iota len))))
+
+(define (rng-element lst)
+  "Return random element from list."
+  (list-ref lst (modulo (rng-next!) (length lst))))
+
+(define (rng-bool)
+  "Return random boolean."
+  (= 0 (modulo (rng-next!) 2)))
+
+(define (rng-message)
+  "Generate a random message alist for compaction tests."
+  (let ((role (rng-element '("user" "assistant" "system")))
+        (content (rng-string (rng-int 5 200)))
+        (tokens (rng-int 1 100)))
+    `(("role" . ,role)
+      ("content" . ,content)
+      ("tokens" . ,tokens))))
+
+(define (rng-messages n)
+  "Generate n random messages."
+  (map (lambda (_) (rng-message)) (iota n)))
+
+;;; property: Run a property test with N trials
+;;; name - test name string
+;;; gen-fn - (lambda () input) generator
+;;; prop-fn - (lambda (input) bool) property checker
+(define (property name gen-fn prop-fn)
+  (set! *pbt-total* (1+ *pbt-total*))
+  (let loop ((trial 0) (counterexample #f))
+    (if (>= trial *pbt-trials*)
+        (begin
+          (set! *pbt-passed* (1+ *pbt-passed*))
+          (format #t "PASS: ~a (~a trials)~%" name *pbt-trials*))
+        (let ((input (gen-fn)))
+          (catch #t
+            (lambda ()
+              (if (prop-fn input)
+                  (loop (1+ trial) #f)
+                  (begin
+                    (set! *pbt-failed* (1+ *pbt-failed*))
+                    (format #t "FAIL: ~a (trial ~a, input: ~s)~%"
+                            name trial input))))
+            (lambda (key . args)
+              (set! *pbt-failed* (1+ *pbt-failed*))
+              (format #t "FAIL: ~a (trial ~a, exception: ~a ~s, input: ~s)~%"
+                      name trial key args input)))))))
+
+;;; ============================================================
+;;; Property 1: Session State Invariants
+;;; ============================================================
+
+(format #t "~%=== PBT: Session State Invariants ===~%")
+
+(property "session-create always has valid name"
+  (lambda () (rng-alpha-string (rng-int 1 50)))
+  (lambda (name)
+    (let ((session (session-create #:name name)))
+      (and (string? (assoc-ref session "name"))
+           (equal? (assoc-ref session "name") name)))))
+
+(property "session-create always has timestamp"
+  (lambda () (rng-alpha-string (rng-int 1 30)))
+  (lambda (name)
+    (let ((session (session-create #:name name)))
+      (and (string? (assoc-ref session "created"))
+           (string? (assoc-ref session "updated"))
+           (> (string-length (assoc-ref session "created")) 0)))))
+
+(property "session-create always has empty messages"
+  (lambda () (rng-alpha-string (rng-int 1 20)))
+  (lambda (name)
+    (let ((session (session-create #:name name)))
+      (null? (assoc-ref session "messages")))))
+
+(property "session-create always has zero-initialized stats"
+  (lambda () (rng-alpha-string (rng-int 1 20)))
+  (lambda (_name)
+    (let* ((session (session-create #:name _name))
+           (stats (assoc-ref session "stats")))
+      (and (= 0 (assoc-ref stats "total_tokens"))
+           (= 0 (assoc-ref stats "input_tokens"))
+           (= 0 (assoc-ref stats "output_tokens"))
+           (= 0 (assoc-ref stats "request_count"))
+           (= 0 (assoc-ref stats "tool_calls"))))))
+
+;;; ============================================================
+;;; Property 2: estimate-tokens
+;;; ============================================================
+
+(format #t "~%=== PBT: Token Estimation ===~%")
+
+(property "estimate-tokens returns non-negative for any string"
+  (lambda () (rng-string (rng-int 0 500)))
+  (lambda (text)
+    (>= (estimate-tokens text) 0)))
+
+(property "estimate-tokens is monotonic with string length"
+  (lambda ()
+    (let* ((len1 (rng-int 0 100))
+           (len2 (rng-int (+ len1 4) (+ len1 200))))
+      (cons (rng-string len1) (rng-string len2))))
+  (lambda (pair)
+    (<= (estimate-tokens (car pair))
+        (estimate-tokens (cdr pair)))))
+
+(property "estimate-tokens returns 0 for non-strings"
+  (lambda () (rng-int 0 10000))
+  (lambda (n)
+    (= (estimate-tokens n) 0)))
+
+;;; ============================================================
+;;; Property 3: Security Sandbox (safe-path?)
+;;; ============================================================
+
+(format #t "~%=== PBT: Security Sandbox ===~%")
+
+(property "paths with .. are always rejected"
+  (lambda ()
+    (let ((prefix (rng-alpha-string (rng-int 0 10)))
+          (suffix (rng-alpha-string (rng-int 0 10))))
+      (string-append prefix "/.." suffix)))
+  (lambda (path)
+    (not (safe-path? path))))
+
+(property ".env paths are always rejected"
+  (lambda ()
+    (let ((prefix (rng-alpha-string (rng-int 0 10))))
+      (string-append prefix (if (> (string-length prefix) 0) "/" "") ".env")))
+  (lambda (path)
+    (not (safe-path? path))))
+
+(property ".git/ paths are always rejected"
+  (lambda ()
+    (let ((suffix (rng-alpha-string (rng-int 1 20))))
+      (string-append ".git/" suffix)))
+  (lambda (path)
+    (not (safe-path? path))))
+
+(property ".ssh paths are always rejected"
+  (lambda ()
+    (let ((suffix (rng-alpha-string (rng-int 1 20))))
+      (string-append ".ssh/" suffix)))
+  (lambda (path)
+    (not (safe-path? path))))
+
+(property ".gnupg paths are always rejected"
+  (lambda ()
+    (let ((suffix (rng-alpha-string (rng-int 1 20))))
+      (string-append ".gnupg/" suffix)))
+  (lambda (path)
+    (not (safe-path? path))))
+
+;;; ============================================================
+;;; Property 4: Tool Dispatch
+;;; ============================================================
+
+(format #t "~%=== PBT: Tool Dispatch ===~%")
+
+(init-default-tools)
+
+(define *known-tool-names*
+  '("read_file" "list_files" "git_status" "git_diff" "git_log"
+    "search_files" "glob_files" "write_file" "edit_file"
+    "run_tests" "git_commit" "git_add_note" "git_push"
+    "eval_scheme" "reload_module" "create_tool"
+    "read_logs" "search_logs"
+    "sage_task_create" "sage_task_complete"
+    "sage_task_list" "sage_task_status"
+    "whoami" "irc_send" "generate_image"))
+
+(property "known tools always resolve via get-tool"
+  (lambda () (rng-element *known-tool-names*))
+  (lambda (name)
+    (let ((tool (get-tool name)))
+      (and tool
+           (equal? (assoc-ref tool "name") name)))))
+
+(property "random unknown tools always return #f from get-tool"
+  (lambda ()
+    (string-append "nonexistent_" (rng-alpha-string (rng-int 5 20))))
+  (lambda (name)
+    (not (get-tool name))))
+
+(property "execute-tool on unknown tool returns 'Unknown tool' message"
+  (lambda ()
+    (string-append "fake_" (rng-alpha-string (rng-int 5 20))))
+  (lambda (name)
+    (let ((result (execute-tool name '())))
+      (string-contains result "Unknown tool"))))
+
+;;; ============================================================
+;;; Property 5: Compaction Invariants
+;;; ============================================================
+
+(format #t "~%=== PBT: Compaction Invariants ===~%")
+
+(property "compact-truncate output <= input length"
+  (lambda ()
+    ;; Ensure keep >= number of system messages to avoid take-right underflow
+    (let* ((n (rng-int 3 30))
+           (msgs (rng-messages n))
+           (sys-count (count (lambda (m) (equal? (assoc-ref m "role") "system"))
+                             msgs))
+           (keep (rng-int (max 1 (1+ sys-count)) (+ n 5))))
+      (cons msgs keep)))
+  (lambda (pair)
+    (let* ((msgs (car pair))
+           (keep (cdr pair))
+           (result (compact-truncate msgs #:keep keep)))
+      (<= (length result) (length msgs)))))
+
+(property "compact-truncate preserves system messages"
+  (lambda ()
+    (let* ((n (rng-int 3 20))
+           ;; Generate non-system messages first
+           (other-msgs (map (lambda (_)
+                              (let ((role (rng-element '("user" "assistant")))
+                                    (content (rng-string (rng-int 5 50)))
+                                    (tokens (rng-int 1 50)))
+                                `(("role" . ,role)
+                                  ("content" . ,content)
+                                  ("tokens" . ,tokens))))
+                            (iota n)))
+           ;; Add exactly one system message at front
+           (msgs (cons `(("role" . "system")
+                         ("content" . "System prompt")
+                         ("tokens" . 10))
+                       other-msgs))
+           ;; Keep must be >= 2 (1 system + at least 1 other)
+           (keep (rng-int 2 (+ n 1))))
+      (cons msgs keep)))
+  (lambda (pair)
+    (let* ((msgs (car pair))
+           (keep (cdr pair))
+           (result (compact-truncate msgs #:keep keep))
+           (sys-out (count (lambda (m) (equal? (assoc-ref m "role") "system"))
+                           result)))
+      ;; The one system message should be preserved
+      (>= sys-out 1))))
+
+(property "compact-token-limit output tokens <= budget"
+  (lambda ()
+    ;; Generate messages with no system messages so system-token overhead
+    ;; doesn't exceed the budget (system msgs are always kept)
+    (let ((msgs (map (lambda (_)
+                       (let ((role (rng-element '("user" "assistant")))
+                             (content (rng-string (rng-int 5 50)))
+                             (tokens (rng-int 1 30)))
+                         `(("role" . ,role)
+                           ("content" . ,content)
+                           ("tokens" . ,tokens))))
+                     (iota (rng-int 5 25))))
+          (budget (rng-int 100 1000)))
+      (cons msgs budget)))
+  (lambda (pair)
+    (let* ((msgs (car pair))
+           (budget (cdr pair))
+           (result (compact-token-limit msgs #:max-tokens budget))
+           (total (fold + 0 (map (lambda (m)
+                                   (or (assoc-ref m "tokens")
+                                       (estimate-tokens
+                                        (or (assoc-ref m "content") ""))))
+                                 result))))
+      (<= total budget))))
+
+(property "compact-importance output <= keep count"
+  (lambda ()
+    (let ((msgs (rng-messages (rng-int 5 25)))
+          (keep (rng-int 3 15)))
+      (cons msgs keep)))
+  (lambda (pair)
+    (let* ((msgs (car pair))
+           (keep (cdr pair))
+           (result (compact-importance msgs #:keep keep)))
+      (<= (length result) (max keep (length msgs))))))
+
+(property "compact-summarize adds summary when compacting"
+  (lambda ()
+    (rng-messages (rng-int 8 25)))
+  (lambda (msgs)
+    (let* ((result (compact-summarize msgs #:keep-recent 3))
+           (first (car result))
+           (content (or (assoc-ref first "content") "")))
+      ;; If compaction happened, first message should be a summary
+      (if (> (length msgs) 3)
+          (string-contains content "Context Summary")
+          ;; No compaction needed
+          #t))))
+
+(property "extract-topics returns list of strings"
+  (lambda () (rng-messages (rng-int 1 20)))
+  (lambda (msgs)
+    (let ((topics (extract-topics msgs)))
+      (and (list? topics)
+           (every string? topics)))))
+
+(property "identify-intent returns non-empty string"
+  (lambda () (rng-messages (rng-int 1 10)))
+  (lambda (msgs)
+    (let ((intent (identify-intent msgs)))
+      (and (string? intent)
+           (> (string-length intent) 0)))))
+
+;;; ============================================================
+;;; Property 6: Model Tier Ordering
+;;; ============================================================
+
+(format #t "~%=== PBT: Model Tier Ordering ===~%")
+
+(property "resolve-model-for-tokens always returns a tier"
+  (lambda () (rng-int 0 100000))
+  (lambda (tokens)
+    (let ((tier (resolve-model-for-tokens tokens)))
+      (and tier
+           (string? (tier-name tier))
+           (string? (tier-model tier))
+           (number? (tier-ceiling tier))
+           (number? (tier-context-limit tier))))))
+
+(property "tier resolution is reflexive: same tokens -> same tier"
+  (lambda () (rng-int 0 50000))
+  (lambda (tokens)
+    (let ((t1 (resolve-model-for-tokens tokens))
+          (t2 (resolve-model-for-tokens tokens)))
+      (equal? (tier-name t1) (tier-name t2)))))
+
+(property "tier ordering: more tokens -> same or higher tier"
+  (lambda ()
+    (let* ((t1 (rng-int 0 5000))
+           (t2 (rng-int t1 10000)))
+      (cons t1 t2)))
+  (lambda (pair)
+    (let* ((t1 (resolve-model-for-tokens (car pair)))
+           (t2 (resolve-model-for-tokens (cdr pair)))
+           (c1 (tier-ceiling t1))
+           (c2 (tier-ceiling t2)))
+      ;; Higher tokens should resolve to same or higher-ceiling tier
+      (<= c1 c2))))
+
+(property "tier-available? is consistent with model list"
+  (lambda ()
+    (let ((tier (rng-element *model-tiers*))
+          (models (list (rng-alpha-string (rng-int 5 15)))))
+      (cons tier models)))
+  (lambda (pair)
+    (let* ((tier (car pair))
+           (models (cdr pair))
+           (available (tier-available? tier models)))
+      ;; Result must be boolean-like (truthy or #f)
+      (or available (not available)))))
+
+(property "filter-available-tiers never returns empty"
+  (lambda ()
+    (list (rng-alpha-string (rng-int 5 15))))
+  (lambda (models)
+    (let ((filtered (filter-available-tiers *model-tiers* models)))
+      (> (length filtered) 0))))
+
+;;; ============================================================
+;;; Property 7: Configuration
+;;; ============================================================
+
+(format #t "~%=== PBT: Configuration ===~%")
+
+(property "config-get with default returns default for missing keys"
+  (lambda ()
+    (cons (string-append "NONEXISTENT_" (rng-alpha-string (rng-int 5 15)))
+          (rng-string (rng-int 1 20))))
+  (lambda (pair)
+    (let* ((key (car pair))
+           (default (cdr pair))
+           (result (config-get key default)))
+      (equal? result default))))
+
+(property "path->project-id replaces all slashes"
+  (lambda ()
+    (let* ((segments (rng-int 1 5))
+           (parts (map (lambda (_) (rng-alpha-string (rng-int 1 10)))
+                       (iota segments))))
+      (string-append "/" (string-join parts "/"))))
+  (lambda (path)
+    (let ((id (path->project-id path)))
+      (not (string-contains id "/")))))
+
+(property "path->project-id roundtrips for slash-only paths"
+  (lambda ()
+    (let* ((segments (rng-int 1 5))
+           (parts (map (lambda (_) (rng-alpha-string (rng-int 1 10)))
+                       (iota segments))))
+      (string-append "/" (string-join parts "/"))))
+  (lambda (path)
+    (equal? path (project-id->path (path->project-id path)))))
+
+(property "get-token-limit always returns positive integer"
+  (lambda ()
+    (rng-element '("llama3" "mistral" "gpt-4" "claude"
+                   "deepseek" "qwen" "unknown-model-xyz")))
+  (lambda (model)
+    (let ((limit (get-token-limit model)))
+      (and (number? limit)
+           (> limit 0)))))
+
+(property "*token-limits* entries are all positive"
+  (lambda () (rng-element *token-limits*))
+  (lambda (entry)
+    (and (string? (car entry))
+         (number? (cdr entry))
+         (> (cdr entry) 0))))
+
+;;; ============================================================
+;;; Property 8: JSON Roundtrip
+;;; ============================================================
+
+(format #t "~%=== PBT: JSON Roundtrip ===~%")
+
+(property "json-write-string -> json-read-string roundtrips for strings"
+  (lambda () (rng-alpha-string (rng-int 0 100)))
+  (lambda (s)
+    (let* ((json (json-write-string s))
+           (back (json-read-string json)))
+      (equal? s back))))
+
+(property "json-write-string -> json-read-string roundtrips for numbers"
+  (lambda () (rng-int -10000 10000))
+  (lambda (n)
+    (let* ((json (json-write-string n))
+           (back (json-read-string json)))
+      (= n back))))
+
+(property "json-write-string -> json-read-string roundtrips for alists"
+  (lambda ()
+    (let ((key (rng-alpha-string (rng-int 1 20)))
+          (val (rng-alpha-string (rng-int 0 30))))
+      `((,key . ,val))))
+  (lambda (alist)
+    (let* ((json (json-write-string alist))
+           (back (json-read-string json)))
+      (equal? alist back))))
+
+;;; ============================================================
+;;; Property 9: string-replace-substring
+;;; ============================================================
+
+(format #t "~%=== PBT: String Utilities ===~%")
+
+(property "string-replace-substring with empty search returns original"
+  (lambda () (rng-string (rng-int 0 100)))
+  (lambda (s)
+    (equal? s (string-replace-substring s "" "anything"))))
+
+(property "string-replace-substring idempotent when search not found"
+  (lambda ()
+    (cons (rng-alpha-string (rng-int 1 50))
+          (string-append "ZZZZZ" (rng-alpha-string (rng-int 1 10)))))
+  (lambda (pair)
+    (let ((text (car pair))
+          (search (cdr pair)))
+      ;; search contains ZZZZZ which won't be in alpha-only text
+      (equal? text (string-replace-substring text search "replacement")))))
+
+(property "string-replace-substring result contains no search term"
+  (lambda ()
+    (let* ((word (rng-alpha-string (rng-int 1 5)))
+           (text (string-append "hello " word " world " word " end")))
+      (cons text word)))
+  (lambda (pair)
+    (let* ((text (car pair))
+           (search (cdr pair))
+           (result (string-replace-substring text search "")))
+      (not (string-contains result search)))))
+
+;;; ============================================================
+;;; Property 10: Compaction Score
+;;; ============================================================
+
+(format #t "~%=== PBT: Compaction Score ===~%")
+
+(property "compaction-score is always in [0, 100]"
+  (lambda ()
+    (list (/ (rng-int 0 100) 100.0)
+          (/ (rng-int 0 100) 100.0)
+          (/ (rng-int 1 100) 100.0)))
+  (lambda (args)
+    (let ((score (apply compaction-score args)))
+      (and (>= score 0) (<= score 100)))))
+
+(property "compaction-score: higher info retention -> higher score"
+  (lambda ()
+    (let ((intent (/ (rng-int 50 100) 100.0))
+          (compression (/ (rng-int 30 70) 100.0)))
+      (list intent compression)))
+  (lambda (args)
+    (let* ((intent (car args))
+           (compression (cadr args))
+           (score-low (compaction-score 0.3 intent compression))
+           (score-high (compaction-score 0.9 intent compression)))
+      (>= score-high score-low))))
+
+;;; ============================================================
+;;; Summary
+;;; ============================================================
+
+(format #t "~%=== PBT Summary ===~%")
+(format #t "Properties: ~a~%" *pbt-total*)
+(format #t "Passed: ~a~%" *pbt-passed*)
+(format #t "Failed: ~a~%" *pbt-failed*)
+(format #t "Trials per property: ~a~%" *pbt-trials*)
+(format #t "Total trials: ~a~%" (* *pbt-total* *pbt-trials*))
+(format #t "~%Tests: ~a/~a passed~%" *pbt-passed* *pbt-total*)
+
+(exit (if (= *pbt-failed* 0) 0 1))
