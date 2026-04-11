@@ -604,8 +604,9 @@
           (if handler
               (handler args)
               ;; Try custom commands (strip leading /)
-              (let ((custom-name (substring cmd 1)))
-                (if (get-custom-command custom-name)
+              (let* ((custom-name (substring cmd 1))
+                     (custom-expr (get-custom-command custom-name)))
+                (if custom-expr
                     (begin
                       (log-debug "repl" (format #f "Custom command: ~a" cmd))
                       (let ((result (execute-custom-command custom-name)))
