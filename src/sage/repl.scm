@@ -19,6 +19,7 @@
   #:use-module (sage model-tier)
   #:use-module (sage status)
   #:use-module (sage commands)
+  #:use-module (sage telemetry)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-19)
   #:use-module (ice-9 format)
@@ -140,6 +141,7 @@
 
 (define (cmd-exit args)
   (display "Goodbye!\n")
+  (telemetry-shutdown!)
   (set! *running* #f)
   #t)
 
@@ -698,6 +700,17 @@
                 (status-stream-end completion-tokens elapsed)
                 (debug-tokens prompt-tokens completion-tokens)
 
+                ;; Emit token + cost counters (Ollama is local => $0)
+                (inc-counter! "guile_sage.token.usage"
+                              `(("model" . ,model) ("type" . "input"))
+                              (or prompt-tokens 0))
+                (inc-counter! "guile_sage.token.usage"
+                              `(("model" . ,model) ("type" . "output"))
+                              (or completion-tokens 0))
+                (inc-counter! "guile_sage.cost.usage"
+                              `(("model" . ,model)) 0)
+                (telemetry-flush!)
+
                 ;; Check for tool calls in streamed response
                 (let ((tool-call (ollama-parse-tool-call message)))
                   (if tool-call
@@ -746,6 +759,17 @@
 
               (debug-tokens prompt-tokens completion-tokens)
 
+              ;; Emit token + cost counters (Ollama is local => $0)
+              (inc-counter! "guile_sage.token.usage"
+                            `(("model" . ,model) ("type" . "input"))
+                            (or prompt-tokens 0))
+              (inc-counter! "guile_sage.token.usage"
+                            `(("model" . ,model) ("type" . "output"))
+                            (or completion-tokens 0))
+              (inc-counter! "guile_sage.cost.usage"
+                            `(("model" . ,model)) 0)
+              (telemetry-flush!)
+
               (let ((tool-call (ollama-parse-tool-call message)))
                 (if tool-call
                     (begin
@@ -785,7 +809,18 @@
                       (format #t "~a~%" content)))))))
 
       (lambda (key . args)
-        (format #t "Error: ~a ~a~%" key args)))
+        (cond
+         ;; Friendly handling for `ollama rm`-style errors. See
+         ;; ollama.scm:ollama-chat where 404 throws this key.
+         ((eq? key 'model-not-found)
+          (let ((bad-model (if (pair? args) (car args) "(unknown)"))
+                (msg (if (and (pair? args) (pair? (cdr args))) (cadr args) "")))
+            (format #t "~%Model '~a' is not installed locally.~%" bad-model)
+            (format #t "  ~a~%" msg)
+            (format #t "  Try:  ollama pull ~a~%" bad-model)
+            (format #t "  Or:   /exit and restart with SAGE_MODEL=<other-model>~%~%")))
+         (else
+          (format #t "Error: ~a ~a~%" key args)))))
 
     ;; Check context window thresholds after response
     (let ((warning-text (context-format-warnings
@@ -832,13 +867,20 @@
   ;; Initialize tools
   (init-default-tools)
 
+  ;; Initialize telemetry (no-op if SAGE_TELEMETRY_DISABLE is set or
+  ;; OTEL_EXPORTER_OTLP_ENDPOINT is not configured)
+  (telemetry-init)
+
   ;; Load custom commands
   (let ((n (load-custom-commands!)))
     (when (> n 0)
       (log-info "repl" (format #f "Loaded ~a custom command~a" n
                                 (if (= n 1) "" "s")))))
 
-  ;; Probe available models and configure tiers
+  ;; Probe available models, configure tiers, and validate that the
+  ;; configured model is actually installed locally. If it has been
+  ;; removed (e.g. via `ollama rm`), fall back to the first
+  ;; chat-capable model and tell the user.
   (catch #t
     (lambda ()
       (let* ((models (ollama-list-models))
@@ -846,7 +888,24 @@
         (set! *available-tiers* (load-model-tiers model-names))
         (log-info "repl" "Model tiers loaded"
                   `(("tiers" . ,(length *available-tiers*))
-                    ("models" . ,(length models))))))
+                    ("models" . ,(length models))))
+        ;; Validate the configured model
+        (let* ((preferred (ollama-model))
+               (chosen (select-fallback-model preferred models)))
+          (cond
+           ((not chosen)
+            (log-error "repl" "No models installed locally"
+                       `(("preferred" . ,preferred)))
+            (format #t "ERROR: ~a not found and no chat models installed.~%"
+                    preferred)
+            (format #t "       Run `ollama pull llama3.2` to fix.~%"))
+           ((not (equal? preferred chosen))
+            (log-warn "repl" "Configured model unavailable, falling back"
+                      `(("preferred" . ,preferred) ("chosen" . ,chosen)))
+            (format #t "~%WARNING: model '~a' is not installed locally.~%" preferred)
+            (format #t "         Falling back to '~a'.~%" chosen)
+            (format #t "         Override with: SAGE_MODEL=<name>~%~%")
+            (setenv "SAGE_MODEL" chosen))))))
     (lambda (key . args)
       (set! *available-tiers* *model-tiers*)
       (log-warn "repl" "Failed to probe models, using defaults"
@@ -868,6 +927,18 @@
     (session-load session-name))
    (else
     (session-create)))
+
+  ;; Emit session-start counter (labeled with session name).
+  ;; Use late-bound module-ref to avoid Guile module binding order
+  ;; issues with *session* (same workaround as context.scm).
+  (let* ((sess (catch #t
+                 (lambda ()
+                   (module-ref (resolve-module '(sage session)) '*session*))
+                 (lambda args #f)))
+         (sess-name (or (and sess (assoc-ref sess "name")) "unknown")))
+    (inc-counter! "guile_sage.session.count"
+                  `(("session_id" . ,sess-name)) 1)
+    (telemetry-flush!))
 
   ;; Load SAGE.md into session context
   (load-agents-context)
@@ -905,18 +976,32 @@
       (activate-readline))
     (lambda args #f))
 
-  ;; Main loop
+  ;; Main loop. Each iteration records two active.time intervals:
+  ;; "user" = time spent waiting on readline, "cli" = time spent in repl-eval.
   (set! *running* #t)
   (while *running*
     (catch #t
       (lambda ()
-        (let ((input (readline (make-prompt))))
+        (let* ((user-start (current-time))
+               (input (readline (make-prompt)))
+               (user-end (current-time))
+               (user-secs (- (time-second user-end)
+                             (time-second user-start))))
+          (inc-counter! "guile_sage.active.time"
+                        '(("type" . "user")) user-secs)
           (if (eof-object? input)
               (cmd-exit "")
               (begin
                 (add-history input)
-                (repl-eval input)))))
+                (let* ((cli-start (current-time))
+                       (_ (repl-eval input))
+                       (cli-secs (- (time-second (current-time))
+                                    (time-second cli-start))))
+                  (inc-counter! "guile_sage.active.time"
+                                '(("type" . "cli")) cli-secs))))))
       (lambda (key . args)
         (if (eq? key 'quit)
             (set! *running* #f)
-            (format #t "Error: ~a~%" key))))))
+            (format #t "Error: ~a~%" key)))))
+  ;; Final flush for non-/exit termination paths (EOF, quit signal, etc.)
+  (telemetry-shutdown!))
