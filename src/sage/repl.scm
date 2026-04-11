@@ -150,11 +150,17 @@
 (define (cmd-reset args)
   (display (session-clear!))
   (newline)
+  ;; Reset context warnings after clearing session
+  (reset-fired-thresholds!)
   #t)
 
 (define (cmd-status args)
   (display (format-session-status))
   (newline)
+  ;; Show context window usage
+  (let ((model (and *session* (assoc-ref *session* "model"))))
+    (display (context-window-status model))
+    (newline))
   #t)
 
 (define (cmd-compact args)
@@ -162,7 +168,9 @@
                   (string->number args)
                   5)))
     (display (session-compact! #:keep-recent keep #:summarize #t))
-    (newline))
+    (newline)
+    ;; Reset context warnings so they can re-fire if usage grows again
+    (reset-fired-thresholds!))
   #t)
 
 (define (cmd-context args)
@@ -776,7 +784,16 @@
                       (format #t "~a~%" content)))))))
 
       (lambda (key . args)
-        (format #t "Error: ~a ~a~%" key args)))))))
+        (format #t "Error: ~a ~a~%" key args)))
+
+    ;; Check context window thresholds after response
+    (let ((warning-text (context-format-warnings
+                          (if *session*
+                              (assoc-ref *session* "model")
+                              #f))))
+      (unless (string-null? warning-text)
+        (display warning-text)
+        (newline)))))))
 
 ;;; REPL Eval
 
