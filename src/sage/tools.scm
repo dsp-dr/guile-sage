@@ -555,6 +555,80 @@
                     #:level (and level (string->symbol level))
                     #:limit limit))))
 
+  ;; log_stats - Log statistics for self-debugging
+  (register-safe-tool
+   "log_stats"
+   "Parse log file and return statistics: message counts by level, error rate, most common tool calls"
+   '(("type" . "object")
+     ("properties" . ())
+     ("required" . #()))
+   (lambda (args)
+     (log-stats)))
+
+  ;; log_errors - Recent errors with context
+  (register-safe-tool
+   "log_errors"
+   "Extract and summarize recent errors from the log file with context details"
+   '(("type" . "object")
+     ("properties" . (("count" . (("type" . "integer")
+                                  ("description" . "Number of recent errors to show (default 10)")))))
+     ("required" . #()))
+   (lambda (args)
+     (let ((count (or (assoc-ref args "count") 10)))
+       (log-errors #:count count))))
+
+  ;; log_timeline - Event timeline
+  (register-safe-tool
+   "log_timeline"
+   "Show a timeline of events from the log with level markers and tool call annotations"
+   '(("type" . "object")
+     ("properties" . (("count" . (("type" . "integer")
+                                  ("description" . "Number of recent entries to show (default 50)")))
+                      ("module" . (("type" . "string")
+                                   ("description" . "Filter by module name (e.g. tools, ollama, session)")))))
+     ("required" . #()))
+   (lambda (args)
+     (let ((count (or (assoc-ref args "count") 50))
+           (mod (assoc-ref args "module")))
+       (log-timeline #:count count
+                     #:module-filter mod))))
+
+  ;; log_search_advanced - Multi-criteria log search
+  (register-safe-tool
+   "log_search_advanced"
+   "Search logs with multiple criteria: level, module, message pattern, tool name, and time range"
+   '(("type" . "object")
+     ("properties" . (("level" . (("type" . "string")
+                                  ("description" . "Filter by level: debug|info|warn|error")))
+                      ("module" . (("type" . "string")
+                                   ("description" . "Filter by module name")))
+                      ("message_pattern" . (("type" . "string")
+                                            ("description" . "Regex pattern to match in message text")))
+                      ("tool" . (("type" . "string")
+                                 ("description" . "Filter by tool name in context")))
+                      ("from_time" . (("type" . "string")
+                                      ("description" . "Start timestamp (ISO 8601 prefix, e.g. 2026-01-25)")))
+                      ("to_time" . (("type" . "string")
+                                    ("description" . "End timestamp (ISO 8601 prefix, e.g. 2026-01-26)")))
+                      ("limit" . (("type" . "integer")
+                                  ("description" . "Max results (default 100)")))))
+     ("required" . #()))
+   (lambda (args)
+     (let ((level (assoc-ref args "level"))
+           (mod (assoc-ref args "module"))
+           (msg-pat (assoc-ref args "message_pattern"))
+           (tool (assoc-ref args "tool"))
+           (from-t (assoc-ref args "from_time"))
+           (to-t (assoc-ref args "to_time"))
+           (limit (or (assoc-ref args "limit") 100)))
+       (log-search-advanced #:level level
+                            #:module mod
+                            #:message-pattern msg-pat
+                            #:tool tool
+                            #:from-time from-t
+                            #:to-time to-t
+                            #:limit limit))))
+
   ;; ============================================================
   ;; Agent Task Tools
   ;; ============================================================
