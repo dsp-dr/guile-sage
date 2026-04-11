@@ -12,6 +12,7 @@
   #:use-module (sage agent)
   #:use-module (sage irc)
   #:use-module (sage ollama)
+  #:use-module (sage telemetry)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -133,6 +134,8 @@
         (if (check-permission name args)
             (begin
               (log-tool-call name args)
+              (inc-counter! "guile_sage.code_edit.tool_decision"
+                            `(("tool_name" . ,name) ("decision" . "accept")) 1)
               (let ((start-time (get-internal-real-time)))
                 (catch #t
                   (lambda ()
@@ -149,6 +152,8 @@
             (begin
               (log-warn "tools" (format #f "Permission denied: ~a" name)
                         `(("tool" . ,name)))
+              (inc-counter! "guile_sage.code_edit.tool_decision"
+                            `(("tool_name" . ,name) ("decision" . "reject")) 1)
               (format #f "Permission denied for tool: ~a" name)))
         (begin
           (log-warn "tools" (format #f "Unknown tool: ~a" name))
