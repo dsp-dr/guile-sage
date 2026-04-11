@@ -1,0 +1,86 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Inspired by user removing mistral:latest mid-development to free disk
+
+## Testing
+- 21/21 new tests in test-model-fallback.scm pass
+- 13/13 in test-model-tier.scm still pass after default updates (commit 4)
+- Live verified: SAGE_MODEL=mistral:latest gmake run shows the fallback
+  warning and starts cleanly with qwen3:0.6b (smallest chat-capable)
+- Live verified streaming tool_calls: write_file via llama3.2 actually
+  invokes the tool, and guile_sage_code_edit_tool_decision_total
+  lands in Prometheus on /exit
+- Direct curl POST to /api/chat with tools confirmed first-chunk
+  tool_calls shape: see commit message header for the captured bytes
+
+## Issues
+- bd: none (could file follow-ups for the deferred items below)
+- github: none
+
+## Conjecture (CPRR)
+Three independent hypotheses bundled because they all live in ollama.scm:
+
+1. After ollama rm, sage should pick the smallest chat-capable
+   substitute and warn the user, not crash. \"Smallest\" is the right
+   default because the user just freed disk and probably wants
+   tighter feedback loops.
+
+2. The Ollama streaming protocol places tool_calls in the FIRST
+   chunk (done:false), not the last. Any client that only inspects
+   the done chunk will silently lose tool calls.
+
+3. sage's JSON parser returns arrays as Scheme lists; downstream
+   code that hard-codes vector? for tool_calls is broken regardless
+   of which API path it's on.
+
+## Validation
+1. Live tmux: SAGE_MODEL=mistral:latest gmake run produces \"WARNING:
+   model 'mistral:latest' is not installed locally. Falling back to
+   'qwen3:0.6b'.\" REPL is usable. Subsequent chat completes.
+2. Raw curl -N to /api/chat with stream:true and a tool definition
+   shows: chunk 1 has message.tool_calls with the function call,
+   chunk 2 has done:true with empty content. Captured in commit
+   message header.
+3. (json-read-string \"[1,2,3]\") returns '(1 2 3) — a list, not a
+   vector. Verified with sage's util.scm parser.
+
+## Refutation / known limits
+- The fallback heuristic doesn't know about reasoning models like
+  qwen3:0.6b. On this box it picks qwen3:0.6b as smallest chat-capable
+  but qwen3 emits long <think> chains, bloating token counters.
+  Filed in RELEASE-0.6.0.org as a known characteristic.
+- llama3.2 STILL sometimes text-formats tool calls instead of using
+  the native tool_calls field. The fix here only catches the case
+  where the model DOES use the native field. The fallback parser
+  for ```tool fenced blocks doesn't catch raw inline JSON either.
+  Documented as the \">= 3B\" model selection rationale in
+  RELEASE-0.6.0.org.
+- 404 detection assumes Ollama; cloud providers may use different
+  status codes / error shapes.
+- select-fallback-model picks by size only. A smarter heuristic
+  could prefer known tool-capable families (qwen2.5, llama3.x) over
+  reasoning models (qwen3) but we don't expose that info from
+  /api/tags.
+
+## Meta - research / context / deep-dives
+- Related: src/sage/model-tier.scm — was hard-coded to mistral as
+  standard tier; updated in the next commit to qwen2.5-coder:7b.
+- Related research: docs/MCP-CONTRACT.org (in progress, by a
+  background research agent) is establishing the protocol contract
+  for MCP. It will likely surface a similar pattern: capability
+  declaration up front, graceful degradation when capabilities are
+  missing.
+- Eval idea: write a property-based test (extend test-pbt.scm) that
+  feeds select-fallback-model random subsets of /api/tags responses
+  and verifies the invariant (smallest chat-capable always wins,
+  never picks an embed/image model, never returns nil if any
+  chat-capable exists).
+- The streaming tool_calls bug is exactly the kind of mismatch that
+  the new SAGE_DEBUG_HTTP=1 logging (commit 6) was designed to
+  catch. Worth a regression test that captures the http.jsonl from
+  a tool-call turn and asserts that the streamed first chunk
+  contains tool_calls.
+- Open question: should ollama-chat-with-tools (non-streaming) ever
+  be used now that streaming + tool_calls works end-to-end? Two
+  call sites suggest historical baggage worth removing.
