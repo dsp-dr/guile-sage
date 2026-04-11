@@ -48,13 +48,14 @@
       (assert-equal (tier-model fast) "llama3.2:latest" "model")
       (assert-equal (tier-ceiling fast) 2000 "ceiling")
       (assert-equal (tier-context-limit fast) 8000 "context-limit")
-      (assert-true (not (tier-supports-tools? fast)) "fast has no tools"))))
+      ;; llama3.2 supports tool calling natively
+      (assert-true (tier-supports-tools? fast) "fast supports tools"))))
 
 (test "standard tier supports tools"
   (lambda ()
     (let ((standard (cadr *model-tiers*)))
       (assert-equal (tier-name standard) "standard" "name")
-      (assert-equal (tier-model standard) "mistral:latest" "model")
+      (assert-equal (tier-model standard) "qwen2.5-coder:7b" "model")
       (assert-true (tier-supports-tools? standard) "standard has tools"))))
 
 (test "low tokens resolve to fast tier"
@@ -105,15 +106,15 @@
 (test "tier-available? matches substring"
   (lambda ()
     (let ((tier (car *model-tiers*)))
-      (assert-true (tier-available? tier '("llama3.2:latest" "mistral:latest"))
+      (assert-true (tier-available? tier '("llama3.2:latest" "qwen2.5-coder:7b"))
                    "llama3.2 should be available")
-      (assert-true (not (tier-available? tier '("mistral:latest")))
-                   "llama3.2 should not match mistral only"))))
+      (assert-true (not (tier-available? tier '("qwen2.5-coder:7b")))
+                   "llama3.2 should not match qwen2.5-coder only"))))
 
 (test "filter-available-tiers keeps matching tiers"
   (lambda ()
-    (let ((filtered (filter-available-tiers *model-tiers* '("mistral:latest"))))
-      (assert-equal (length filtered) 1 "only mistral tier")
+    (let ((filtered (filter-available-tiers *model-tiers* '("qwen2.5-coder:7b"))))
+      (assert-equal (length filtered) 1 "only standard tier")
       (assert-equal (tier-name (car filtered)) "standard" "standard tier"))))
 
 (test "filter-available-tiers returns defaults when nothing matches"
