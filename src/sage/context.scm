@@ -100,12 +100,20 @@ Returns #t on success, #f on failure."
 (define (reset-fired-thresholds!)
   (set! *fired-thresholds* '()))
 
+;;; get-session-tokens: Late-bound accessor for session token count.
+;;; Works around Guile module binding order issues when (sage session)
+;;; is loaded as a transitive dependency before session state is set.
+(define (get-session-tokens)
+  (let ((proc (module-ref (resolve-module '(sage session))
+                          'session-total-tokens)))
+    (proc)))
+
 ;;; context-usage: Get current token usage and context window limit
 ;;; Arguments:
 ;;;   model - Optional model name for limit lookup
 ;;; Returns: alist with tokens, limit, ratio, and percentage
 (define* (context-usage #:optional (model #f))
-  (let* ((tokens (session-total-tokens))
+  (let* ((tokens (get-session-tokens))
          (limit (get-token-limit model))
          (ratio (if (> limit 0) (/ tokens limit) 0))
          (pct (inexact->exact (round (* 100.0 ratio)))))
@@ -119,7 +127,7 @@ Returns #t on success, #f on failure."
 ;;;   model - Optional model name for limit lookup
 ;;; Returns: Exact rational or 0
 (define* (context-usage-ratio #:optional (model #f))
-  (let* ((tokens (session-total-tokens))
+  (let* ((tokens (get-session-tokens))
          (limit (get-token-limit model)))
     (if (> limit 0) (/ tokens limit) 0)))
 
