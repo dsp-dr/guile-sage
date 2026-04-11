@@ -28,6 +28,10 @@
             log-api-response
             read-recent-logs
             search-logs
+            log-stats
+            log-errors
+            log-timeline
+            log-search-advanced
             init-logging
             with-logging
             set-log-level!
@@ -350,6 +354,258 @@
             "No matching entries found."
             (string-join limited "\n")))
       "No log file found."))
+
+;;; ============================================================
+;;; Log Parsing Helpers
+;;; ============================================================
+
+;;; parse-log-line: Parse a log line into an alist
+;;; Format: [timestamp] [LEVEL] [module] message key=value...
+;;; Returns: alist with keys "timestamp" "level" "module" "message" "context"
+;;;          or #f if line cannot be parsed
+(define (parse-log-line line)
+  (let ((rx (make-regexp "^\\[([^]]+)\\] \\[([^]]+)\\] \\[([^]]+)\\] (.*)")))
+    (let ((m (regexp-exec rx line)))
+      (if m
+          (let* ((timestamp (match:substring m 1))
+                 (level (match:substring m 2))
+                 (module (match:substring m 3))
+                 (rest (match:substring m 4))
+                 ;; Split rest into message and context key=value pairs
+                 (parts (split-message-context rest)))
+            `(("timestamp" . ,timestamp)
+              ("level" . ,level)
+              ("module" . ,module)
+              ("message" . ,(car parts))
+              ("context" . ,(cdr parts))))
+          #f))))
+
+;;; split-message-context: Split "message key=val key2=val2" into (message . context-alist)
+(define (split-message-context str)
+  (let ((kv-rx (make-regexp "([a-zA-Z_]+)=([^ ]+)")))
+    ;; Find all key=value pairs
+    (let loop ((pos 0) (kvs '()))
+      (let ((m (regexp-exec kv-rx str pos)))
+        (if m
+            (loop (match:end m)
+                  (cons (cons (match:substring m 1) (match:substring m 2))
+                        kvs))
+            ;; The message is everything before the first key=value
+            (let ((first-kv (regexp-exec kv-rx str)))
+              (if first-kv
+                  (cons (string-trim-both (substring str 0 (match:start first-kv)))
+                        (reverse kvs))
+                  (cons (string-trim-both str) '()))))))))
+
+;;; read-all-log-lines: Read all lines from the current log file
+;;; Returns: list of strings
+(define (read-all-log-lines)
+  (unless *log-file*
+    (init-logging))
+  (if (and *log-file* (file-exists? *log-file*))
+      (call-with-input-file *log-file*
+        (lambda (port)
+          (let loop ((line (get-line port))
+                     (acc '()))
+            (if (eof-object? line)
+                (reverse acc)
+                (loop (get-line port) (cons line acc))))))
+      '()))
+
+;;; ============================================================
+;;; Log Introspection Functions
+;;; ============================================================
+
+;;; log-stats: Compute statistics from log entries
+;;; Returns: Formatted string with counts by level, error rate,
+;;;          most common tool calls, total entries
+(define (log-stats)
+  (let* ((lines (read-all-log-lines))
+         (parsed (filter identity (map parse-log-line lines)))
+         (total (length parsed))
+         ;; Count by level
+         (level-counts
+          (let ((tbl '()))
+            (for-each
+             (lambda (entry)
+               (let* ((lvl (assoc-ref entry "level"))
+                      (cur (assoc-ref tbl lvl)))
+                 (set! tbl
+                       (cons (cons lvl (1+ (or cur 0)))
+                             (filter (lambda (p) (not (equal? (car p) lvl))) tbl)))))
+             parsed)
+            tbl))
+         ;; Count tool calls
+         (tool-calls
+          (let ((tbl '()))
+            (for-each
+             (lambda (entry)
+               (let ((tool (assoc-ref (assoc-ref entry "context") "tool")))
+                 (when tool
+                   (let ((cur (assoc-ref tbl tool)))
+                     (set! tbl
+                           (cons (cons tool (1+ (or cur 0)))
+                                 (filter (lambda (p) (not (equal? (car p) tool))) tbl)))))))
+             parsed)
+            ;; Sort by count descending
+            (sort tbl (lambda (a b) (> (cdr a) (cdr b))))))
+         ;; Error rate
+         (error-count (or (assoc-ref level-counts "ERROR") 0))
+         (warn-count (or (assoc-ref level-counts "WARN") 0))
+         (error-rate (if (> total 0)
+                         (* 100.0 (/ error-count total))
+                         0)))
+    (string-append
+     (format #f "=== Log Statistics ===~%")
+     (format #f "Total entries: ~a~%" total)
+     (format #f "~%Counts by level:~%")
+     (apply string-append
+            (map (lambda (p) (format #f "  ~a: ~a~%" (car p) (cdr p)))
+                 (sort level-counts (lambda (a b) (string<? (car a) (car b))))))
+     (format #f "~%Error rate: ~,1f%~%" error-rate)
+     (format #f "Warning+Error rate: ~,1f%~%"
+             (if (> total 0) (* 100.0 (/ (+ error-count warn-count) total)) 0))
+     (format #f "~%Top tool calls:~%")
+     (apply string-append
+            (map (lambda (p) (format #f "  ~a: ~a~%" (car p) (cdr p)))
+                 (take tool-calls (min 10 (length tool-calls))))))))
+
+;;; log-errors: Extract recent errors with surrounding context
+;;; Arguments:
+;;;   count - Number of recent errors to show (default 10)
+;;; Returns: Formatted string of error entries
+(define* (log-errors #:key (count 10))
+  (let* ((lines (read-all-log-lines))
+         (parsed (filter identity (map parse-log-line lines)))
+         (errors (filter (lambda (entry)
+                           (equal? (assoc-ref entry "level") "ERROR"))
+                         parsed))
+         (recent (take (reverse errors) (min count (length errors)))))
+    (if (null? recent)
+        "No errors found in log."
+        (string-append
+         (format #f "=== Recent Errors (~a of ~a total) ===~%~%"
+                 (length recent) (length errors))
+         (apply string-append
+                (map (lambda (entry)
+                       (let ((ctx (assoc-ref entry "context")))
+                         (string-append
+                          (format #f "[~a] [~a] ~a~%"
+                                  (assoc-ref entry "timestamp")
+                                  (assoc-ref entry "module")
+                                  (assoc-ref entry "message"))
+                          (if (null? ctx) ""
+                              (string-append
+                               (apply string-append
+                                      (map (lambda (p)
+                                             (format #f "  ~a = ~a~%" (car p) (cdr p)))
+                                           ctx))
+                               "\n")))))
+                     (reverse recent)))))))
+
+;;; log-timeline: Show a timeline of events in the log
+;;; Arguments:
+;;;   count - Number of recent entries to show (default 50)
+;;;   module-filter - Show only entries from this module (optional)
+;;; Returns: Formatted timeline string
+(define* (log-timeline #:key (count 50) (module-filter #f))
+  (let* ((lines (read-all-log-lines))
+         (parsed (filter identity (map parse-log-line lines)))
+         (filtered (if module-filter
+                       (filter (lambda (entry)
+                                 (equal? (assoc-ref entry "module") module-filter))
+                               parsed)
+                       parsed))
+         (recent (take (reverse filtered) (min count (length filtered)))))
+    (if (null? recent)
+        "No entries found."
+        (string-append
+         (format #f "=== Event Timeline (~a entries) ===~%~%" (length recent))
+         (apply string-append
+                (map (lambda (entry)
+                       (let* ((lvl (assoc-ref entry "level"))
+                              (marker (cond
+                                       ((equal? lvl "ERROR") "!!!")
+                                       ((equal? lvl "WARN")  " ! ")
+                                       ((equal? lvl "DEBUG") " . ")
+                                       (else                 " - ")))
+                              (tool (assoc-ref (assoc-ref entry "context") "tool"))
+                              (duration (assoc-ref (assoc-ref entry "context") "duration_ms")))
+                         (format #f "~a ~a [~a] ~a~a~%"
+                                 (assoc-ref entry "timestamp")
+                                 marker
+                                 (assoc-ref entry "module")
+                                 (assoc-ref entry "message")
+                                 (cond
+                                  ((and tool duration)
+                                   (format #f " (tool=~a, ~ams)" tool duration))
+                                  (tool (format #f " (tool=~a)" tool))
+                                  (else "")))))
+                     (reverse recent)))))))
+
+;;; log-search-advanced: Search logs with multiple criteria
+;;; Arguments:
+;;;   level - Filter by log level (optional)
+;;;   module - Filter by module name (optional)
+;;;   message-pattern - Regex pattern for message text (optional)
+;;;   tool - Filter by tool name in context (optional)
+;;;   from-time - Start timestamp string (optional, ISO prefix match)
+;;;   to-time - End timestamp string (optional, ISO prefix match)
+;;;   limit - Max results (default 100)
+;;; Returns: Formatted string of matching entries
+(define* (log-search-advanced #:key (level #f) (module #f)
+                              (message-pattern #f) (tool #f)
+                              (from-time #f) (to-time #f)
+                              (limit 100))
+  (let* ((lines (read-all-log-lines))
+         (parsed (filter identity (map parse-log-line lines)))
+         ;; Apply filters
+         (filtered
+          (filter
+           (lambda (entry)
+             (and
+              ;; Level filter
+              (or (not level)
+                  (equal? (string-upcase level)
+                          (assoc-ref entry "level")))
+              ;; Module filter
+              (or (not module)
+                  (equal? module (assoc-ref entry "module")))
+              ;; Message pattern filter
+              (or (not message-pattern)
+                  (let ((rx (make-regexp message-pattern regexp/icase)))
+                    (regexp-exec rx (assoc-ref entry "message"))))
+              ;; Tool filter
+              (or (not tool)
+                  (equal? tool
+                          (assoc-ref (assoc-ref entry "context") "tool")))
+              ;; Time range filters (simple string comparison on ISO timestamps)
+              (or (not from-time)
+                  (string>=? (assoc-ref entry "timestamp") from-time))
+              (or (not to-time)
+                  (string<=? (assoc-ref entry "timestamp") to-time))))
+           parsed))
+         (limited (take filtered (min limit (length filtered)))))
+    (if (null? limited)
+        "No matching entries found."
+        (string-append
+         (format #f "=== Advanced Search Results (~a of ~a matching) ===~%~%"
+                 (length limited) (length filtered))
+         (apply string-append
+                (map (lambda (entry)
+                       (let ((ctx (assoc-ref entry "context")))
+                         (string-append
+                          (format #f "[~a] [~a] [~a] ~a~%"
+                                  (assoc-ref entry "timestamp")
+                                  (assoc-ref entry "level")
+                                  (assoc-ref entry "module")
+                                  (assoc-ref entry "message"))
+                          (if (null? ctx) ""
+                              (apply string-append
+                                     (map (lambda (p)
+                                            (format #f "  ~a = ~a~%" (car p) (cdr p)))
+                                          ctx))))))
+                     limited))))))
 
 ;;; ============================================================
 ;;; Convenience Macros
