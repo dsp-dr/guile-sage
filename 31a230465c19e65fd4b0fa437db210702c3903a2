@@ -1,0 +1,61 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Spec referenced: experiments/notes/nexushive-telemetry-setup.md
+  (mirrored from gist aygp-dr/3e394bc89d3a8581eef96b27095b54a7)
+
+## Testing
+- 13/13 new SRFI-64 tests pass: guile -L src tests/test-telemetry.scm
+- Live verified end-to-end: hand-crafted OTLP JSON POST to infra-host:4318
+  returned HTTP 200 {\"partialSuccess\":{}} and Prometheus shows
+  {exported_job=\"guile-sage\"} as a new label value
+- Smoke tested through sage REPL in tmux: counters land in Prometheus
+  on /exit (telemetry-shutdown! triggers final flush)
+
+## Issues
+- bd: guile-sage telemetry epic (315f436 \"feat(beads): add OTEL telemetry epic and 10 tasks\")
+- github: none yet
+
+## Conjecture (CPRR)
+- Hypothesis: a fail-soft, fire-and-forget OTLP/HTTP JSON emitter
+  built on the existing http-post-with-timeout helper is sufficient
+  to give guile-sage observability parity with Claude Code on the
+  same NexusHive dashboard, without pulling in protobuf or gRPC.
+
+## Validation
+- Hand-crafted JSON POST to infra-host:4318/v1/metrics returns 200 with
+  partialSuccess:{} (full success). Prometheus query for
+  guile_sage_session_count_total returns the expected series.
+- json-write-string handles the nested alist+vector shape correctly
+  (vectors -> JSON arrays, alists -> JSON objects).
+- Cumulative counters survive multiple flushes (the collector
+  treats subsequent flushes as the same series, not new ones)
+- The unit suffix derivation works as the spec describes:
+  unit=\"tokens\" -> _tokens_total, unit=\"s\" -> _seconds_total,
+  unit=\"USD\" -> _USD_total, unit=\"1\" -> _total
+
+## Refutation / known limits
+- We assume the collector is on the LAN with no auth. Cloud OTel
+  endpoints requiring an API key would need a header injection.
+- Single-thread emission only. If sage ever goes multi-threaded the
+  *counters* hash needs a mutex.
+- No support for histogram or gauge metric types yet (only sum).
+- The flush is synchronous and blocks the REPL for the round-trip
+  latency. On the LAN this is ~10-20ms; for cloud collectors it
+  could be noticeable.
+
+## Meta - research / context / deep-dives
+- C4 / sequence diagrams for the data flow: docs/TELEMETRY.org has
+  the high-level architecture. A future deep-dive could add a Level
+  3 diagram showing the in-memory counter -> JSON -> POST -> collector
+  -> Prometheus exporter -> scrape pipeline.
+- Related: scripts/dashboard-add-guile-sage.py (the Grafana mutator)
+  and tmp/ai-tools-dashboard.{before,after}.json snapshots.
+- Future eval idea: feed the collector a forged payload and verify
+  sage's flush is idempotent (re-flushing the same totals shouldn't
+  double-count in Prometheus because cumulative temporality dedups
+  by series).
+- Worth reading: opentelemetry-proto JSON encoding spec
+  https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md#json-protobuf-encoding
+- The user's other AI tools all share this nexus collector — see
+  experiments/notes/nexushive-telemetry-setup.md for the full list.
