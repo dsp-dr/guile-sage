@@ -1,0 +1,84 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Bug surfaced by background sage UX agent (sub-agent ad422073a2147c712)
+  during exploratory testing on 2026-04-11. See
+  docs/UX-FINDINGS-0.6.0.md gap N1.
+
+## Testing
+- 6 unit tests in test-tools.scm covering int, string-int,
+  inexact-int, unparseable, missing, search_logs string limit
+- 2 PBT properties at 100 trials each: read_logs survives any
+  lines input shape, search_logs survives any limit input shape
+- gmake check 34/37 baseline preserved (3 known security failures)
+- PBT 59/59 properties pass at seed 42, 5900 total trials
+- Live verified all 7 input shapes via REPL: 20, \"20\", 20.0,
+  20.5, \"20.5\", \"abc\", #f - all return real log content,
+  no wrong-type-arg crash
+
+## Issues
+- bd: guile-bcy (P1) — claimed and ready to close after push
+
+## Conjecture (CPRR)
+- Hypothesis 1: every tool that takes a JSON-encoded integer
+  arg has the same vulnerability if it doesn't normalise at the
+  boundary. The model is unreliable about JSON int vs string
+  encoding (varies by family, by temperature, by example in the
+  system prompt) so we cannot rely on the wire shape.
+- Hypothesis 2: a single coerce->int helper at the boundary is
+  enough — internal Scheme functions can keep expecting proper
+  exact integers as their contract. Defensive coercion at the
+  edge, strict types in the core.
+- Hypothesis 3: PBT-style input-shape coverage is the right
+  regression gate. Unit tests pin specific cases; PBT covers
+  the unknown variants the next model release might emit.
+
+## Validation
+- The original repro (read_logs lines=20 hallucinates 2023
+  log entries) no longer fires: the tool returns real log
+  content and the model has no opportunity to confabulate.
+- All seven input shapes verified live and via PBT.
+- Inexact-integer corner case (20.0) caught DURING this commit
+  because Guile's (integer? 20.0) is #t — naive integer? gating
+  would have passed through and downstream still failed.
+  Caught by my own smoke test before merging.
+- Defensive in 3 separate tool call sites; no behavioural change
+  for callers that already pass exact integers.
+
+## Refutation / known limits
+- Only fixes the THREE log-related tools (read_logs, search_logs,
+  log_search_advanced). Other tools that take JSON int args
+  (none right now, but future tools might) need to use
+  coerce->int as well. Worth a periodic grep audit.
+- Doesn't address the hallucination root cause (gap #3 in the
+  UX findings) — even with the bug fixed, if the model gets
+  ANY tool error or empty result it still fabricates content.
+  That's bd guile-bqx (post-tool-error system message).
+- The PBT properties cover a fixed set of 7 input shapes via
+  rng-element on a kind list. Don't cover hash-table inputs,
+  port inputs, or weird symbols. Probably overkill for this
+  threat model.
+- coerce->int rounds non-integer numbers via (round x). Banker's
+  rounding in Guile (round-half-to-even). For lines=2.5 you
+  get 2, not 3. Fine for our use case but documented.
+
+## Meta - research / context / deep-dives
+- Worth a future audit: grep for (or (assoc-ref args \"...\") N)
+  patterns in tools.scm to find other places that should use
+  coerce->int. Could be a Makefile lint target.
+- Related: docs/UX-FINDINGS-0.6.0.md is the source-of-truth
+  document for the bugs from the exploratory session. Should
+  land as a docs commit in this 0.6.x stack.
+- Eval idea: a property-based fuzzer that calls every registered
+  tool with every input shape from the rng-* generators and
+  asserts no wrong-type-arg crashes anywhere. Would catch this
+  class of bug for any future tool added to the registry.
+- Open question: should the JSON parser do the int normalisation
+  itself when the schema declares (\"type\" . \"integer\")?
+  Closer to the spec (JSON Schema validation) but invasive.
+  Tool-boundary coercion is the simpler choice for now.
+- Worth reading: how Claude Code handles the same problem.
+  Probably they use Pydantic / JSON Schema validation up front
+  so the tool body never sees a misshaped arg. We don't have
+  schema validation in sage yet — could be a 0.7.0 hardening
+  candidate (bd-able).
