@@ -6,6 +6,7 @@ FROM alpine:3.21 AS builder
 RUN apk add --no-cache \
     guile \
     guile-dev \
+    guile-readline \
     make \
     curl
 
@@ -19,9 +20,10 @@ RUN make build
 # Runtime image
 FROM alpine:3.21
 
-# Install runtime dependencies only
+# Install runtime dependencies only (readline needed by repl.scm)
 RUN apk add --no-cache \
     guile \
+    guile-readline \
     curl
 
 # Create sage user
