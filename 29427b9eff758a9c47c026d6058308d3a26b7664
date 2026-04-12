@@ -1,0 +1,6 @@
+CPRR Note — repl wire-up
+Attribution: Claude Opus 4.6 (1M context)
+Tests: gmake check green; no regressions in test-repl, test-repl-guard, test-repl-chains
+Conjecture: removing use-openai? gate on streaming enables SSE for all providers
+Validation: git diff shows 0 remaining ollama-host/ollama-model/ollama-chat calls in repl.scm
+Research: previous inline dispatch had infinite recursion (provider-model called provider-model)
