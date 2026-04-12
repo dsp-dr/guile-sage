@@ -1,0 +1,92 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Findings driver: docs/MCP-CONTRACT.org research agent (sub-agent
+  af96dc911d553eaa2) which captured the bytes-on-wire MCP shapes
+  and identified both the {} blocker and the shape-coercion need
+- Original streaming-fix introducing the cond pattern: 0a7f24c
+
+## Testing
+- Smoke test in REPL:
+  - (json-write-string json-empty-object) -> \"{}\"
+  - (json-write-string '((\"capabilities\" . ((\"sampling\" . ,json-empty-object)))))
+    -> \"{\\\"capabilities\\\":{\\\"sampling\\\":{}}}\"
+  - (as-list #(1 2 3)) -> (1 2 3)
+  - (as-list #f) -> ()
+  - ollama-parse-tool-call still parses list-shaped tool_calls
+    after the refactor (verified with the bytes from commit 0a7f24c
+    notes)
+- 57/57 PBT properties pass at seed 42, 5700 total trials (commit 2
+  of this stack adds the new properties)
+- Full gmake check 34/37 baseline (3 known security failures)
+- '() -> \"null\" backward-compat verified by an explicit PBT property
+
+## Issues
+- bd: guile-bw2 (json-empty-object sentinel, P1) - claimed
+- bd: guile-p94 (as-list helper, P2)
+- github: dsp-dr/guile-sage no PR yet, will land via main push
+
+## Conjecture (CPRR)
+1. A symbol sentinel ('json-empty-object) is the right
+   representation for empty JSON object on the writer side because
+   Scheme has no other unambiguous way to distinguish empty alist
+   from empty array — both are '(). A symbol is cheap, can't
+   accidentally collide with a string key, and is self-documenting
+   in Scheme code that constructs the request.
+2. The defensive shape coercion belongs in util.scm not in each
+   client. The vector-or-list mismatch comes from ONE root cause
+   (parser returns lists, builders use list->vector); the fix
+   should be in ONE place.
+3. The MCP envelope decoder will need this exact pattern when it
+   ships in 0.7.0. Centralising now means 0.7.0 doesn't have to
+   re-derive it.
+
+## Validation
+1. PBT properties verify the sentinel roundtrip behaviour and
+   that the legacy '() -> null path is unchanged. 100 trials
+   each, no false positives.
+2. ollama-parse-tool-call refactor preserves behaviour: tested
+   with the actual bytes Ollama returns for a llama3.2 tool call
+   (captured in commit 0a7f24c notes).
+3. as-list throws on unknown shapes — caught in tests via the
+   error path.
+
+## Refutation / known limits
+- The PARSER side is unchanged. (json-read-string \"{}\") and
+  (json-read-string \"[]\") both still return '(). Roundtrip
+  through the parser is still lossy for empty containers; the
+  fix only restores the writer side. A full fix would change
+  parse-obj to return json-empty-object for {} and parse-arr
+  to return some 'json-empty-array, but that's invasive and the
+  benefit is small (no current caller needs the distinction
+  on the inbound side).
+- as-list only handles 4 shapes (vector, list, #f, '()). Edge
+  cases like hash tables, ports, or strings throw with a clear
+  error. Acceptable — these are the only shapes the JSON parser
+  produces.
+- The 'json-empty-object symbol could collide with a user
+  symbol of the same name in unusual code paths. Symbols are
+  interned globally in Guile so two 'json-empty-object literals
+  in different modules ARE the same value. Acceptable trade-off
+  for cleanliness.
+
+## Meta - research / context / deep-dives
+- Worth a future audit: every place that calls (assoc-ref obj key)
+  on a value that *might* be a JSON array would benefit from
+  passing through (as-list (assoc-ref obj key)) for safety. Could
+  be a Makefile lint target or a one-time grep.
+- The {} sentinel is the FIRST piece of MCP-specific infrastructure
+  in 0.6.x. The next will be JSON-RPC envelope construction
+  (request id correlation, error envelope decoding). Worth
+  considering whether those land in (sage util) or a new (sage
+  jsonrpc) module.
+- Open question: should we ever pretty-print JSON for the debug
+  log? Currently json-write produces minified output. A
+  json-write-pretty would be useful for debugging but adds
+  weight to a tight HTTP loop.
+- Related research: docs/MCP-CONTRACT.org (1117 lines, 23 numbered
+  invariants, 4 spec divergences) is the input artifact this
+  commit is responding to. Should land on main as a separate
+  docs commit when 0.7.0 work begins.
+- Consider future: a json-empty-array sentinel for symmetry. Not
+  needed for 0.7.0 MCP work but would be cleaner.
