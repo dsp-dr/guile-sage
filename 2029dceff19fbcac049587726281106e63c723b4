@@ -1,0 +1,6 @@
+CPRR Note — gemini provider
+Attribution: Claude Opus 4.6 (1M context)
+Tests: 25/25 test-provider.scm pass; gmake check green
+Conjecture: system messages merged into first user turn since Gemini lacks system role
+Validation: gemini-tools-to-api-format wraps tools in functionDeclarations vector
+Research: Gemini v1beta API uses parts array mixing text + functionCall in one response
