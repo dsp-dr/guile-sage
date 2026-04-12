@@ -1086,6 +1086,106 @@
               (counter-key name reversed)))))
 
 ;;; ============================================================
+;;; Multi-Step Tool Chain Properties (bd: guile-qa1)
+;;; ============================================================
+
+;;; Access private bindings from (sage repl)
+(use-modules (sage repl) (sage session))
+(define pbt-execute-tool-chain (@@ (sage repl) execute-tool-chain))
+(define pbt-*max-tool-iterations* (@@ (sage repl) *max-tool-iterations*))
+
+(property "N-tool-call sequence terminates within N+1 iterations"
+  ;; Generator: produce N in [0, 10]
+  (lambda () (rng-int 0 10))
+  ;; Property: a synthetic N-step chain terminates and returns a string
+  (lambda (n)
+    (session-create)
+    (let* ((step 0)
+           (real-ocwt (module-ref (resolve-module '(sage ollama))
+                                  'ollama-chat-with-tools))
+           ;; Mock: return tool_calls for exactly N follow-up steps, then stop
+           (mock-ocwt (lambda (model messages tools)
+                        (set! step (1+ step))
+                        (if (< step n)
+                            ;; Still have tool calls to emit
+                            `(("message" . (("role" . "assistant")
+                                            ("content" . ,(format #f "Step ~a" step))
+                                            ("tool_calls" . #(
+                                              (("function" . (("name" . "git_status")
+                                                              ("arguments" . ()))))))))
+                              ("eval_count" . 5)
+                              ("prompt_eval_count" . 3))
+                            ;; No more tool calls -- chain should terminate
+                            `(("message" . (("role" . "assistant")
+                                            ("content" . ,(format #f "Done after ~a steps" step))))
+                              ("eval_count" . 5)
+                              ("prompt_eval_count" . 3))))))
+      (let ((result
+             (dynamic-wind
+               (lambda ()
+                 (module-set! (resolve-module '(sage ollama))
+                              'ollama-chat-with-tools mock-ocwt))
+               (lambda ()
+                 (if (= n 0)
+                     ;; N=0: no tool_calls in initial message
+                     (pbt-execute-tool-chain "test" `(("content" . "No tools.")) "No tools." 1)
+                     ;; N>0: initial message has 1 tool_call
+                     (pbt-execute-tool-chain "test"
+                       `(("content" . "Starting.")
+                         ("tool_calls" . #(
+                           (("function" . (("name" . "git_status")
+                                           ("arguments" . ())))))))
+                       "Starting." 1)))
+               (lambda ()
+                 (module-set! (resolve-module '(sage ollama))
+                              'ollama-chat-with-tools real-ocwt)))))
+        ;; The function must return a string (it terminated)
+        ;; and step must be <= N (we don't overshoot)
+        (and (string? result)
+             (<= step (max n 1)))))))
+
+(property "max-iterations cap always fires at *max-tool-iterations* (never exceeds)"
+  ;; Generator: random seed (ignored, we always test the cap)
+  (lambda () (rng-int 0 100))
+  ;; Property: an infinite-tool-call mock terminates at exactly the cap
+  (lambda (_seed)
+    (session-create)
+    (let* ((call-count 0)
+           (real-ocwt (module-ref (resolve-module '(sage ollama))
+                                  'ollama-chat-with-tools))
+           ;; Mock: ALWAYS return a tool_call (infinite)
+           (mock-ocwt (lambda (model messages tools)
+                        (set! call-count (1+ call-count))
+                        `(("message" . (("role" . "assistant")
+                                        ("content" . "Again.")
+                                        ("tool_calls" . #(
+                                          (("function" . (("name" . "git_status")
+                                                          ("arguments" . ()))))))))
+                          ("eval_count" . 2)
+                          ("prompt_eval_count" . 1)))))
+      (let ((result
+             (dynamic-wind
+               (lambda ()
+                 (module-set! (resolve-module '(sage ollama))
+                              'ollama-chat-with-tools mock-ocwt))
+               (lambda ()
+                 (pbt-execute-tool-chain "test"
+                   `(("content" . "Infinite.")
+                     ("tool_calls" . #(
+                       (("function" . (("name" . "git_status")
+                                       ("arguments" . ())))))))
+                   "Infinite." 1))
+               (lambda ()
+                 (module-set! (resolve-module '(sage ollama))
+                              'ollama-chat-with-tools real-ocwt)))))
+        ;; Must have terminated (returned a string) and
+        ;; call-count must be exactly *max-tool-iterations*.
+        ;; Iterations 0..9 each process tool_calls and call the mock = 10 calls.
+        ;; Iteration 10 sees (>= 10 10) and returns without calling.
+        (and (string? result)
+             (= call-count pbt-*max-tool-iterations*))))))
+
+;;; ============================================================
 ;;; Summary
 ;;; ============================================================
 
