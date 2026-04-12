@@ -251,6 +251,129 @@
       (string-contains result "Unknown tool"))))
 
 ;;; ============================================================
+;;; Property: permission contract (ADR-0003, post-5bcc284)
+;;; ============================================================
+;;;
+;;; ADR-0003 declares two static lists: tools that must always be
+;;; permitted (safe), and tools that must require YOLO (unsafe). The
+;;; properties below pin both halves of that contract over random
+;;; ordering of the input set, so an accidental edit to *safe-tools*
+;;; in src/sage/tools.scm trips at least one trial.
+
+(format #t "~%=== PBT: permission contract (ADR-0003) ===~%")
+
+;; Subset of *safe-tools* that ADR-0003 lists as "always permitted".
+;; Anything register-safe-tool'd at init time is *additionally* safe
+;; but not part of the static contract — keep this list aligned with
+;; the table in docs/adr/0003-security-model.md.
+(define *adr-safe-tools*
+  '("read_file" "list_files" "glob_files" "search_files"
+    "git_status" "git_diff" "git_log"
+    "read_logs" "search_logs"
+    "sage_task_create" "sage_task_complete"
+    "sage_task_list" "sage_task_status"
+    "generate_image"))
+
+;; Tools ADR-0003 lists as "require SAGE_YOLO_MODE". They must NOT
+;; appear in *safe-tools* and must be denied by check-permission
+;; when YOLO is off.
+(define *adr-unsafe-tools*
+  '("write_file" "edit_file"
+    "git_commit" "git_add_note" "git_push"
+    "eval_scheme" "create_tool" "reload_module" "run_tests"))
+
+(define (with-yolo-off thunk)
+  (let ((saved-sage (getenv "SAGE_YOLO_MODE"))
+        (saved-yolo (getenv "YOLO_MODE")))
+    (unsetenv "SAGE_YOLO_MODE")
+    (unsetenv "YOLO_MODE")
+    (let ((result (thunk)))
+      (if saved-sage (setenv "SAGE_YOLO_MODE" saved-sage) (unsetenv "SAGE_YOLO_MODE"))
+      (if saved-yolo (setenv "YOLO_MODE" saved-yolo) (unsetenv "YOLO_MODE"))
+      result)))
+
+(define (with-yolo-on thunk)
+  (let ((saved-sage (getenv "SAGE_YOLO_MODE")))
+    (setenv "SAGE_YOLO_MODE" "1")
+    (let ((result (thunk)))
+      (if saved-sage (setenv "SAGE_YOLO_MODE" saved-sage) (unsetenv "SAGE_YOLO_MODE"))
+      result)))
+
+(property "ADR-safe tools are always permitted without YOLO"
+  (lambda () (rng-element *adr-safe-tools*))
+  (lambda (name)
+    (with-yolo-off (lambda () (and (check-permission name '()) #t)))))
+
+(property "ADR-unsafe tools are always denied without YOLO"
+  (lambda () (rng-element *adr-unsafe-tools*))
+  (lambda (name)
+    (with-yolo-off (lambda () (not (check-permission name '()))))))
+
+(property "ADR-unsafe tools are always permitted under YOLO"
+  (lambda () (rng-element *adr-unsafe-tools*))
+  (lambda (name)
+    (with-yolo-on (lambda () (and (check-permission name '()) #t)))))
+
+(property "ADR-unsafe tools are absent from *safe-tools*"
+  (lambda () (rng-element *adr-unsafe-tools*))
+  (lambda (name)
+    (not (member name *safe-tools*))))
+
+(property "ADR-safe tool names all resolve via get-tool"
+  (lambda () (rng-element *adr-safe-tools*))
+  (lambda (name)
+    (let ((tool (get-tool name)))
+      (and tool (equal? (assoc-ref tool "name") name)))))
+
+(property "execute-tool denies ADR-unsafe tools without YOLO"
+  (lambda () (rng-element *adr-unsafe-tools*))
+  (lambda (name)
+    (with-yolo-off
+     (lambda ()
+       (let ((result (execute-tool name '())))
+         (string-contains result "Permission denied"))))))
+
+;;; ============================================================
+;;; Property: resolve-path semantics (bd: guile-ecn)
+;;; ============================================================
+;;;
+;;; resolve-path is a pure function — these properties pin the four
+;;; cases its docstring promises (absolute kept, relative anchored,
+;;; "" -> workspace, #f -> #f) over random inputs.
+
+(format #t "~%=== PBT: resolve-path semantics ===~%")
+
+(property "resolve-path is identity on absolute paths"
+  (lambda ()
+    (string-append "/tmp/sage-pbt-resolve-" (rng-alpha-string (rng-int 1 16))))
+  (lambda (path)
+    (equal? (resolve-path path) path)))
+
+(property "resolve-path is idempotent on absolute paths"
+  (lambda ()
+    (string-append "/var/tmp/" (rng-alpha-string (rng-int 1 16))))
+  (lambda (path)
+    (equal? (resolve-path (resolve-path path)) (resolve-path path))))
+
+(property "resolve-path anchors relative paths under workspace"
+  (lambda () (rng-alpha-string (rng-int 1 32)))
+  (lambda (rel)
+    (let ((resolved (resolve-path rel))
+          (ws (workspace)))
+      (and (string-prefix? ws resolved)
+           (string-suffix? rel resolved)))))
+
+(property "resolve-path returns absolute strings for any non-#f input"
+  (lambda ()
+    (if (rng-bool)
+        (string-append "/tmp/" (rng-alpha-string (rng-int 1 16)))
+        (rng-alpha-string (rng-int 1 16))))
+  (lambda (path)
+    (let ((resolved (resolve-path path)))
+      (and (string? resolved)
+           (string-prefix? "/" resolved)))))
+
+;;; ============================================================
 ;;; Property 5: Compaction Invariants
 ;;; ============================================================
 

@@ -31,6 +31,7 @@
             execute-tool
             check-permission
             safe-path?
+            resolve-path
             init-default-tools
             tools-to-schema))
 
