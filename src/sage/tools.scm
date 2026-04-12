@@ -446,8 +446,10 @@
      ("required" . #()))
    (lambda (args)
      (let* ((pattern (or (assoc-ref args "pattern") "test-*.scm"))
-            (cmd (format #f "cd ~a && for test in tests/~a; do guile3 -L src $test 2>&1; done"
-                         (workspace) pattern))
+            ;; Use command -v to find guile (guile3 on FreeBSD, guile on macOS)
+            (guile-bin "$(command -v guile3 2>/dev/null || command -v guile)")
+            (cmd (format #f "cd ~a && for test in tests/~a; do ~a -L src $test 2>&1; done"
+                         (workspace) pattern guile-bin))
             (tmp (format #f "/tmp/sage-test-~a" (getpid))))
        (system (string-append cmd " > " tmp " 2>&1"))
        (let ((result (call-with-input-file tmp get-string-all)))
