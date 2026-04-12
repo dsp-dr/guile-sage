@@ -1,0 +1,86 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Bug repro + diagnosis: background sub-agent (REPRO-guile-tpf.md)
+- Wire evidence captured via SAGE_DEBUG_HTTP=1 (added in commit 5947973)
+
+## Testing
+- Live smoke test: 3 invocations through execute-tool
+  - scoped path=src/sage: 35 lines, all src/sage/, no tests/ leak
+  - unsafe path=../../../etc: rejected by safe-path? as expected
+  - unscoped (default '.'): 59 lines, mixed tree (correct fallback)
+- A second smoke test caught a SECONDARY bug during this commit:
+  putting -- before --include= makes grep parse --include= as a
+  filename and fail. Fixed in the same change by moving --include
+  before --.
+
+## Issues
+- bd: guile-tpf (P2) — claimed, will close after the unit-test commit
+
+## Conjecture (CPRR)
+- Hypothesis 1: every tool that takes a directory-scope argument
+  must expose it explicitly in the JSON schema. Models cannot pass
+  args that aren't in the contract; they will mangle the
+  available knobs trying to compensate (the model in the wire
+  trace tried encoding scope inside file_pattern as
+  **/define.scm — meaningless but well-intentioned).
+- Hypothesis 2: --include= is widely misunderstood as a path
+  glob. Documenting it as a BASENAME glob in the schema
+  description prevents the model from trying to put slashes in.
+- Hypothesis 3: head -50 was masking the scope problem because
+  whichever directory grep walked first filled the window. Even
+  raising to head -200 isn't a real fix; the right fix is to make
+  scoping work so the truncation is rarely hit.
+
+## Validation
+- Phase 1 reproduced the bug with a natural prompt (\"Search for
+  define in src/sage\"); the model emitted no path key.
+- Phase 2 quoted the exact JSON the model emitted from the
+  http.jsonl wire trace — proves the schema is the bottleneck.
+- Phase 3 forced the explicit \"path=src/sage\" prompt; the model
+  STILL couldn't pass path because the schema lacked it. Strong
+  evidence that the schema is the only lever.
+- Phase 4 (direct execute-tool) confirmed: passing path=src/sage
+  to the OLD tool was silently dropped because the body never
+  read the arg. Same byte-for-byte output as no-arg call.
+- Post-fix smoke test: scope works, unsafe path rejected,
+  no-scope fallback still works.
+
+## Refutation / known limits
+- head -200 is still arbitrary truncation. A model that asks for
+  every match of a common pattern will lose results. A real fix
+  would either remove the cap or paginate. Out of scope for this
+  bug.
+- file_pattern is still --include=, which is documented as a
+  basename glob in the new schema description, but the model has
+  no way to enforce a path glob. If a user wants \"src/sage/util.scm\"
+  they have to use path=src/sage + file_pattern=util.scm.
+- The grep command is shell-formatted. If pattern contains
+  single quotes the substitution breaks. Existing parity with
+  the rest of tools.scm — sage uses sh-quoted grep elsewhere
+  too — and is tracked separately under guile-sage-eeh
+  (guile-curl + native subprocess migration).
+- No PBT property yet for the new path arg. Filed as a follow-up
+  in this same stack — will land in commit 3 of this stack.
+
+## Meta - research / context / deep-dives
+- Worth a future grep audit: every tool in tools.scm should be
+  reviewed for missing scope/path/pagination knobs. glob_files
+  has a similar shape and may have the same issue.
+- Eval idea: a property test that runs every register-tool
+  schema through a synthetic model that emits one of each
+  declared property; the property is that the resulting
+  tool call must produce a valid execution path. Catches
+  schema/body drift automatically.
+- Open question: should sage validate JSON tool args against
+  the declared schema BEFORE executing? Currently the schema is
+  advisory (sent to the model, ignored by execute-tool). A
+  schema-validator at the boundary would catch missing-arg
+  errors before reaching the tool body. Filed as a 0.7.0
+  candidate when MCP work brings JSON Schema in anyway.
+- Worth reading: how Claude Code's Read tool handles paths.
+  Same scoping/honesty class of problem at scale.
+- The agent's wire-evidence approach (Phase 2 of REPRO doc) is
+  a great template for any future bug repro: prompt -> wire
+  capture -> direct tool invocation -> classify the layer.
+  Worth promoting to docs/ as a methodology note.
