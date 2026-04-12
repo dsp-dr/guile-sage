@@ -801,6 +801,13 @@
 ;; before any property runs; the trial loop preserves it.
 (setenv "SAGE_YOLO_MODE" "1")
 
+;; The workspace-relative property writes under workspace/tmp/ —
+;; gitignored, so a fresh CI checkout doesn't have it. write_file
+;; doesn't mkdir -p, so create the parent here.
+(let ((tmp-dir (string-append (or (getenv "SAGE_WORKSPACE") (getcwd)) "/tmp")))
+  (unless (file-exists? tmp-dir)
+    (mkdir tmp-dir)))
+
 (define (rng-hex-token len)
   ;; lowercase a-f0-9 for filename safety
   (list->string
