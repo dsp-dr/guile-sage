@@ -1,0 +1,83 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- User feedback that prompted this: \"we should hve ahd debug loggin
+  in for all of this so we could bidirectionally check for model /
+  guile vs. raw / http mismatches\"
+
+## Testing
+- 8/8 new tests pass: guile -L src tests/test-http-debug.scm
+  - toggle on/off
+  - log file path resolution + SAGE_LOG_DIR override
+  - no-op when disabled
+  - JSONL format roundtrip
+  - real HTTP capture against localhost Ollama
+  - authorization redaction guarantee
+- Live verified end-to-end with sage tool-call demo:
+  http.jsonl captured 4 OTLP POSTs, 1 streaming chat (chunk_count=2,
+  matching the llama3.2 tool_call shape we discovered earlier),
+  1 follow-up non-streaming chat after the tool ran. Total 12
+  request/response pairs from one prompt.
+
+## Issues
+- bd: none yet
+- github: none
+
+## Conjecture (CPRR)
+- Hypothesis: a single fail-soft JSONL logging hook at the
+  http-post layer is sufficient to diagnose the protocol mismatches
+  that have bitten us so far (vector-vs-list parsing, streaming
+  chunk handling, OTLP unit-suffix derivation), without
+  instrumenting individual call sites or building a custom proxy.
+
+## Validation
+- The bug we shipped this against (streaming tool_calls in the
+  first chunk) was caught by directly inspecting an http.jsonl
+  trace from a successful sage tool-call demo. The first_chunk
+  field showed the tool_calls shape; the last_chunk field showed
+  the empty done:true message. That was the smoking gun.
+- Bearer token redaction verified by an explicit test that
+  attempts to leak \"Bearer SECRET-TOKEN-XYZ\" through the
+  Authorization header and asserts the log line contains
+  <redacted> instead of the secret string.
+- 12 entries captured cleanly per chat turn — not so many that
+  the file becomes unwieldy for a debugging session.
+
+## Refutation / known limits
+- Streaming responses only capture first_chunk and last_chunk,
+  not the full chunk sequence. For a 50-chunk SSE stream we'd
+  miss intermediate state. Acceptable for current use cases
+  (Ollama tool calls fit in 2-5 chunks); will need extension
+  for MCP SSE work in 0.7.0 where intermediate chunks may carry
+  notification frames.
+- Body truncation at 8192 chars (unless SAGE_DEBUG_HTTP_FULL=1)
+  could hide bugs in very large requests. The full bypass exists
+  for forensic captures.
+- Failure mode: if .logs/ is on a full disk, the silent catch
+  swallows the write error. We won't notice the log isn't being
+  written. Acceptable trade-off vs breaking the REPL.
+- The wrapper adds an extra getenv call per http-post even when
+  disabled. Profile-trivial but worth knowing.
+- POST-only. http-get is NOT instrumented because we don't
+  currently use it for any debug-relevant traffic. MCP SSE will
+  need GET instrumentation in 0.7.0.
+
+## Meta - research / context / deep-dives
+- Eval idea: Run sage with SAGE_DEBUG_HTTP=1 against the live
+  skills-hub MCP server (when MCP support lands) and compare the
+  http.jsonl trace against the canonical MCP spec. Should catch
+  protocol drift early.
+- Worth exploring: a tiny CLI tool that consumes http.jsonl and
+  pretty-prints request/response pairs side by side, with diff
+  highlighting against a golden file. Would make regression
+  debugging much faster.
+- Related convention: Claude Code's own SDK has a similar
+  --debug=http flag that dumps wire traces. Worth diffing
+  formats so users can switch between tools and use the same
+  jq queries.
+- Open question: should we also log to stderr in real time when
+  SAGE_DEBUG_HTTP_TAIL=1 or similar? Useful when debugging in
+  tmux without leaving the REPL to tail the log file.
+- Future enhancement: log MCP SSE notification frames separately
+  with a notification type field, so the debug log distinguishes
+  request/response pairs from server-pushed notifications.
