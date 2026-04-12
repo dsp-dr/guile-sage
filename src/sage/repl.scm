@@ -556,6 +556,10 @@
     ("/undefine-command" . ,cmd-undefine-command)
     ("/commands"  . ,cmd-commands)))
 
+;;; Tool Execution Loop — multi-step tool chains (bd: guile-qa1)
+
+(define *max-tool-iterations* 10)  ;; safety cap to prevent infinite loops
+
 ;;; Tool Result Guard (anti-hallucination)
 
 (define (tool-result-needs-guard? result)
@@ -578,6 +582,70 @@
   (if (tool-result-needs-guard? result)
       (string-append result "\n\n" *tool-error-guard-message*)
       result))
+
+;;; Multi-step Tool Chain Dispatch (bd: guile-qa1)
+;;;
+;;; Execute tool calls from a model response, re-prompting until the
+;;; model stops emitting tool_calls or *max-tool-iterations* is hit.
+;;; Handles the full tool_calls array (not just the first one).
+;;; Returns the final text content to display.
+
+(define (execute-tool-chain model message content tokens)
+  (let ((tools (tools-to-schema)))
+    (let loop ((msg message)
+               (text content)
+               (toks tokens)
+               (iteration 0))
+      (let ((tool-calls (as-list (assoc-ref msg "tool_calls"))))
+        (if (or (null? tool-calls) (>= iteration *max-tool-iterations*))
+            ;; No more tool calls — return the final text
+            (begin
+              (when (>= iteration *max-tool-iterations*)
+                (format #t "~%[max tool iterations (~a) reached]~%" *max-tool-iterations*))
+              (session-add-message "assistant" text #:tokens toks)
+              text)
+            ;; Process ALL tool calls in this response
+            (begin
+              ;; Add the assistant's message (with tool_call flag)
+              (session-add-message "assistant" text #:tokens toks #:tool-call #t)
+              ;; Execute each tool call
+              (for-each
+               (lambda (tc)
+                 (let* ((fn (assoc-ref tc "function"))
+                        (tool-name (and fn (assoc-ref fn "name")))
+                        (tool-args (and fn (assoc-ref fn "arguments")))
+                        (result (if tool-name
+                                    (execute-tool tool-name (or tool-args '()))
+                                    "Unknown tool call format")))
+                   (when *debug*
+                     (format #t "[DEBUG] Tool: ~a~%" (or tool-name "?"))
+                     (format #t "[DEBUG] Args: ~a~%" tool-args))
+                   (format #t "~%[Tool: ~a]~%" (or tool-name "?"))
+                   (format #t "~a~%" result)
+                   ;; Guard + add to session
+                   (let ((guarded (guard-tool-result result)))
+                     (session-add-message "user"
+                                          (format #f "Tool result for ~a:\n~a"
+                                                  (or tool-name "?") guarded)))))
+               tool-calls)
+              ;; Re-prompt the model with the tool results (WITH tools so
+              ;; the model can request further tool calls in the chain)
+              (let* ((follow-up (ollama-chat-with-tools model
+                                                         (session-get-context)
+                                                         tools))
+                     (follow-msg (assoc-ref follow-up "message"))
+                     (follow-content (or (assoc-ref follow-msg "content") ""))
+                     (follow-usage (ollama-extract-token-usage follow-up))
+                     (follow-tokens (assoc-ref follow-usage 'completion_tokens)))
+                ;; Emit telemetry for the follow-up
+                (inc-counter! "guile_sage.token.usage"
+                              `(("model" . ,model) ("type" . "input"))
+                              (or (assoc-ref follow-usage 'prompt_tokens) 0))
+                (inc-counter! "guile_sage.token.usage"
+                              `(("model" . ,model) ("type" . "output"))
+                              (or follow-tokens 0))
+                ;; Loop: check if the follow-up ALSO has tool calls
+                (loop follow-msg follow-content follow-tokens (1+ iteration)))))))))
 
 ;;; Agent Loop
 
@@ -738,44 +806,14 @@
                 (telemetry-flush!)
 
                 ;; Check for tool calls in streamed response
-                (let ((tool-call (ollama-parse-tool-call message)))
-                  (if tool-call
-                      ;; Tool call found -- execute and do non-streaming follow-up
-                      (let* ((tool-name (assoc-ref tool-call "name"))
-                             (tool-args (assoc-ref tool-call "arguments"))
-                             (result (execute-tool tool-name tool-args)))
-                        (when *debug*
-                          (format #t "[DEBUG] Tool: ~a~%" tool-name)
-                          (format #t "[DEBUG] Args: ~a~%" tool-args))
-
-                        (session-add-message "assistant" content
-                                             #:tokens completion-tokens
-                                             #:tool-call #t)
-
-                        (format #t "~%[Tool: ~a]~%" tool-name)
-                        (format #t "~a~%" result)
-
-                        ;; Guard tool result to suppress hallucination
-                        (let ((guarded (guard-tool-result result)))
-                          (session-add-message "user"
-                                              (format #f "Tool result for ~a:\n~a"
-                                                      tool-name guarded)))
-
-                        ;; Non-streaming follow-up after tool execution
-                        (let* ((follow-up (ollama-chat model (session-get-context)))
-                               (follow-msg (assoc-ref follow-up "message"))
-                               (follow-content (assoc-ref follow-msg "content"))
-                               (follow-usage (ollama-extract-token-usage follow-up))
-                               (follow-completion (assoc-ref follow-usage 'completion_tokens)))
-                          (debug-tokens (assoc-ref follow-usage 'prompt_tokens)
-                                        follow-completion)
-                          (session-add-message "assistant" follow-content
-                                               #:tokens follow-completion)
-                          (format #t "~%~a~%" follow-content)))
-
+                (let ((tool-calls (as-list (assoc-ref message "tool_calls"))))
+                  (if (null? tool-calls)
                       ;; No tool call -- content already displayed via streaming
                       (session-add-message "assistant" content
-                                           #:tokens completion-tokens)))))
+                                           #:tokens completion-tokens)
+                      ;; Tool chain — loop until model stops requesting tools
+                      (let ((final-text (execute-tool-chain model message content completion-tokens)))
+                        (format #t "~%~a~%" final-text))))))
 
             ;; --- Non-streaming path (existing behavior) ---
             (let* ((response (ollama-chat-with-tools model messages tools))
@@ -798,45 +836,18 @@
                             `(("model" . ,model)) 0)
               (telemetry-flush!)
 
-              (let ((tool-call (ollama-parse-tool-call message)))
-                (if tool-call
-                    (begin
-                      (let* ((tool-name (assoc-ref tool-call "name"))
-                             (tool-args (assoc-ref tool-call "arguments"))
-                             (result (execute-tool tool-name tool-args)))
-                        (when *debug*
-                          (format #t "[DEBUG] Tool: ~a~%" tool-name)
-                          (format #t "[DEBUG] Args: ~a~%" tool-args))
-
-                        (session-add-message "assistant" content
-                                             #:tokens completion-tokens
-                                             #:tool-call #t)
-
-                        (format #t "~a~%" content)
-                        (format #t "~%[Tool: ~a]~%" tool-name)
-                        (format #t "~a~%" result)
-
-                        ;; Guard tool result to suppress hallucination
-                        (let ((guarded (guard-tool-result result)))
-                          (session-add-message "user"
-                                              (format #f "Tool result for ~a:\n~a"
-                                                      tool-name guarded)))
-
-                        (let* ((follow-up (ollama-chat model (session-get-context)))
-                               (follow-msg (assoc-ref follow-up "message"))
-                               (follow-content (assoc-ref follow-msg "content"))
-                               (follow-usage (ollama-extract-token-usage follow-up))
-                               (follow-completion (assoc-ref follow-usage 'completion_tokens)))
-                          (debug-tokens (assoc-ref follow-usage 'prompt_tokens)
-                                        follow-completion)
-                          (session-add-message "assistant" follow-content
-                                               #:tokens follow-completion)
-                          (format #t "~%~a~%" follow-content))))
-
+              (let ((tool-calls (as-list (assoc-ref message "tool_calls"))))
+                (if (null? tool-calls)
+                    ;; No tool call — display content directly
                     (begin
                       (session-add-message "assistant" content
                                            #:tokens completion-tokens)
-                      (format #t "~a~%" content)))))))
+                      (format #t "~a~%" content))
+                    ;; Tool chain — loop until model stops requesting tools
+                    (begin
+                      (format #t "~a~%" content)
+                      (let ((final-text (execute-tool-chain model message content completion-tokens)))
+                        (format #t "~%~a~%" final-text))))))))
 
       (lambda (key . args)
         (cond
