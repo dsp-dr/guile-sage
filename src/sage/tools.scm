@@ -340,28 +340,44 @@
   ;; search_files
   (register-tool
    "search_files"
-   "Search for pattern in files"
+   "Search for pattern in files (optionally scoped to a subdirectory)"
    '(("type" . "object")
      ("properties" . (("pattern" . (("type" . "string")
                                     ("description" . "Search pattern (literal string)")))
+                      ("path" . (("type" . "string")
+                                 ("description" . "Subdirectory to search relative to workspace; defaults to workspace root")))
                       ("file_pattern" . (("type" . "string")
-                                        ("description" . "File glob pattern")))
+                                         ("description" . "Filename glob (basename only, no slashes), e.g. *.scm")))
                       ("regex" . (("type" . "boolean")
                                   ("description" . "Treat pattern as regex (default: false)")))))
      ("required" . #("pattern")))
    (lambda (args)
+     ;; bd: guile-tpf — schema previously didn't expose a path/scope arg,
+     ;; so models had no way to scope a search and the implementation
+     ;; always grepped from workspace root then truncated to head -50.
+     ;; Now: accept path, validate via safe-path?, walk grep from there.
      (let* ((pattern (assoc-ref args "pattern"))
+            (raw-path (or (assoc-ref args "path") "."))
             (file-pattern (or (assoc-ref args "file_pattern") "*"))
             (use-regex (assoc-ref args "regex"))
             ;; Use -F for fixed strings by default to avoid escaping issues
-            (grep-flag (if use-regex "-r" "-rF"))
-            (cmd (format #f "cd ~a && grep ~a '~a' --include='~a' . 2>&1 | head -50"
-                         (workspace) grep-flag pattern file-pattern)))
-       (let* ((tmp (format #f "/tmp/sage-grep-~a" (getpid))))
-         (system (string-append cmd " > " tmp))
-         (let ((result (call-with-input-file tmp get-string-all)))
-           (delete-file tmp)
-           result)))))
+            (grep-flag (if use-regex "-r" "-rF")))
+       (cond
+        ((not (safe-path? raw-path))
+         (format #f "Unsafe path: ~a" raw-path))
+        (else
+         (let* ((scope-path (if (equal? raw-path ".") "." raw-path))
+                ;; --include= MUST come before -- so grep treats it as a
+                ;; flag rather than a filename. -- '~a' protects against
+                ;; patterns starting with -. head -200 (was 50) gives
+                ;; narrower scopes a fair shot at filling the window.
+                (cmd (format #f "cd ~a && grep ~a --include='~a' -- '~a' ~a 2>&1 | head -200"
+                             (workspace) grep-flag file-pattern pattern scope-path))
+                (tmp (format #f "/tmp/sage-grep-~a" (getpid))))
+           (system (string-append cmd " > " tmp))
+           (let ((result (call-with-input-file tmp get-string-all)))
+             (delete-file tmp)
+             result)))))))
 
   ;; glob_files
   (register-tool
