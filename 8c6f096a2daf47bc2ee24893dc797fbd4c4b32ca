@@ -1,0 +1,6 @@
+CPRR Note — provider tests
+Attribution: Claude Opus 4.6 (1M context)
+Tests: 25 tests, 100% pass, all synthetic (no live API calls)
+Conjecture: cross-provider token usage shape test ensures all 3 extractors return identical alist
+Validation: setenv/unsetenv dance in tests is hermetic (restores previous SAGE_PROVIDER)
+Research: SRFI-64 test-harness.scm provides run-test/assert-equal compatibility shim
