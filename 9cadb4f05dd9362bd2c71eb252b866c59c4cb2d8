@@ -1,0 +1,81 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- User ask: \"ensure we have PBT driving any of the contract /
+  interface layers for hardening\"
+
+## Testing
+- 57/57 PBT properties pass at seed 42 (was 40 before this commit)
+- 5700 total trials (was 4000)
+- One real edge case caught and fixed during development:
+  duplicate keys in normalize-labels input produce
+  non-deterministic sort output. Real OTLP forbids duplicate
+  label keys (would be a malformed metric), so the generator was
+  tightened to produce unique keys.
+
+## Issues
+- bd: guile-spo (PBT extension across contract/interface layers, P2)
+- bd: guile-bw2 (json-empty-object) - covered by 4 properties here
+- bd: guile-p94 (as-list) - covered by 5 properties here
+
+## Conjecture (CPRR)
+1. Property-based tests are the right tool for shape-coercion and
+   roundtrip invariants because the failure modes are about
+   preservation across input variations, not specific cases.
+2. Model fallback selection has a small set of invariants that
+   should hold for ANY valid available-models list: never returns
+   embed/image, returns preferred when present, picks smallest
+   when not. PBT is well-suited.
+3. The telemetry counter-key invariant should hold under
+   reordering — that's what makes counters with the same logical
+   labels collapse to the same series in Prometheus.
+
+## Validation
+- The counter-key bug caught by the initial PBT run is real:
+  Scheme's `sort` is not guaranteed stable, so re-sorting an
+  already-sorted-but-with-duplicates list can swap the
+  duplicates' relative order. The fix (require unique keys)
+  matches actual OTLP semantics, not a workaround.
+- The select-fallback-model property runs against synthetic
+  /api/tags shapes built from rng-fake-model, so it's
+  generator-quality and not coupled to a live Ollama instance.
+- Total runtime ~1.5s for 5700 trials. Acceptable for CI.
+
+## Refutation / known limits
+- Generators are still small (rng-int 0..20 for list lengths,
+  short alphabetic strings). Edge cases at much larger sizes
+  are not exercised. Could be tightened with size-shrinking
+  in a future PBT harness.
+- The model fallback property assumes the rng-chat-model
+  generator covers the realistic family/format space. If the
+  Ollama JSON shape changes (e.g. families becomes nested), the
+  generator would need updating in lockstep.
+- No counterexample shrinking. When a property fails, you see
+  the raw random input with a possibly-large counterexample.
+  Acceptable for this codebase's PBT philosophy (\"smoke-test
+  many cases, hand-debug failures\").
+- We don't run the full ollama-chat against a synthetic Ollama
+  server; that would catch HTTP-layer regressions but is much
+  heavier and would need a fake server.
+- The telemetry properties run with telemetry disabled
+  (SAGE_TELEMETRY_DISABLE=1) to avoid hammering the live nexus
+  collector during PBT.
+
+## Meta - research / context / deep-dives
+- Hegel-guile (~/ghq/github.com/dsp-dr/hegel-guile) provides a
+  more sophisticated property/proof framework. We could port a
+  subset of these properties there for harder shrinking and
+  Lakatosian counterexample generation. Not done in 0.6.x to
+  avoid dependency creep.
+- Eval idea: a fuzzer over the json-write -> json-read roundtrip
+  for arbitrarily-shaped nested data. Would catch any future
+  parser/writer divergence early. Probably warrants its own
+  test file.
+- Open question: should the PBT trial count be tunable per
+  property? Some (like as-list shape coercion) probably need
+  fewer than 100 trials; others (like the fallback selection)
+  could use 1000 to catch rarer edge cases.
+- Worth exploring: SRFI 158 generators for cleaner test data
+  generation. Current rng-* helpers are ad-hoc.
+- The PBT total is now 5700 trials in ~1.5s. Headroom for
+  expansion is significant before we'd need to start parallelising.
