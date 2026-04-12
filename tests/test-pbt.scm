@@ -981,6 +981,62 @@
       (and path-honest? roundtrip-ok?))))
 
 ;;; ============================================================
+;;; Property: search_files path scope honesty (bd: guile-tpf)
+;;; ============================================================
+;;;
+;;; The contract: for any safe path under workspace, search_files
+;;; with that path arg must return only matches whose paths begin
+;;; with that scope. The pre-fix code silently dropped the arg and
+;;; returned readdir-order matches from anywhere in the workspace.
+
+(format #t "~%=== PBT: search_files path scope ===~%")
+
+(property "search_files scope contains scope substring in every match line"
+  (lambda ()
+    ;; Pick a safe scope that exists in this repo. We use a small
+    ;; rotation rather than fully-random paths because randomly
+    ;; generated dir names won't exist on disk.
+    (rng-element '("src/sage" "tests" "scripts" "docs")))
+  (lambda (scope)
+    (let* ((result (execute-tool "search_files"
+                                 `(("pattern" . "define")
+                                   ("path" . ,scope))))
+           (lines (filter (lambda (l) (not (string-null? l)))
+                          (string-split result #\newline)))
+           ;; Filter out grep "Binary file ..." headers and any
+           ;; out-of-band noise; keep only lines that look like
+           ;; "path:content" matches
+           (match-lines (filter (lambda (l)
+                                  (and (string-contains l ":")
+                                       (not (string-prefix? "Binary file " l))
+                                       (not (string-prefix? "grep:" l))))
+                                lines)))
+      ;; Every match line MUST start with the scope path
+      (every (lambda (line)
+               (or (string-prefix? scope line)
+                   ;; Allow leading "./" form just in case
+                   (string-prefix? (string-append "./" scope) line)))
+             match-lines))))
+
+(property "search_files default scope is non-empty"
+  (lambda ()
+    ;; No knob — just verifies the no-arg fallback still works
+    (rng-int 0 1))
+  (lambda (_)
+    (let ((result (execute-tool "search_files" '(("pattern" . "define")))))
+      (and (string? result) (> (string-length result) 0)))))
+
+(property "search_files unsafe path is rejected"
+  (lambda ()
+    ;; Generate path-traversal-shaped strings; safe-path? must reject all
+    (let ((depth (rng-int 1 5)))
+      (string-join (map (lambda (_) "..") (iota depth)) "/")))
+  (lambda (bad-path)
+    (let ((result (execute-tool "search_files"
+                                `(("pattern" . "x") ("path" . ,bad-path)))))
+      (string-contains result "Unsafe"))))
+
+;;; ============================================================
 ;;; Property: telemetry.scm — counter / label invariants
 ;;; ============================================================
 
