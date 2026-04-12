@@ -355,6 +355,66 @@
       (unless (string-contains result "not found")
         (error "should report not-found" result)))))
 
+;;; ============================================================
+;;; search_files path-scope honesty  (bd: guile-tpf)
+;;; ============================================================
+;;;
+;;; Pre-fix bug: search_files schema didn't expose a path arg, so
+;;; models could not scope a search and the implementation always
+;;; grepped from workspace root. Symptom: "Search for define in
+;;; src/sage" returned matches from tests/, scripts/, and tmp/
+;;; instead. See docs/REPRO-guile-tpf.md for the byte-exact wire
+;;; trace and the model-vs-schema diagnosis.
+
+(format #t "~%--- search_files path scope ---~%")
+
+(run-test "search_files honours path=src/sage scope"
+  (lambda ()
+    (let ((result (execute-tool "search_files"
+                                '(("pattern" . "define-module")
+                                  ("path" . "src/sage")))))
+      (unless (string? result)
+        (error "search_files should return string" result))
+      ;; Must include src/sage hits — the whole point of scoping
+      (unless (string-contains result "src/sage/")
+        (error "scoped to src/sage MUST return src/sage matches" result))
+      ;; Must NOT include tests/ hits — proves the scope was honoured
+      (when (string-contains result "tests/")
+        (error "scoped to src/sage MUST NOT return tests/ matches" result)))))
+
+(run-test "search_files default scope returns mixed tree"
+  (lambda ()
+    (let ((result (execute-tool "search_files"
+                                '(("pattern" . "define-module")))))
+      ;; Without scope, the default '.' walk should still produce
+      ;; some result (mixed across trees, exact composition is
+      ;; readdir-order-dependent)
+      (unless (and (string? result) (> (string-length result) 0))
+        (error "default scope should still return matches" result)))))
+
+(run-test "search_files rejects unsafe scope path"
+  (lambda ()
+    (let ((result (execute-tool "search_files"
+                                '(("pattern" . "root")
+                                  ("path" . "../../../etc")))))
+      (unless (string-contains result "Unsafe")
+        (error "search_files should reject path traversal" result)))))
+
+(run-test "search_files schema declares path property"
+  (lambda ()
+    ;; Schema regression: ensure the path property never gets
+    ;; dropped from the schema again. This is the bug that the
+    ;; whole class of \"model can't pass an arg the schema doesn't
+    ;; advertise\" failure modes lives in.
+    (let* ((tool (get-tool "search_files"))
+           (params (assoc-ref tool "parameters"))
+           (props (assoc-ref params "properties"))
+           (path-prop (assoc-ref props "path")))
+      (unless path-prop
+        (error "search_files schema must declare a path property"))
+      (unless (equal? (assoc-ref path-prop "type") "string")
+        (error "search_files path must be a string" path-prop)))))
+
 (run-test "edit_file File-not-found echoes the resolved path"
   (lambda ()
     (setenv "SAGE_YOLO_MODE" "1")
