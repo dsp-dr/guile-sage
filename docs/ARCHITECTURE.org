@@ -98,21 +98,26 @@ in-memory state.
 
 ** Core Tool Categories
 
+Tools are classified into a *safe* tier (always permitted) and an
+*unsafe* tier (require =SAGE_YOLO_MODE=). The permission contract is
+defined in [[file:adr/0003-security-model.md][ADR-0003]] and enforced by =check-permission= in
+=src/sage/tools.scm=. The annotations below mirror that contract.
+
 *** File Operations (Pure Guile)
-- =read_file= - Read file content
-- =write_file= - Write/create files
-- =edit_file= - Modify existing files
-- =list_files= - Directory listing
-- =glob_files= - Pattern matching
-- =search_files= - Content search
+- =read_file= - Read file content [safe]
+- =write_file= - Write/create files [unsafe — needs YOLO]
+- =edit_file= - Modify existing files [unsafe — needs YOLO]
+- =list_files= - Directory listing [safe]
+- =glob_files= - Pattern matching [safe]
+- =search_files= - Content search [safe]
 
 *** Git Operations (Shell, TODO: libgit2)
-- =git_status= - Working tree state
-- =git_diff= - Show changes
-- =git_log= - Commit history
-- =git_commit= - Create commits
-- =git_push= - Push to remote
-- =git_add_note= - Attach notes to commits
+- =git_status= - Working tree state [safe]
+- =git_diff= - Show changes [safe]
+- =git_log= - Commit history [safe]
+- =git_commit= - Create commits [unsafe — needs YOLO]
+- =git_push= - Push to remote [unsafe — needs YOLO]
+- =git_add_note= - Attach notes to commits [unsafe — needs YOLO]
 
 *** Self-Inspection (Pure Guile)
 - =read_logs= - Read sage's own logs
