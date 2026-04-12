@@ -373,16 +373,11 @@
 ;;;   message - Response message alist (has "content", may have "tool_calls")
 ;;; Returns: Tool call alist with "name" and "arguments", or #f
 (define (ollama-parse-tool-call message)
-  (let* ((tool-calls (assoc-ref message "tool_calls"))
-         ;; util.scm's JSON parser returns arrays as LISTS, but other
-         ;; callers may pass vectors. Accept both shapes uniformly.
-         (first-tc (cond
-                    ((and tool-calls (vector? tool-calls)
-                          (> (vector-length tool-calls) 0))
-                     (vector-ref tool-calls 0))
-                    ((and tool-calls (pair? tool-calls))
-                     (car tool-calls))
-                    (else #f))))
+  ;; tool_calls can arrive as a vector (when sage built it via list->vector)
+  ;; or as a list (when sage's JSON parser returned it from /api/chat).
+  ;; Centralised in (sage util) as-list — bd: guile-p94.
+  (let* ((tool-calls-list (as-list (assoc-ref message "tool_calls")))
+         (first-tc (and (pair? tool-calls-list) (car tool-calls-list))))
     (if first-tc
         ;; Native Ollama tool calling
         (let ((fn (assoc-ref first-tc "function")))
