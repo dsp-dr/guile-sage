@@ -20,6 +20,7 @@
   #:use-module (sage status)
   #:use-module (sage commands)
   #:use-module (sage telemetry)
+  #:use-module (sage mcp)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-19)
   #:use-module (ice-9 format)
@@ -870,6 +871,10 @@
   ;; Initialize telemetry (no-op if SAGE_TELEMETRY_DISABLE is set or
   ;; OTEL_EXPORTER_OTLP_ENDPOINT is not configured)
   (telemetry-init)
+
+  ;; Discover and register MCP tools (fail-soft: logs WARN on error,
+  ;; never crashes the REPL). See docs/MCP-CONTRACT.org.
+  (mcp-init)
 
   ;; Load custom commands
   (let ((n (load-custom-commands!)))
