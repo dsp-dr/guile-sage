@@ -1,0 +1,9 @@
+CPRR: guile-qa1 validation
+
+Attribution: validation agent (Claude Opus 4.6)
+Tests: 9/9 unit (test-repl-chains.scm), 76/76 PBT (test-pbt.scm, +2 properties)
+Conjecture: dispatch loop is correct; model planning quality is the bottleneck
+Validation: live testing with llama3.2 confirms 0/4 multi-step prompts succeed
+  despite the loop working correctly -- all 3 tested prompts hit the 10-iteration
+  safety cap due to degenerate model behavior (same-tool loops)
+Research: see docs/MULTISTEP-REVIEW-0.7.md for full findings and 5 gap items
