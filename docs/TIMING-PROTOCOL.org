@@ -1,0 +1,173 @@
+#+TITLE: guile-sage Timing Protocol
+#+AUTHOR: guile-sage
+#+OPTIONS: toc:2 num:nil
+
+* Purpose
+
+Reproducible per-model performance + tool-call reliability
+benchmark for sage's Ollama backend. The protocol exists to:
+
+1. Lock in *concrete numbers* for the model-tier defaults so we
+   are not picking models based on intuition.
+2. Catch *regressions* in model behaviour after Ollama upgrades or
+   model re-pulls. Models change subtly between releases — a
+   model that did native tool calling reliably last week may
+   regress.
+3. Give the FreeBSD test box a *deterministic methodology* so the
+   numbers from FreeBSD can be compared apples-to-apples with
+   the numbers from the macOS dev box.
+
+* Script
+
+=scripts/timing-bench.sh= is the canonical implementation. It is
+a thin sh wrapper around a python heredoc that does all the
+JSON-shaped HTTP work — bash heredoc + escaping was a footgun
+with prompts containing parens or quotes (the v0 of this script
+hit exactly that bug; see commit history).
+
+** Knobs
+
+| Env var               | Default                                  | Purpose                          |
+|-----------------------+------------------------------------------+----------------------------------|
+| =OLLAMA_HOST=         | =http://localhost:11434=                 | Where to talk Ollama             |
+| =TIMING_BENCH_MODELS= | =llama3.2:latest qwen3:0.6b qwen2.5-coder:7b= | Space-separated model list  |
+| =TIMING_BENCH_TRIALS= | =3=                                      | Tool-call invocation trials      |
+| =TIMING_BENCH_PROMPT= | (square Scheme function prompt)          | Single-turn perf prompt          |
+
+** Methodology
+
+For each model the script runs *two* phases:
+
+*** Phase 1 — single-turn performance (no tools)
+
+One non-streaming POST to =/api/chat= with the canonical prompt.
+Captures from the response body:
+
+| Field                  | What it measures                                  |
+|------------------------+---------------------------------------------------|
+| =load_duration=        | Cold-load latency for the model into VRAM        |
+| =prompt_eval_count=    | Tokens in the input prompt                       |
+| =prompt_eval_duration= | Time to ingest the prompt                         |
+| =eval_count=           | Tokens generated in the response                 |
+| =eval_duration=        | Time to generate the response                     |
+| =total_duration=       | End-to-end wall clock for the request            |
+
+Reported as TSV: =load_ms prompt_tok prompt_t/s eval_tok eval_t/s total_ms=.
+
+*** Phase 2 — native tool-call invocation rate
+
+=N= (default 3) non-streaming POSTs to =/api/chat= with a fixed
+=get_weather= tool definition and the prompt "What is the weather
+in Tokyo? Use the get_weather tool." For each response, the script
+checks whether =message.tool_calls= is non-empty.
+
+A model that emits a *text-formatted* tool-call like
+~{"name":"get_weather", "arguments":{"city":"Tokyo"}}~ inside the
+content does NOT count — only native =tool_calls= field counts.
+This matches what sage's =ollama-parse-tool-call= sees.
+
+Reported as =tool_calls/N=.
+
+* Locked-in measurements (2026-04-11, mini host, 64 GB RAM)
+
+Captured by =TIMING_BENCH_TRIALS=10 scripts/timing-bench.sh= on
+the macOS development box (mini, Apple Silicon, 64 GB RAM,
+Ollama 0.18.3).
+
+| model                | load_ms | prompt_tok | prompt_t/s | eval_tok | eval_t/s | total_ms | tool_calls/10 |
+|----------------------+---------+------------+------------+----------+----------+----------+---------------|
+| llama3.2:latest      |    1070 |         47 |         71 |       15 |     43.5 |     2078 |         *10*  |
+| qwen3:0.6b           |     786 |         32 |        516 |      251 |    154.4 |     2517 |         *10*  |
+| qwen2.5-coder:7b     |    2486 |         51 |        144 |       10 |     24.0 |     3263 |         *0*   |
+
+** What the numbers say
+
+1. *llama3.2:latest is the right fast-tier default.* It is
+   tool-reliable (10/10), produces clean short answers (10-15
+   tokens for the test prompt), and warm-loads in ~1s.
+
+2. *qwen2.5-coder:7b is the WORST tool-caller in our local set.*
+   It hit *0/10* native tool calls in this run. The model
+   text-formatted the tool call into the content instead — exactly
+   the failure mode we saw in the live exploratory UX session
+   (=docs/UX-FINDINGS-0.6.0.md=). Setting it as the standard-tier
+   default in 0.6.0 was a mistake; should be reverted.
+
+3. *qwen3:0.6b is surprisingly tool-reliable* (10/10) but pays a
+   massive token tax: 251 generated tokens for what should be a
+   one-line answer. The reasoning chain (=<think>...</think>=)
+   blows up token counters and pollutes context. Use only when
+   model footprint matters more than token budget.
+
+4. *Total time correlates with tokens generated*, NOT with raw
+   eval t/s. qwen3:0.6b at 154 t/s is *slower end-to-end* than
+   llama3.2 at 43 t/s because qwen3 generates 251 tokens vs
+   llama3.2's 15. Per-second throughput is misleading.
+
+5. *Tool-call reliability is bimodal in this set.* It's either
+   100% (llama3.2, qwen3) or 0% (qwen2.5-coder). No model in the
+   small set was "sometimes". Worth retesting the larger qwen2.5
+   variants if the user pulls them again.
+
+** Caveats
+
+- Single host (mini), single Ollama version (0.18.3), single run
+  per model. Variance unknown. Re-run at least monthly or after
+  any =ollama pull= to catch model upgrades.
+- *Non-streaming.* Sage uses streaming for the chat path. Streaming
+  may produce different tool-call behaviour for some models
+  (=docs/UX-FINDINGS-0.6.0.md= observed llama3.2 was less reliable
+  in the streaming + sage path than in raw curl). A streaming
+  variant of this benchmark is a candidate follow-up.
+- *Cold load is sensitive to what's already resident.* The
+  =load_duration= numbers above were collected after a session
+  that had llama3.2 already loaded (91ms in the first run vs
+  1070ms in the 10-trial run that re-warmed across model
+  switches). Real cold-load is closer to 2-3s for these sizes.
+- *No prompt cache.* Each request is independent. Real sage
+  sessions reuse the prompt prefix and would see lower
+  =prompt_eval_duration= per turn.
+
+* Comparison to RELEASE-0.6.0.org claims
+
+| Claim in RELEASE-0.6.0.org                          | Confirmed?            |
+|-----------------------------------------------------+-----------------------|
+| llama3.2:latest is the right fast-tier default      | *YES* (10/10 tools)   |
+| qwen2.5-coder:14b is unusable on this hardware      | not retested (removed earlier) |
+| ">=3B params is the reliable floor for tool calling" | *NO — refuted* by qwen3:0.6b which is 0.6B and got 10/10 |
+| qwen2.5-coder:7b is the right standard-tier default | *NO — refuted* by 0/10 tool-call score |
+
+The 3B claim was based on sparse evidence and should be removed
+from the release notes. The standard-tier default should change.
+
+* Action items (filed as bd issues)
+
+- =guile-c8q= — formalise this protocol (this commit)
+- =guile-???= — model-tier standard tier default needs revisit
+  based on the 0/10 result for qwen2.5-coder:7b. Candidates:
+  - revert to a single-tier model (llama3.2 only)
+  - try llama3.2:1b for fast, llama3.2:3b for standard if Meta
+    publishes the 1b
+  - test mistral-small / phi3-mini once installed
+- A streaming-variant of this benchmark to verify whether the
+  numbers change when sage's streaming code path is in the mix
+- A FreeBSD-host variant of these measurements to compare
+  against the macOS numbers
+
+* Reproducibility checklist
+
+To reproduce the locked-in numbers:
+
+#+BEGIN_SRC bash
+# 1. Same Ollama version (or note your version)
+curl -s http://localhost:11434/api/version
+
+# 2. Same models present
+ollama list | awk 'NR>1 {print $1}' | sort
+
+# 3. Run the bench with 10 trials
+TIMING_BENCH_TRIALS=10 scripts/timing-bench.sh
+
+# 4. Capture the TSV output and diff against this doc's table.
+#    Material drift = file a bd issue.
+#+END_SRC
