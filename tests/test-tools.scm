@@ -66,13 +66,21 @@
     (unless (check-permission "git_status" '())
       (error "git_status should be safe"))))
 
-(run-test "write_file is safe (dev mode)"
+(run-test "write_file requires YOLO"
   (lambda ()
+    (unsetenv "SAGE_YOLO_MODE")
+    (unsetenv "YOLO_MODE")
+    (when (check-permission "write_file" '())
+      (error "write_file should be denied without YOLO"))
+    (setenv "SAGE_YOLO_MODE" "1")
     (unless (check-permission "write_file" '())
-      (error "write_file should be safe in dev mode"))))
+      (error "write_file should be allowed under YOLO"))
+    (unsetenv "SAGE_YOLO_MODE")))
 
 (run-test "eval_scheme is unsafe"
   (lambda ()
+    (unsetenv "SAGE_YOLO_MODE")
+    (unsetenv "YOLO_MODE")
     (when (check-permission "eval_scheme" '())
       (error "eval_scheme should be unsafe"))))
 

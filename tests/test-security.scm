@@ -12,6 +12,11 @@
              (ice-9 format)
              (ice-9 regex))
 
+;; Permission-bypass tests must run with YOLO disabled, even when CI
+;; sets SAGE_YOLO_MODE globally so other suites can mutate the workspace.
+(unsetenv "SAGE_YOLO_MODE")
+(unsetenv "YOLO_MODE")
+
 ;;; Load shared SRFI-64 test harness
 (load (string-append (dirname (current-filename)) "/test-harness.scm"))
 
