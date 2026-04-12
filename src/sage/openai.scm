@@ -14,6 +14,7 @@
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-19)
   #:use-module (ice-9 format)
+  #:use-module (ice-9 textual-ports)
   #:export (openai-host
             openai-model
             openai-api-key
@@ -98,6 +99,50 @@
 ;;; Chat Completions
 ;;; ============================================================
 
+;;; openai-post-with-headers: POST that also captures response headers.
+;;; Returns (code body guardrails) where guardrails is a string or #f.
+(define (openai-post-with-headers url body timeout headers)
+  "POST via curl capturing response headers for guardrail detection."
+  (let* ((header-file (format #f "/tmp/sage-headers-~a" (getpid)))
+         (in-file (format #f "/tmp/sage-post-in-~a" (getpid)))
+         (out-file (format #f "/tmp/sage-post-out-~a" (getpid)))
+         (_ (call-with-output-file in-file
+              (lambda (port) (display body port))))
+         (header-args (string-join
+                       (cons "-H 'Content-Type: application/json'"
+                             (map (lambda (h)
+                                    (format #f "-H '~a: ~a'" (car h) (cdr h)))
+                                  headers))
+                       " "))
+         (cmd (format #f "curl -s --max-time ~a -D '~a' -w '\\n%{http_code}' -X POST ~a -d '@~a' '~a' > '~a'"
+                      timeout header-file header-args in-file url out-file)))
+    (system cmd)
+    (let* ((output (if (file-exists? out-file)
+                       (call-with-input-file out-file get-string-all)
+                       ""))
+           (lines (string-split output #\newline))
+           (code-line (if (pair? lines) (last lines) "0"))
+           (body-lines (if (pair? lines) (drop-right lines 1) '()))
+           (resp-body (string-join body-lines "\n"))
+           (code (or (string->number (string-trim-both code-line)) 0))
+           ;; Extract guardrail header
+           (guardrails
+            (if (file-exists? header-file)
+                (let ((hdrs (call-with-input-file header-file get-string-all)))
+                  (let ((match (string-contains hdrs "x-litellm-applied-guardrails:")))
+                    (if match
+                        (let* ((start (+ match (string-length "x-litellm-applied-guardrails:")))
+                               (end (or (string-index hdrs #\newline start)
+                                        (string-length hdrs))))
+                          (string-trim-both (substring hdrs start end)))
+                        #f)))
+                #f)))
+      ;; Cleanup
+      (when (file-exists? in-file) (delete-file in-file))
+      (when (file-exists? out-file) (delete-file out-file))
+      (when (file-exists? header-file) (delete-file header-file))
+      (list code resp-body guardrails))))
+
 ;;; openai-chat: Non-streaming chat completion.
 (define* (openai-chat model messages #:key (stream #f))
   (let* ((url (string-append (openai-host) "/chat/completions"))
@@ -110,11 +155,13 @@
     (log-api-request model "/chat/completions" #:tokens (length messages))
     (status-thinking #:model model #:host (openai-host))
 
-    (let* ((result (http-post-with-timeout url body *request-timeout*
-                                           #:headers (openai-auth-headers)))
+    (let* ((result (openai-post-with-headers url body *request-timeout*
+                                             (openai-auth-headers)))
            (elapsed (- (time-second (current-time)) (time-second start-time)))
-           (code (if (pair? result) (car result) 0))
-           (resp-body (if (pair? result) (cdr result) "")))
+           (code (if (list? result) (car result) 0))
+           (resp-body (if (list? result) (cadr result) ""))
+           (guardrails (if (and (list? result) (> (length result) 2))
+                           (caddr result) #f)))
 
       (status-done elapsed)
 
@@ -127,7 +174,7 @@
               (let ((usage (openai-extract-token-usage normalised)))
                 (log-api-response code #:tokens (+ (assoc-ref usage 'prompt_tokens)
                                                     (assoc-ref usage 'completion_tokens))))
-              normalised))
+              (if guardrails (cons (cons "guardrails" guardrails) normalised) normalised)))
           (lambda (key . args)
             (log-error "openai" "Failed to parse API response"
                        `(("body_preview" . ,(substring resp-body 0
@@ -219,11 +266,13 @@
     (log-api-request model "/chat/completions" #:tokens (length messages))
     (status-thinking #:model model #:host (openai-host))
 
-    (let* ((result (http-post-with-timeout url body *request-timeout*
-                                           #:headers (openai-auth-headers)))
+    (let* ((result (openai-post-with-headers url body *request-timeout*
+                                             (openai-auth-headers)))
            (elapsed (- (time-second (current-time)) (time-second start-time)))
-           (code (if (pair? result) (car result) 0))
-           (resp-body (if (pair? result) (cdr result) "")))
+           (code (if (list? result) (car result) 0))
+           (resp-body (if (list? result) (cadr result) ""))
+           (guardrails (if (and (list? result) (> (length result) 2))
+                           (caddr result) #f)))
 
       (status-done elapsed)
 
@@ -236,7 +285,7 @@
               (let ((usage (openai-extract-token-usage normalised)))
                 (log-api-response code #:tokens (+ (assoc-ref usage 'prompt_tokens)
                                                     (assoc-ref usage 'completion_tokens))))
-              normalised))
+              (if guardrails (cons (cons "guardrails" guardrails) normalised) normalised)))
           (lambda (key . args)
             (log-error "openai" "Failed to parse API response"
                        `(("body_preview" . ,(substring resp-body 0

@@ -868,15 +868,10 @@
                             `(("model" . ,model)) 0)
               (telemetry-flush!)
 
-              ;; Check if guardrails redacted content (LiteLLM patterns)
-              (when (or (string-contains content "[EMAIL REDACTED]")
-                        (string-contains content "[CC REDACTED]")
-                        (string-contains content "[SSN REDACTED]")
-                        (string-contains content "[KEY REDACTED]")
-                        (string-contains content "[PHONE REDACTED]")
-                        (string-contains content "[STRIPE REDACTED]")
-                        (string-contains content "REDACTED"))
-                (format #t "\x1b[33m🛡️ Guardrails applied (content redacted)\x1b[0m~%"))
+              ;; Show guardrail indicator from LiteLLM response header
+              (let ((guardrails (assoc-ref response "guardrails")))
+                (when (and guardrails (string? guardrails) (not (string-null? guardrails)))
+                  (format #t "\x1b[33m🛡️ Guardrails: ~a\x1b[0m~%" guardrails)))
 
               (let ((tool-calls (as-list (assoc-ref message "tool_calls"))))
                 (if (null? tool-calls)
