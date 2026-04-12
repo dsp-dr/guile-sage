@@ -41,6 +41,9 @@
             telemetry-shutdown!
             ;; Exposed for tests
             *counters*
+            *flush-backoff-seconds*
+            *last-flush-failure*
+            in-flush-backoff?
             counter-key
             normalize-labels
             build-resource-attributes
@@ -58,6 +61,12 @@
 (define *start-time-unix-nano* "0")
 (define *counters* (make-hash-table))
 (define *initialized* #f)
+
+;;; Backoff state: suppress flush retries for *flush-backoff-seconds* after
+;;; a failed POST, so a down collector doesn't burn wall time on every turn.
+;;; Counters accumulate in memory continuously; only the PUSH is rate-limited.
+(define *last-flush-failure* #f)    ; #f or epoch seconds of last failure
+(define *flush-backoff-seconds* 60) ; how long to suppress retries
 
 ;;; Scope identifies the meter name + version (matches "otel_scope_name" in
 ;;; Prometheus). Mirrors the spec's example "com.nexushive.my_agent".
@@ -261,6 +270,17 @@
                 ("metrics" . ,metrics))))))))))
 
 ;;; ============================================================
+;;; Flush backoff
+;;; ============================================================
+
+;;; in-flush-backoff?: Return #t if we're within the backoff window
+;;; following a failed flush. The caller should skip the POST.
+(define (in-flush-backoff?)
+  (and *last-flush-failure*
+       (let ((now (time-second (current-time time-utc))))
+         (< (- now *last-flush-failure*) *flush-backoff-seconds*))))
+
+;;; ============================================================
 ;;; Init / flush / shutdown
 ;;; ============================================================
 
@@ -300,30 +320,48 @@
 
 ;;; telemetry-flush!: POST current cumulative totals to the collector.
 ;;; Fail-soft: any error is logged at WARN and discarded.
+;;; When a previous flush has failed, subsequent calls are suppressed for
+;;; *flush-backoff-seconds* to avoid burning wall time on a dead collector.
+;;; Counters stay in memory and the next successful flush carries everything.
 (define (telemetry-flush!)
   (when (and *enabled* (> (hash-count (const #t) *counters*) 0))
-    (catch #t
-      (lambda ()
-        (let* ((payload (build-metrics-payload))
-               (body (json-write-string payload))
-               (result (http-post-with-timeout *endpoint* body 2)))
-          (let ((code (if (pair? result) (car result) 0)))
-            (cond
-             ((and (number? code) (>= code 200) (< code 300))
-              (log-debug "telemetry" "Flush succeeded"
-                         `(("code" . ,code)
-                           ("counters" . ,(hash-count (const #t) *counters*)))))
-             (else
-              (log-warn "telemetry" "Flush failed (non-2xx)"
-                        `(("code" . ,code)
-                          ("endpoint" . ,*endpoint*))))))))
-      (lambda (key . args)
-        (log-warn "telemetry" "Flush threw"
-                  `(("error" . ,(format #f "~a ~a" key args))))))))
+    (if (in-flush-backoff?)
+        (log-debug "telemetry" "Flush skipped (backoff window)"
+                   `(("backoff_seconds" . ,*flush-backoff-seconds*)))
+        (catch #t
+          (lambda ()
+            (let* ((payload (build-metrics-payload))
+                   (body (json-write-string payload))
+                   (result (http-post-with-timeout *endpoint* body 2)))
+              (let ((code (if (pair? result) (car result) 0)))
+                (cond
+                 ((and (number? code) (>= code 200) (< code 300))
+                  ;; Success -- clear any prior backoff
+                  (set! *last-flush-failure* #f)
+                  (log-debug "telemetry" "Flush succeeded"
+                             `(("code" . ,code)
+                               ("counters" . ,(hash-count (const #t) *counters*)))))
+                 (else
+                  ;; Non-2xx -- enter backoff
+                  (set! *last-flush-failure*
+                        (time-second (current-time time-utc)))
+                  (log-warn "telemetry" "Flush failed (non-2xx)"
+                            `(("code" . ,code)
+                              ("endpoint" . ,*endpoint*))))))))
+          (lambda (key . args)
+            ;; Exception -- enter backoff
+            (set! *last-flush-failure*
+                  (time-second (current-time time-utc)))
+            (log-warn "telemetry" "Flush threw"
+                      `(("error" . ,(format #f "~a ~a" key args)))))))))
 
 ;;; telemetry-shutdown!: Final flush before process exit.
+;;; Always attempts one last flush regardless of backoff state -- this is the
+;;; user's last chance to push accumulated counters before the process dies.
 ;;; Resets state so a subsequent telemetry-init can re-initialize.
 (define (telemetry-shutdown!)
   (when *enabled*
+    ;; Clear backoff so the final flush attempt actually fires.
+    (set! *last-flush-failure* #f)
     (telemetry-flush!))
   (set! *initialized* #f))
