@@ -1,0 +1,6 @@
+CPRR Note — provider dispatch
+Attribution: Claude Opus 4.6 (1M context)
+Tests: gmake check passes (all suites green)
+Conjecture: lazy module-ref avoids load-time dep on gemini/openai when unused
+Validation: SAGE_PROVIDER=gemini provider-model returns gemini-model; default returns ollama-model
+Research: Guile resolve-module is idempotent; repeated calls return cached module
