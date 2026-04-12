@@ -1,0 +1,99 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Bug surfaced by background sage UX agent (sub-agent ad422073a2147c712)
+  during exploratory testing on 2026-04-11. See
+  docs/UX-FINDINGS-0.6.0.md gap #1.
+
+## Testing
+- 4 unit tests in test-tools.scm covering: write_file abs lands at
+  /tmp/, write_file rel lands under workspace, read_file not-found
+  echoes resolved abs path, edit_file not-found echoes resolved abs path
+- 2 PBT properties at 100 trials each:
+  write_file -> read_file roundtrip works for absolute /tmp/ paths
+  write_file -> read_file roundtrip works for workspace-relative paths
+- gmake check 34/37 baseline preserved (3 known security failures)
+- PBT 61/61 properties pass at seed 42, 6100 total trials
+- Live verified end-to-end in shell:
+  ABS: Wrote 14 bytes to /tmp/sage-resolve-test.txt
+  REL: Wrote 14 bytes to /Users/USER/.../guile-sage/tmp/sage-resolve-test.txt
+  ls -la confirmed both files exist at the reported paths with the
+  expected content (\"absolute hello\" and \"relative hello\").
+- Manual cleanup of test artifacts after each run.
+
+## Issues
+- bd: guile-ecn (P2) — claimed and ready to close after push
+
+## Conjecture (CPRR)
+- Hypothesis 1: the bug was a copy-paste of safe-path?'s expansion
+  logic done four times across four tools, with the WRITE side
+  reporting the input path verbatim instead of the resolved one.
+  Centralising the path resolution into one helper is the right
+  fix because (a) the four sites had identical logic and (b)
+  safe-path? was doing the same expansion inline.
+- Hypothesis 2: write_file's success message is the most-trusted
+  string in any tool-using turn — the model uses it to decide
+  whether the operation succeeded and to compose its reply. A lie
+  here cascades into hallucination downstream.
+- Hypothesis 3: the parallel bugs in read_file/edit_file/list_files
+  are real but had no end-user visibility before this commit
+  because read_file with a missing path silently said \"File not
+  found: <input>\" without making the user aware that the search
+  scope was wrong. Fixing them now prevents another class of
+  silent path-misreporting.
+
+## Validation
+- Live filesystem proof: two distinct paths, two distinct contents,
+  two distinct success messages. Before the fix, BOTH paths would
+  have written to the same workspace-relative location.
+- PBT roundtrip property: writes random content to random filename,
+  reads it back, asserts equality. Catches any future regression
+  where the resolved path doesn't match the literal filesystem
+  location.
+- PBT path-honesty assertion: success message MUST contain the
+  resolved path string. Catches any future tool that mints a fake
+  path in its success message.
+
+## Refutation / known limits
+- resolve-path is pure (no canonicalize-path-safe call). It does
+  not normalise //, ../, or symlinks. safe-path? still calls
+  canonicalize-path-safe separately for the workspace-containment
+  check. The downside is that resolve-path can return paths with
+  embedded //, which the OS handles fine but which look ugly in
+  user output. Acceptable.
+- The fix doesn't apply to git_commit's path arg (already takes
+  workspace-relative file lists for git add) or to the log
+  search/read tools (no path arg). Confined to the four file
+  manipulation tools.
+- read_file's success path (returning the file contents) is
+  unchanged — only the not-found error message was wrong.
+- The PBT property uses /tmp/ as the absolute test scope. If
+  /tmp/ is not writable on a CI runner, the property fails;
+  acceptable since /tmp/ is mandated by POSIX.
+- The PBT generator only produces alphanumeric filenames; it does
+  not stress edge cases like spaces, unicode, very long paths, or
+  symlinks. Could be tightened in a follow-up if a corner case
+  bites us.
+
+## Meta - research / context / deep-dives
+- Worth a future audit: grep for any other (string-append (workspace)
+  ...) patterns that should use resolve-path. The current grep
+  showed all 5 sites; only safe-path?'s expanded was already
+  refactored, the other 4 are now updated.
+- Related: docs/UX-FINDINGS-0.6.0.md gap #1 was the source-of-truth
+  for this bug. Should land as a docs commit in this 0.6.x stack.
+- Eval idea: a property test for edit_file roundtrip: write a file
+  with content X, edit X -> Y, read it back, assert Y. Catches
+  future regressions in the search/replace plumbing.
+- Open question: should resolve-path also normalise // -> / for
+  display? Tradeoff between clean output and pure simplicity.
+  Would require importing (ice-9 regex) or (ice-9 popen) to call
+  realpath; not worth it for cosmetic improvement.
+- Worth thinking about: is there a class of \"echo what you actually
+  did\" lints we could automate? Diff the model's free-form text
+  in a tool turn against the raw tool output and flag any new
+  paths/IDs/tokens that aren't in the tool output. This is the same
+  honesty-budget idea that came up in UX-FINDINGS gap #3.
+- Future hardening (0.7.0?): JSON Schema validation on tool args
+  before they reach the tool body, including \"format\" hints like
+  \"path\" that can do this kind of normalisation declaratively.
