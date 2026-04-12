@@ -1,0 +1,10 @@
+## CPRR Note
+
+**Context**: guile-u3n — telemetry-flush! burns ~4s/turn when infra-host:4318 is down
+**Problem**: 4 flush points * 1s curl timeout = 14% wall-time regression
+**Resolution**: Module-level *last-flush-failure* timestamp + in-flush-backoff? guard.
+  After failed POST, skip flushes for 60s. telemetry-shutdown! clears backoff
+  for a final attempt. Counters accumulate in-memory throughout.
+**Risk**: Low — backoff is purely additive; no existing code paths changed in
+  semantics, only guarded. *flush-backoff-seconds* is exported for test control.
+**Validation**: gmake check (all suites green), existing 13 telemetry tests pass.
