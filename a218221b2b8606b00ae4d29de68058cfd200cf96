@@ -1,0 +1,11 @@
+## CPRR Note
+
+**Context**: guile-u3n test coverage — 5 assertions for the backoff state machine
+**Problem**: No tests covered the new flush backoff path; needed to verify
+  the invariant that counters accumulate through backoff windows.
+**Resolution**: 5 tests against 127.0.0.1:1 (unreachable endpoint). The "retries"
+  test backdates *last-flush-failure* by 120s rather than using set! on
+  *flush-backoff-seconds* to avoid Guile compiler constant-folding. Added
+  (srfi srfi-19) import for time-second/current-time/time-utc.
+**Risk**: None — test-only change. No production code touched.
+**Validation**: gmake check all green (18/18 telemetry, full suite passing).
