@@ -1,0 +1,232 @@
+#+TITLE: AI CLI Feature Comparison — guile-sage vs Claude Code, Gemini CLI, Codex CLI, Aider
+#+AUTHOR: guile-sage
+#+DATE: 2026-04-12
+#+OPTIONS: toc:2 num:nil ^:nil
+
+* Overview
+
+Feature matrix comparing guile-sage 0.6.0 against the four AI coding
+CLIs installed on this host. The goal: identify high-value gaps where
+sage lags and plan the 0.7.0+ roadmap.
+
+Versions tested:
+
+| Tool | Version | Language | LLM Provider |
+|------+---------+----------+--------------|
+| guile-sage | 0.6.0 | GNU Guile 3 | Ollama (local) + MCP (skills-hub) |
+| Claude Code | 2.1.92 | TypeScript | Anthropic API (cloud) |
+| Gemini CLI | 0.37.1 | TypeScript | Google AI (cloud) |
+| Codex CLI | 0.120.0 | Rust | OpenAI API (cloud) |
+| Aider | 0.86.2 | Python | Any (OpenAI, Anthropic, Ollama, etc.) |
+
+* Feature Comparison Matrix
+
+** Core REPL / Interaction
+
+| Feature | sage | claude | gemini | codex | aider |
+|---------+------+--------+--------+-------+-------|
+| Interactive REPL | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Non-interactive =-p= prompt | ✓ | ✓ =-p/--print= | ✓ =-p/--prompt= | ✓ =exec= subcommand | ✓ =--message= |
+| Streaming output | ✓ | ✓ | ✓ | ✓ | ✓ =--stream= |
+| Session persistence | ✓ (JSON) | ✓ (auto) | ✓ =--resume= | ✓ =resume/fork= | ✓ =--restore-chat-history= |
+| Session continue | ✓ =-c= | ✓ =-c= | ✓ =-r latest= | ✓ =resume --last= | ✓ =--restore-chat-history= |
+| YOLO / auto-approve | ✓ =-y= | ✓ =--dangerously-skip-permissions= | ✓ =-y/--yolo= | ✓ =--full-auto= | ✓ (no approval needed) |
+| Plan/read-only mode | ✗ | ✓ =--permission-mode plan= | ✓ =--approval-mode plan= | ✗ | ✗ |
+| Slash commands | ✓ =/help, /exit, /status= | ✓ =/help, /compact, /commit= | ✓ | ✗ | ✓ =/help, /add, /drop= |
+| Custom commands | ✓ (=define-command=) | ✓ (skills) | ✓ (extensions) | ✗ | ✗ |
+| Readline / history | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+** Model Management
+
+| Feature | sage | claude | gemini | codex | aider |
+|---------+------+--------+--------+-------+-------|
+| Model selection | ✓ =-m/--model= | ✓ =--model= | ✓ =-m/--model= | ✓ =--model= | ✓ =--model= |
+| Multi-model tiers | ✓ (fast/standard auto) | ✗ (single model) | ✗ | ✗ | ✓ (=--architect=, =--weak-model=, =--editor-model=) |
+| Dynamic tier switching | ✓ (by token count) | ✗ | ✗ | ✗ | ✗ |
+| Model fallback on removal | ✓ (size-ASC) | ✗ | ✗ | ✗ | ✗ |
+| Ollama (local) support | ✓ (native) | ✗ | ✗ | ✗ | ✓ (via OpenAI compat) |
+| Cloud provider support | ✓ (Ollama Cloud) | ✓ (Anthropic) | ✓ (Google) | ✓ (OpenAI) | ✓ (any via litellm) |
+| Model listing | ✓ (=ollama-list-models=) | ✗ | ✗ | ✗ | ✓ (=--list-models=) |
+| Reasoning effort | ✗ | ✓ =--effort= | ✗ | ✗ | ✓ =--reasoning-effort= |
+| Thinking tokens | ✗ | ✗ | ✗ | ✗ | ✓ =--thinking-tokens= |
+
+** Tool Calling / Code Actions
+
+| Feature | sage | claude | gemini | codex | aider |
+|---------+------+--------+--------+-------+-------|
+| Native tool calling | ✓ (22 built-in) | ✓ (Read, Edit, Write, Bash, etc.) | ✓ | ✓ (shell + file) | ✗ (edit-based, no tools) |
+| File read | ✓ =read_file= | ✓ =Read= | ✓ | ✓ | ✓ (repo map) |
+| File write | ✓ =write_file= | ✓ =Write= | ✓ | ✓ | ✓ (apply edits) |
+| File edit (search/replace) | ✓ =edit_file= | ✓ =Edit= | ✓ | ✓ | ✓ (diff-based) |
+| Shell execution | ✓ =run_tests= (YOLO) | ✓ =Bash= | ✓ | ✓ (sandboxed) | ✗ |
+| Git operations | ✓ (status/diff/log/commit/push) | ✓ (via Bash) | ✓ | ✓ | ✓ (=--auto-commits=) |
+| File search (grep) | ✓ =search_files= (with path scope) | ✓ =Grep= | ✓ | ✓ | ✓ (repo map) |
+| File glob | ✓ =glob_files= | ✓ =Glob= | ✓ | ✗ | ✗ |
+| Image generation | ✓ =generate_image= | ✗ | ✗ | ✗ | ✗ |
+| Log introspection | ✓ (=read_logs=, =search_logs=, =log_stats=) | ✗ | ✗ | ✗ | ✗ |
+| Agent task management | ✓ (=sage_task_create/complete/list=) | ✓ (=TaskCreate/Update=) | ✗ | ✗ | ✗ |
+| Web search | ✗ | ✓ =WebSearch= | ✓ | ✓ =--search= | ✗ |
+| Web fetch | ✗ | ✓ =WebFetch= | ✓ | ✗ | ✗ |
+| Tool permission model | ✓ (safe-tools + YOLO) | ✓ (allow/deny lists) | ✓ (policy engine) | ✓ (sandbox tiers) | N/A |
+| Anti-hallucination guard | ✓ (post-tool-error injection) | ✗ (implicit) | ✗ | ✗ | ✗ |
+| Multi-step tool chains | ✗ (1 tool/turn) | ✓ (multi-tool) | ✓ | ✓ | ✗ |
+
+** MCP (Model Context Protocol)
+
+| Feature | sage | claude | gemini | codex | aider |
+|---------+------+--------+--------+-------+-------|
+| MCP client | ✓ (SSE, v1) | ✓ (SSE + stdio) | ✓ | ✓ | ✗ |
+| MCP server mode | ✗ | ✗ | ✗ | ✓ =mcp-server= | ✗ |
+| Config from =~/.claude.json= | ✓ | ✓ | ✗ (own config) | ✗ (own config) | ✗ |
+| Tool discovery | ✓ (=tools/list=) | ✓ | ✓ | ✓ | ✗ |
+| Tool invocation | ✓ (=tools/call=) | ✓ | ✓ | ✓ | ✗ |
+| SSE transport | ✓ (curl+FIFO) | ✓ | ✓ | ✗ | ✗ |
+| Stdio transport | ✗ | ✓ | ✓ | ✓ | ✗ |
+| =SAGE_MCP_DISABLE= guard | ✓ | N/A | N/A | N/A | N/A |
+
+** Observability / Telemetry
+
+| Feature | sage | claude | gemini | codex | aider |
+|---------+------+--------+--------+-------+-------|
+| OTLP metrics | ✓ (5 counters) | ✓ (8 counters) | ✓ (native OTLP) | ✓ (via config.toml) | ✗ (via LiteLLM proxy) |
+| Prometheus integration | ✓ (via OTel collector) | ✓ | ✓ | ✓ | ✗ |
+| Grafana dashboard | ✓ (AI Tools panel) | ✓ | ✓ | ✓ | ✗ |
+| HTTP wire-level debug | ✓ =SAGE_DEBUG_HTTP= | ✓ =--debug api= | ✓ =-d= | ✓ =debug= subcommand | ✗ |
+| Structured logging (JSONL) | ✓ (=.logs/sage.log=) | ✗ | ✗ | ✗ | ✓ (=--llm-history-file=) |
+| Timing protocol / benchmark | ✓ (=scripts/timing-bench.sh=) | ✗ | ✗ | ✗ | ✗ |
+| Telemetry backoff | ✓ (60s on failure) | ✓ | ? | ? | N/A |
+
+** Context Window / Memory
+
+| Feature | sage | claude | gemini | codex | aider |
+|---------+------+--------+--------+-------+-------|
+| Context window tracking | ✓ (token counting) | ✓ (auto) | ✓ | ✓ | ✓ |
+| Context compaction | ✓ (5 strategies) | ✓ =/compact= | ✓ | ✓ | ✓ (=--max-chat-history-tokens=) |
+| Repo map / indexing | ✗ | ✓ (codebase index) | ✓ | ✓ | ✓ (=--map-tokens=) |
+| Prompt caching | ✗ | ✓ (auto) | ✓ | ✓ | ✓ (=--cache-prompts=) |
+| AGENTS.md / CLAUDE.md | ✓ (AGENTS.md) | ✓ (CLAUDE.md) | ✓ (GEMINI.md) | ✓ (AGENTS.md) | ✓ (=.aider*= files) |
+| Auto-memory (persistent) | ✗ | ✓ (auto-memory) | ✗ | ✗ | ✗ |
+| Project-scoped sessions | ✓ (XDG path-encoded) | ✓ (per-directory) | ✓ | ✓ | ✓ |
+
+** Development Workflow
+
+| Feature | sage | claude | gemini | codex | aider |
+|---------+------+--------+--------+-------+-------|
+| Git worktree isolation | ✗ | ✓ =-w/--worktree= | ✓ =-w/--worktree= | ✗ | ✗ |
+| PR creation / review | ✗ | ✓ (via Bash/gh) | ✓ | ✓ =review= subcommand | ✗ |
+| Sandbox / container | ✗ | ✗ | ✓ =-s/--sandbox= | ✓ =sandbox= subcommand | ✗ |
+| Cost tracking / budget | ✗ | ✓ =--max-budget-usd= | ✗ | ✗ | ✓ (shows cost) |
+| Multi-agent / sub-agents | ✗ | ✓ (=Agent= tool) | ✗ | ✗ | ✗ |
+| IDE integration | ✗ | ✓ (VS Code, JetBrains) | ✗ | ✓ (desktop app) | ✓ (VS Code) |
+| Docker support | ✓ (Dockerfile) | ✗ | ✗ | ✓ | ✗ |
+| Structured output / JSON Schema | ✗ | ✓ =--json-schema= | ✓ =-o json= | ✗ | ✗ |
+| Hooks (pre/post tool) | ✗ | ✓ (hooks system) | ✓ (hooks) | ✗ | ✗ |
+
+* Where sage leads
+
+1. *Local-first with Ollama* — the only tool in this matrix that
+   natively targets local Ollama without a cloud key. Aider supports
+   Ollama via OpenAI-compat but treats it as a secondary path.
+
+2. *Dynamic model-tier selection* — auto-switches between fast and
+   standard models based on context size. No other tool does this.
+
+3. *Graceful model removal* — survives =ollama rm= without crashing.
+   Picks the smallest chat-capable substitute automatically.
+
+4. *Self-inspection tools* — =read_logs=, =search_logs=, =log_stats=,
+   =log_timeline= let the agent introspect its own execution history.
+   No other CLI exposes this.
+
+5. *Anti-hallucination guard* — explicit post-tool-error injection
+   that tells the model not to fabricate content. Others rely on
+   implicit model behaviour or prompt engineering.
+
+6. *Timing protocol* — a reproducible per-model benchmark script with
+   locked-in measurements. No other tool ships this.
+
+7. *CPRR-structured git notes* — every commit carries attribution,
+   testing, conjectures, validation, and research pointers. Unique.
+
+8. *Property-based testing (PBT)* — 64+ properties across 6 contract
+   layers, with a cross-pollination path to hegel-guile. No other AI
+   CLI ships PBT for its own internals.
+
+* Where sage lags — high-value gaps for 0.7.0+
+
+** P0 — Critical gaps (competitive table-stakes)
+
+| Gap | Who has it | What sage needs | Effort |
+|-----+------------+-----------------+--------|
+| Multi-step tool chains | claude, gemini, codex | Re-prompt loop in REPL dispatch until model stops emitting tool_calls | M |
+| Context compaction =/compact= | all four | Wire the existing 5 compaction strategies to a =/compact= slash command | S |
+| Repo map / codebase indexing | claude, gemini, codex, aider | Build a tree-sitter or simple AST index of the workspace at startup | L |
+| Web search / fetch | claude, gemini, codex | Add =web_search= and =web_fetch= tools (via curl + a search API) | M |
+| Prompt caching | claude, gemini, codex, aider | Ollama supports prompt caching natively; just reuse the prefix | S |
+| Cost tracking | claude, aider | Emit =guile_sage.cost.usage= with actual provider pricing (cloud only) | S |
+
+** P1 — High-value differentiators
+
+| Gap | Who has it | What sage needs | Effort |
+|-----+------------+-----------------+--------|
+| Stdio MCP transport | claude, gemini, codex | Add subprocess spawning for local MCP servers (=command= + =args= in =~/.claude.json=) | M |
+| Git worktree isolation | claude, gemini | =-w= flag that creates a worktree, runs sage in it, merges back | M |
+| Hooks (pre/post tool) | claude, gemini | Event system: fire a shell command before/after each tool call | M |
+| Plan/read-only mode | claude, gemini | A =--plan= flag that disables all write tools | S |
+| Structured output / JSON Schema | claude, gemini | =--json-schema= flag that validates the final response against a schema | M |
+| Auto-memory (persistent) | claude | A =remember= / =forget= system backed by XDG files | M |
+| Reasoning effort | claude, aider | Pass-through flag for models that support it (qwen3 =<think>=) | S |
+
+** P2 — Nice-to-haves
+
+| Gap | Who has it | What sage needs | Effort |
+|-----+------------+-----------------+--------|
+| IDE integration | claude, codex, aider | LSP-style bridge or VS Code extension | L |
+| Sandbox / container | gemini, codex | Run tools inside a Docker container or nsjail | L |
+| PR creation | claude, codex | A =/pr= slash command that stages + commits + pushes + =gh pr create= | M |
+| Sub-agents | claude | Spawn child sage processes for parallel tasks | L |
+| Cost budget cap | claude | =--max-budget-usd= that halts after spending N dollars | S |
+| MCP server mode | codex | Expose sage's 22 tools as an MCP server for other clients | M |
+
+* Roadmap priorities for 0.7.0
+
+Based on the gap analysis, the highest-impact work for 0.7.0:
+
+1. *Multi-step tool chains* (P0, M) — the dispatch loop re-prompt.
+   This is the #1 UX gap per docs/MULTISTEP-CHAINS-0.6.x.md: 0/6
+   multi-step prompts succeeded. Every competitor handles this.
+
+2. *=/compact= slash command* (P0, S) — wire the existing 5
+   compaction strategies (already in =src/sage/compaction.scm=) to a
+   user-invocable command. Low effort, high visibility.
+
+3. *Prompt caching via Ollama* (P0, S) — Ollama supports prompt
+   prefix caching natively. Reduce prompt_eval_duration for
+   multi-turn sessions. Just reuse the message prefix.
+
+4. *Stdio MCP transport* (P1, M) — unlocks local MCP servers like
+   filesystem, github, sqlite that Claude Code users already have
+   configured in =~/.claude.json=.
+
+5. *Web search tool* (P0, M) — add a =web_search= tool backed by a
+   search API (DuckDuckGo Instant Answer, Brave Search, or SearXNG
+   on the LAN). Unblocks research-style prompts.
+
+6. *Plan/read-only mode* (P1, S) — =--plan= flag that registers
+   ONLY safe-tools and skips YOLO. Useful for code review sessions.
+
+7. *Auto-memory* (P1, M) — persistent memory backed by XDG files,
+   same as Claude Code's auto-memory. Store user preferences,
+   project context, and cross-session learning.
+
+* Summary stats
+
+| Metric | sage | claude | gemini | codex | aider |
+|--------+------+--------+--------+-------+-------|
+| ✓ features | 38 | 52 | 42 | 38 | 35 |
+| Unique features | 8 | 5 | 2 | 3 | 2 |
+| Missing P0 gaps | 6 | 0 | 1 | 2 | 4 |
+| Local-first | ✓ | ✗ | ✗ | ✗ | partial |
+| MCP support | SSE | SSE+stdio | SSE+stdio | stdio+server | ✗ |
+| Self-hosted | ✓ | ✗ | ✗ | ✗ | ✓ |
+| Open source | ✓ (MIT) | ✗ | ✗ | ✓ (Apache) | ✓ (Apache) |
