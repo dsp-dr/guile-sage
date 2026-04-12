@@ -281,6 +281,9 @@
 
 (run-test "write_file absolute path lands at the absolute location"
   (lambda ()
+    ;; write_file is YOLO-only since 5bcc284. Earlier "write_file
+    ;; requires YOLO" test leaks an unset state, so we restore here.
+    (setenv "SAGE_YOLO_MODE" "1")
     (let ((tmp-path "/tmp/sage-write-test-abs.txt"))
       ;; Cleanup before test
       (when (file-exists? tmp-path)
@@ -299,6 +302,7 @@
 
 (run-test "write_file relative path lands under workspace"
   (lambda ()
+    (setenv "SAGE_YOLO_MODE" "1")
     (let ((rel "tmp/sage-write-test-rel.txt"))
       ;; Cleanup before test
       (let ((full (string-append (workspace) "/" rel)))
@@ -330,6 +334,7 @@
 
 (run-test "edit_file File-not-found echoes the resolved path"
   (lambda ()
+    (setenv "SAGE_YOLO_MODE" "1")
     (let ((result (execute-tool "edit_file"
                                 '(("path" . "/tmp/sage-does-not-exist-xyzzy")
                                   ("search" . "x")

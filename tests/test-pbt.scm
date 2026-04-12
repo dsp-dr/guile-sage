@@ -797,6 +797,10 @@
 
 (format #t "~%=== PBT: write_file path honesty ===~%")
 
+;; write_file/edit_file are YOLO-only since 5bcc284. Set it once
+;; before any property runs; the trial loop preserves it.
+(setenv "SAGE_YOLO_MODE" "1")
+
 (define (rng-hex-token len)
   ;; lowercase a-f0-9 for filename safety
   (list->string
