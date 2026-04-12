@@ -599,20 +599,40 @@
 ;;; Handles the full tool_calls array (not just the first one).
 ;;; Returns the final text content to display.
 
+(define *max-same-tool-repeats* 3)  ;; degenerate loop detection
+
 (define (execute-tool-chain model message content tokens)
-  (let ((tools (tools-to-schema)))
+  (let ((tools (tools-to-schema))
+        (last-tool-name #f)
+        (repeat-count 0))
     (let loop ((msg message)
                (text content)
                (toks tokens)
-               (iteration 0))
+               (iteration 0)
+               (prev-tool #f)
+               (repeats 0))
       (let ((tool-calls (as-list (assoc-ref msg "tool_calls"))))
-        (if (or (null? tool-calls) (>= iteration *max-tool-iterations*))
-            ;; No more tool calls — return the final text
-            (begin
-              (when (>= iteration *max-tool-iterations*)
-                (format #t "~%[max tool iterations (~a) reached]~%" *max-tool-iterations*))
-              (session-add-message "assistant" text #:tokens toks)
-              text)
+        ;; Check for degenerate loop: same tool N times in a row
+        (let* ((current-tool (and (pair? tool-calls)
+                                  (let ((fn (assoc-ref (car tool-calls) "function")))
+                                    (and fn (assoc-ref fn "name")))))
+               (is-repeat (and current-tool prev-tool
+                               (equal? current-tool prev-tool)))
+               (new-repeats (if is-repeat (1+ repeats) 0))
+               (degenerate? (>= new-repeats *max-same-tool-repeats*)))
+          (if (or (null? tool-calls)
+                  (>= iteration *max-tool-iterations*)
+                  degenerate?)
+              ;; No more tool calls, safety cap, or degenerate loop
+              (begin
+                (when (>= iteration *max-tool-iterations*)
+                  (format #t "~%\x1b[33m[max tool iterations (~a) reached]\x1b[0m~%"
+                          *max-tool-iterations*))
+                (when degenerate?
+                  (format #t "~%\x1b[33m[stopping: ~a called ~a times in a row]\x1b[0m~%"
+                          current-tool *max-same-tool-repeats*))
+                (session-add-message "assistant" text #:tokens toks)
+                text)
             ;; Process ALL tool calls in this response
             (begin
               ;; Add the assistant's message (with tool_call flag)
@@ -654,7 +674,8 @@
                               `(("model" . ,model) ("type" . "output"))
                               (or follow-tokens 0))
                 ;; Loop: check if the follow-up ALSO has tool calls
-                (loop follow-msg follow-content follow-tokens (1+ iteration)))))))))
+                (loop follow-msg follow-content follow-tokens
+                      (1+ iteration) current-tool new-repeats)))))))))
 
 ;;; Agent Loop
 
@@ -846,6 +867,16 @@
               (inc-counter! "guile_sage.cost.usage"
                             `(("model" . ,model)) 0)
               (telemetry-flush!)
+
+              ;; Check if guardrails redacted content (LiteLLM patterns)
+              (when (or (string-contains content "[EMAIL REDACTED]")
+                        (string-contains content "[CC REDACTED]")
+                        (string-contains content "[SSN REDACTED]")
+                        (string-contains content "[KEY REDACTED]")
+                        (string-contains content "[PHONE REDACTED]")
+                        (string-contains content "[STRIPE REDACTED]")
+                        (string-contains content "REDACTED"))
+                (format #t "\x1b[33m🛡️ Guardrails applied (content redacted)\x1b[0m~%"))
 
               (let ((tool-calls (as-list (assoc-ref message "tool_calls"))))
                 (if (null? tool-calls)
