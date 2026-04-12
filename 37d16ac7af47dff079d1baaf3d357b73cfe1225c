@@ -1,0 +1,69 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- User feedback that drove the OTEL config sections: \"can you check
+  that we otel noted for env setup as well as in ~/.config/sage per
+  our README\" + \"docs for 0.6 should have otel notes and config
+  updated for the testing\"
+- Model selection rationale section prompted by the live model
+  unreliability we hit during the tool-call demo
+
+## Testing
+- All docs are .org files, no executable code, no test impact
+- Verified the manual verification commands in RELEASE-0.6.0.org
+  are accurate by running each one against the live system before
+  including them
+- Verified docs/TELEMETRY.org instructions by following them on
+  the running tmux session
+
+## Issues
+- bd: none
+- github: none
+
+## Conjecture (CPRR)
+- Hypothesis 1: Splitting the docs into a release-notes file
+  (RELEASE-0.6.0.org), a canonical reference (TELEMETRY.org), and
+  inline .env.template comments gives us three layers a user can
+  consult independently. Release notes are read once. The reference
+  is read for ongoing operations. The .env.template is read when
+  setting up a new box.
+- Hypothesis 2: The model-selection rationale (>=3B params for
+  reliable tool calling) is non-obvious enough that future users
+  will hit the same surprise unless we document it.
+
+## Validation
+- Verified by reading each doc cold as if I'd never seen the work
+  and trying to follow the instructions
+- The benchmark numbers in the model-selection table came from
+  actual curl runs against /api/chat for each model with the same
+  prompt; not estimates
+
+## Refutation / known limits
+- The C4 / sequence diagrams the user wanted (\"c4 diagrams levels
+  1 and 2 ... control flow, data flow, and sequence diagram\") for
+  MCP are NOT in this commit. They live in docs/MCP-CONTRACT.org
+  which is being produced by a background research agent and is
+  out of scope for 0.6.0.
+- The release notes mention a \"write_file path-misreporting bug\"
+  as a known follow-up but don't actually fix it.
+- TELEMETRY.org documents the manual harness as the current state.
+  No automation (pexpect/expect/HTTP API) is included; deferred
+  for when manual stops being sufficient.
+
+## Meta - research / context / deep-dives
+- Worth a future deep-dive: reorganise the docs/ tree. We now have
+  RELEASE-0.6.0.org, TELEMETRY.org, MCP-CONTRACT.org (incoming),
+  ARCHITECTURE.org, and several others. A docs/index.org with a
+  quick navigation map would help.
+- Consider a CHANGELOG.org that aggregates per-version release
+  notes files, in the spirit of keepachangelog.com. Right now
+  RELEASE-0.6.0.org is the first per-version file in the repo.
+- Open question: should the .env.template be split into per-feature
+  templates so users can opt in to telemetry without seeing all
+  the unrelated knobs? Probably not worth the complexity; the
+  inline comments cover the discoverability gap.
+- Related: the research agent producing docs/MCP-CONTRACT.org is
+  also documenting CPRR-style invariants for the MCP protocol.
+  We should align RELEASE-0.6.0.org's structure with that
+  document so the patterns feel consistent across release-notes
+  and contract docs.
