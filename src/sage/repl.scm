@@ -663,7 +663,7 @@
                                                          (session-get-context)
                                                          tools))
                      (follow-msg (assoc-ref follow-up "message"))
-                     (follow-content (or (assoc-ref follow-msg "content") ""))
+                     (follow-content (let ((c (assoc-ref follow-msg "content"))) (if (and c (string? c)) c "")))
                      (follow-usage (provider-extract-token-usage follow-up))
                      (follow-tokens (assoc-ref follow-usage 'completion_tokens)))
                 ;; Emit telemetry for the follow-up
@@ -818,7 +818,7 @@
                      (elapsed (- (time-second (current-time))
                                  (time-second start-time)))
                      (message (assoc-ref response "message"))
-                     (content (or (assoc-ref message "content") ""))
+                     (content (let ((c (assoc-ref message "content"))) (if (and c (string? c)) c "")))
                      (usage (provider-extract-token-usage response))
                      (prompt-tokens (assoc-ref usage 'prompt_tokens))
                      (completion-tokens (assoc-ref usage 'completion_tokens)))
@@ -850,7 +850,7 @@
             ;; --- Non-streaming path (existing behavior) ---
             (let* ((response (provider-chat-with-tools model messages tools))
                    (message (assoc-ref response "message"))
-                   (content (or (assoc-ref message "content") ""))
+                   (content (let ((c (assoc-ref message "content"))) (if (and c (string? c)) c "")))
                    (usage (provider-extract-token-usage response))
                    (prompt-tokens (assoc-ref usage 'prompt_tokens))
                    (completion-tokens (assoc-ref usage 'completion_tokens)))
