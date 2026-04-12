@@ -1,0 +1,65 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Property design from docs/REPRO-guile-tpf.md §7
+
+## Testing
+- 64/64 PBT properties pass at seed 42 (was 61/61)
+- 6400 total trials (was 6100)
+- gmake check: 40/40 unit tests + the security baseline still green
+
+## Issues
+- bd: guile-tpf (P2) — closes after this commit + push
+
+## Conjecture (CPRR)
+- Hypothesis: rotating across the 4 real workspace subdirs is
+  enough coverage for the scope honesty contract — each one is
+  a representative \"real subdirectory\" with its own tree shape.
+  Random path generation would produce nonexistent dirs that
+  grep can't walk, defeating the test.
+- Hypothesis: path-traversal fuzzing at varying depths (1-5
+  levels of ..) catches a class of safe-path? regressions that
+  fixed-depth tests miss.
+
+## Validation
+- Property 1 ran 100 trials × 4 scopes uniformly distributed
+  via rng-element. All pass.
+- Property 3 ran 100 trials with depth in [1,5]. All rejected
+  with \"Unsafe\" prefix.
+- Filter logic strips \"Binary file ...\" headers and grep:
+  prefixed errors so only real match lines are checked. Without
+  the filter, binary file warnings would false-positive.
+
+## Refutation / known limits
+- The property uses string-prefix? rather than exact path match.
+  If a file outside src/sage happened to be named with that
+  prefix (e.g., src/sage-extra/foo.scm) it would slip through.
+  Acceptable for this codebase.
+- Property 1 grep'd for the literal pattern \"define\" because
+  it's universally common. A rarer pattern would give better
+  coverage of the head -200 truncation behaviour but make the
+  property more brittle.
+- No property yet for the file_pattern arg (basename glob
+  semantics). Could be added in a follow-up.
+- The 4-scope rotation is hard-coded to this repo's dir layout.
+  If src/sage gets renamed, the property breaks. Acceptable
+  in exchange for using real grep-walkable paths.
+
+## Meta - research / context / deep-dives
+- Worth porting to hegel-guile as a 4th example
+  (examples/path-scope-fuzz.scm) once 0.7.0 ships and the
+  cross-pollination doc is updated. Same template as
+  shape-coercion / json-int-fuzz / file-roundtrip.
+- Eval idea: a property test runner that takes ANY tool with
+  a declared path arg in its schema and runs the same scope
+  honesty / unsafe-path / default-fallback assertions. Would
+  catch this class of bug for any future path-arg tool with
+  zero per-tool test code.
+- Open question: should the truncation cap (head -200) be a
+  separately-testable knob? Right now you can't write a property
+  for \"matches don't get truncated when scope is small enough\"
+  without invoking real grep on real files. A pure-Scheme grep
+  layer would make this testable.
+- Related: docs/UX-FINDINGS-0.6.0.md gap N4 was the user-facing
+  symptom. This property + unit tests + the fix together close
+  the loop from observation to repro to fix to regression guard.
