@@ -1,187 +1,578 @@
-#+TITLE: Sage Architecture
+#+TITLE: Sage Architecture (v0.6.0)
 #+AUTHOR: guile-sage
-#+OPTIONS: toc:2
+#+DATE: 2026-04-11
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
 
-* Startup State Machine
+* 1. C4 Level 1 --- System Context
+
+#+BEGIN_SRC plantuml :file images/arch-c4-l1.png
+@startuml arch-c4-l1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title guile-sage --- System Context (C4 L1)
+
+Person(user, "Developer", "Terminal interaction via readline.")
+
+System_Boundary(sage_boundary, "guile-sage") {
+  System(sage, "sage REPL", "GNU Guile 3.0 CLI.\nOrchestrates prompts, tool dispatch,\nsessions, context window, telemetry.")
+}
+
+System_Ext(ollama, "Ollama", "LLM runtime.\nlocalhost:11434 (or cloud).\nChat completions + native tool_calls.")
+
+System_Ext(skills_hub, "skills-hub MCP", "Python/uvicorn MCP server.\nnexus:8400/sse.\n~35 skills as tools over HTTP+SSE.")
+
+System_Ext(otel, "OTel Collector", "infra-host:4318.\nReceives OTLP/HTTP JSON metrics.")
+
+System_Ext(prometheus, "Prometheus", "infra-host:9090.\nScrapes OTel Collector.")
+
+System_Ext(grafana, "Grafana", "infra-host:3000.\nAI Tools dashboard /d/ai-tools/.")
+
+Rel(user, sage, "Prompts, /commands", "stdin/tty")
+Rel(sage, ollama, "POST /api/chat\n(NDJSON streaming + tools)", "HTTP")
+Rel(sage, skills_hub, "initialize, tools/list, tools/call", "HTTP POST + SSE\nJSON-RPC 2.0")
+Rel(sage, otel, "POST /v1/metrics", "OTLP/HTTP JSON")
+Rel(otel, prometheus, "Prometheus remote-write", "internal")
+Rel(prometheus, grafana, "PromQL queries", "internal")
+Rel_Back(skills_hub, sage, "SSE message events\n(JSON-RPC responses)", "text/event-stream")
+
+SHOW_LEGEND()
+@enduml
+#+END_SRC
+
+Key relationships:
+
+- *sage* is both the MCP host and MCP client in a single process.
+- *Ollama* is orthogonal to MCP. Ollama returns =tool_calls= arrays;
+  sage routes each tool to either its local tool registry or to an MCP
+  server via =mcp-call-tool=.
+- The MCP server *pushes* JSON-RPC responses over SSE; the HTTP POST
+  returns only =202 Accepted=. Request/response correlation is by
+  JSON-RPC =id= across two separate TCP connections.
+- Telemetry is fire-and-forget. The REPL never blocks or crashes on
+  telemetry failure.
+
+* 2. C4 Level 2 --- Container (Module) Diagram
+
+#+BEGIN_SRC plantuml :file images/arch-c4-l2.png
+@startuml arch-c4-l2
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title guile-sage --- Container / Module (C4 L2)
+
+Person(user, "Developer")
+
+System_Boundary(sage, "guile-sage process (GNU Guile 3.0)") {
+
+  Container(main,       "main.scm",       "Guile", "CLI entry point, getopt, dispatch.")
+  Container(repl,       "repl.scm",       "Guile", "REPL loop, readline, /commands,\nchat dispatch, tool-call handling,\nmodel-tier auto-switch.")
+  Container(ollama_mod, "ollama.scm",     "Guile", "Ollama API client:\nchat, streaming, tool_calls parsing,\nimage generation.")
+  Container(mcp_mod,    "mcp.scm",        "Guile", "MCP SSE client:\nconfig discovery (~/.claude.json),\nSSE via curl+FIFO workaround,\nJSON-RPC envelope, tool registration.")
+  Container(tools_mod,  "tools.scm",      "Guile", "Tool registry: 22 built-in +\nMCP-discovered. Permission check,\nexecute-tool, tools-to-schema.")
+  Container(telem_mod,  "telemetry.scm",  "Guile", "OTLP/HTTP cumulative counter\nemission. inc-counter!, flush!.")
+  Container(util_mod,   "util.scm",       "Guile", "HTTP clients (native + curl fallback),\nJSON parser/writer, as-list coercion,\njson-empty-object sentinel,\nSAGE_DEBUG_HTTP wire logging.")
+  Container(session,    "session.scm",    "Guile", "Conversation persistence.\nJSON files in .sage/sessions/.")
+  Container(config,     "config.scm",     "Guile", "Env vars, .env loading, XDG paths,\nAGENTS.md discovery, token limits.")
+  Container(model_tier, "model-tier.scm", "Guile", "Tier-based model auto-selection\nby token count. Tools? flag per tier.")
+  Container(context,    "context.scm",    "Guile", "Context window management,\nthreshold warnings.")
+  Container(compact,    "compaction.scm", "Guile", "5 compaction strategies:\ntruncate, summarize, sliding,\ntoken-budget, hybrid.")
+  Container(logging,    "logging.scm",    "Guile", "Structured JSONL logging\nto .logs/sage.log.")
+  Container(agent,      "agent.scm",      "Guile", "Agent task system,\nbeads integration, modes.")
+  Container(status,     "status.scm",     "Guile", "Streaming status display.")
+  Container(version,    "version.scm",    "Guile", "Semver constants.")
+}
+
+System_Ext(ollama, "Ollama", "localhost:11434")
+System_Ext(skills_hub, "skills-hub", "infra-host:8400")
+System_Ext(otel, "OTel Collector", "infra-host:4318")
+
+Rel(user, repl, "stdin/tty")
+Rel(main, repl, "repl-start")
+Rel(repl, ollama_mod, "ollama-chat[-streaming]")
+Rel(repl, tools_mod, "execute-tool")
+Rel(repl, mcp_mod, "mcp-init, mcp-shutdown!")
+Rel(repl, telem_mod, "inc-counter!, telemetry-flush!")
+Rel(repl, session, "session-create/add/get")
+Rel(repl, model_tier, "resolve-model-for-tokens")
+Rel(repl, context, "context-window-status")
+Rel(repl, compact, "session-maybe-compact!")
+Rel(repl, config, "config-load-dotenv")
+Rel(ollama_mod, util_mod, "http-post-streaming, http-get")
+Rel(mcp_mod, util_mod, "http-post-with-timeout, json-*")
+Rel(mcp_mod, tools_mod, "register-tool (MCP tools)")
+Rel(mcp_mod, telem_mod, "inc-counter! (mcp.tool_call)")
+Rel(tools_mod, telem_mod, "inc-counter! (tool_decision)")
+Rel(tools_mod, mcp_mod, "mcp-call-tool (for MCP tools)")
+Rel(telem_mod, util_mod, "http-post-with-timeout")
+Rel(config, util_mod, "json-read-string (.env)")
+Rel(util_mod, logging, "http-debug-log!")
+Rel(ollama_mod, ollama, "HTTP")
+Rel(mcp_mod, skills_hub, "HTTP POST + SSE (curl+FIFO)")
+Rel(telem_mod, otel, "POST /v1/metrics")
+
+SHOW_LEGEND()
+@enduml
+#+END_SRC
+
+** Module Summary (17 source files, ~7k LOC)
+
+| Module         | File             | Role                                        | Key exports                                              |
+|----------------+------------------+---------------------------------------------+----------------------------------------------------------|
+| main           | =main.scm=      | CLI entry, getopt                           | =(main)=                                                 |
+| repl           | =repl.scm=      | REPL loop, chat dispatch                    | =repl-start=, =repl-eval=, =handle-command=             |
+| ollama         | =ollama.scm=    | Ollama API client                           | =ollama-chat[-streaming]=, =ollama-parse-tool-call=      |
+| mcp            | =mcp.scm=       | MCP SSE client                              | =mcp-init=, =mcp-call-tool=, =mcp-shutdown!=            |
+| tools          | =tools.scm=     | Tool registry + dispatch                    | =register-tool=, =execute-tool=, =tools-to-schema=      |
+| telemetry      | =telemetry.scm= | OTLP/HTTP counter emission                  | =telemetry-init=, =inc-counter!=, =telemetry-flush!=    |
+| util           | =util.scm=      | HTTP + JSON + debug logging                 | =http-post-streaming=, =json-read/write-string=, =as-list= |
+| session        | =session.scm=   | Conversation persistence                    | =session-create=, =session-add-message=, =session-save= |
+| config         | =config.scm=    | Env/dotenv/XDG config                       | =config-get=, =config-load-dotenv=, =find-agents-md=    |
+| model-tier     | =model-tier.scm= | Auto-select model by token count           | =resolve-model-for-tokens=, =load-model-tiers=          |
+| context        | =context.scm=   | Context window management                   | =context-window-status=, =load-agents-context=           |
+| compaction     | =compaction.scm= | 5 compaction strategies                    | =compact-truncate=, =compact-auto=, =compact-hybrid=    |
+| logging        | =logging.scm=   | Structured JSONL logging                    | =log-info=, =log-warn=, =log-error=, =init-logging=     |
+| agent          | =agent.scm=     | Agent task system                           | =set-agent-mode!=, =task-list=, =agent-pause=           |
+| status         | =status.scm=    | Streaming output display                    | =status-stream-start=, =status-stream-token=            |
+| version        | =version.scm=   | Semver constants                            | =*version*=, =version-string=                           |
+| commands       | =commands.scm=  | Custom command loader                       | =load-custom-commands!=                                  |
+
+* 3. Network Topology
+
+#+BEGIN_SRC mermaid
+flowchart LR
+    subgraph mini["mini (.22) — macOS workstation"]
+        sage["sage REPL"]
+        ollama_local["Ollama :11434"]
+    end
+
+    subgraph nexus["nexus (.100) — FreeBSD server"]
+        skills["skills-hub MCP :8400"]
+        otel["OTel Collector :4318"]
+        prom["Prometheus :9090"]
+        graf["Grafana :3000"]
+    end
+
+    sage -- "POST /api/chat\n(NDJSON streaming)" --> ollama_local
+    sage -- "SSE GET + JSON-RPC POST\n(MCP protocol)" --> skills
+    sage -- "POST /v1/metrics\n(OTLP/HTTP JSON)" --> otel
+    otel -- "Prometheus exporter" --> prom
+    prom -- "PromQL" --> graf
+#+END_SRC
+
+All traffic is on the LAN_SUBNET LAN. No Tailscale.
+
+| Host       | IP              | Services                               |
+|------------+-----------------+----------------------------------------|
+| mini       | DEV_HOST   | sage REPL, Ollama (localhost:11434)    |
+| nexus      | INFRA_HOST  | skills-hub :8400, OTel :4318, Prometheus :9090, Grafana :3000 |
+
+* 4. Startup Sequence
 
 #+BEGIN_SRC
 ┌─────────────────────────────────────────────────────────────┐
-│                      REPL START                             │
+│                     repl-start                              │
 └─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │  config-load-dotenv   │  Load .env files
-                └───────────────────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │  ensure-sage-dirs     │  Create ~/.config/sage, etc.
-                └───────────────────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │  init-logging         │  Setup .logs/ directory
-                └───────────────────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │  init-default-tools   │  Register all tools
-                └───────────────────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │  session-create       │  New session or load existing
-                └───────────────────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │  load-agents-context  │  Read AGENTS.md → system msg
-                └───────────────────────┘
-                            │
-                            ▼
-                ┌───────────────────────┐
-                │  Display banner       │  Show version, model, host
-                └───────────────────────┘
-                            │
-                            ▼
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  config-load-dotenv   │  Load .env files
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  ensure-sage-dirs     │  Create XDG dirs (~/.config/sage, etc.)
+              │  ensure-project-dirs  │  Project-specific dirs
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  init-logging         │  Setup .logs/ directory + JSONL
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  init-default-tools   │  Register 22 built-in tools
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  telemetry-init       │  Read OTEL env vars, build resource
+              │                       │  attrs. No-op if disabled.
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  mcp-init             │  Read ~/.claude.json → SSE servers
+              │                       │  For each server:
+              │                       │    1. curl+FIFO SSE connection
+              │                       │    2. Read endpoint event
+              │                       │    3. initialize handshake
+              │                       │    4. notifications/initialized
+              │                       │    5. tools/list → register-tool
+              │                       │  Fail-soft: WARN + continue
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  load-custom-commands │  User-defined /commands
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  probe-models         │  ollama-list-models
+              │  load-model-tiers     │  Filter tiers by available models
+              │  validate-model       │  Fallback if configured model missing
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  session-create       │  New session (or load/continue)
+              │  session.count++      │  Emit telemetry counter + flush
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  load-agents-context  │  Read AGENTS.md → system message
+              └───────────────────────┘
+                          │
+                          ▼
+              ┌───────────────────────┐
+              │  Welcome banner       │  Version, model, host, YOLO mode
+              └───────────────────────┘
+                          │
+                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      MAIN LOOP                              │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  readline(prompt) → input                            │   │
-│  │       │                                              │   │
-│  │       ▼                                              │   │
-│  │  ┌─────────┐    ┌─────────────┐    ┌────────────┐   │   │
-│  │  │ /cmd?   │───▶│ handle-cmd  │    │ handle-chat│   │   │
-│  │  └─────────┘    └─────────────┘    └────────────┘   │   │
-│  │       │ no            │                   │          │   │
-│  │       └───────────────┴───────────────────┘          │   │
-│  │                       │                              │   │
-│  │                       ▼                              │   │
-│  │              ┌─────────────────┐                     │   │
-│  │              │  ollama-chat    │                     │   │
-│  │              │  with tools     │                     │   │
-│  │              └─────────────────┘                     │   │
-│  │                       │                              │   │
-│  │                       ▼                              │   │
-│  │              ┌─────────────────┐                     │   │
-│  │              │ parse-tool-call │                     │   │
-│  │              └─────────────────┘                     │   │
-│  │                   │       │                          │   │
-│  │            tool?  ▼       ▼ no tool                  │   │
-│  │              ┌─────────┐  ┌─────────┐                │   │
-│  │              │ execute │  │ display │                │   │
-│  │              │  tool   │  │ response│                │   │
-│  │              └─────────┘  └─────────┘                │   │
-│  │                   │                                  │   │
-│  │                   ▼                                  │   │
-│  │              ┌─────────────────┐                     │   │
-│  │              │ follow-up chat  │ (with tool result)  │   │
-│  │              └─────────────────┘                     │   │
-│  └──────────────────────────────────────────────────────┘   │
+│  readline → repl-eval → handle-command | handle-chat        │
+│  Each iteration records:                                    │
+│    active.time(user) = readline wait                        │
+│    active.time(cli)  = repl-eval processing                 │
 └─────────────────────────────────────────────────────────────┘
 #+END_SRC
 
-* Design Philosophy: Tools Over Memory
+Shutdown paths:
 
-Sage is NOT tool-agnostic. It explicitly uses file-based tools rather than
-in-memory state.
+- =/exit= command: calls =telemetry-shutdown!= then sets =*running*= to =#f=.
+- EOF (Ctrl-D): calls =cmd-exit=.
+- After main loop exits: =telemetry-shutdown!= (final flush).
 
-** Why Tools, Not Memory
+* 5. Chat Turn Sequence Diagram
 
-| In-Memory (BAD)              | File-Based Tools (GOOD)           |
-|------------------------------|-----------------------------------|
-| TODO list in session state   | bd create/list/close              |
-| Notes stored in variables    | git notes, write_file             |
-| Context in conversation only | AGENTS.md loaded at startup       |
-| Lost on restart              | Persisted in filesystem           |
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    participant U as User
+    participant R as REPL (repl.scm)
+    participant MT as model-tier.scm
+    participant O as Ollama (ollama.scm)
+    participant T as tools.scm
+    participant MCP as mcp.scm
+    participant SK as skills-hub (infra-host:8400)
+    participant TM as telemetry.scm
+    participant OC as OTel Collector (infra-host:4318)
 
-** Core Tool Categories
+    U->>R: input text
+    R->>R: inc-counter! active.time(user)
+    R->>R: session-add-message("user", input)
+    R->>MT: resolve-model-for-tokens(current_tokens)
+    MT-->>R: tier (model name, tools? flag)
 
-Tools are classified into a *safe* tier (always permitted) and an
-*unsafe* tier (require =SAGE_YOLO_MODE=). The permission contract is
-defined in [[file:adr/0003-security-model.md][ADR-0003]] and enforced by =check-permission= in
-=src/sage/tools.scm=. The annotations below mirror that contract.
+    alt Streaming mode (default)
+        R->>O: ollama-chat-streaming(model, messages, tools)
+        O->>O: POST /api/chat (stream: true)
+        loop NDJSON chunks
+            O-->>R: SSE chunk (content delta + tool_calls on first chunk)
+            R->>R: status-stream-token (display)
+        end
+    else Non-streaming mode
+        R->>O: ollama-chat-with-tools(model, messages, tools)
+        O->>O: POST /api/chat (stream: false)
+        O-->>R: complete response
+    end
 
-*** File Operations (Pure Guile)
-- =read_file= - Read file content [safe]
-- =write_file= - Write/create files [unsafe — needs YOLO]
-- =edit_file= - Modify existing files [unsafe — needs YOLO]
-- =list_files= - Directory listing [safe]
-- =glob_files= - Pattern matching [safe]
-- =search_files= - Content search [safe]
+    R->>R: ollama-parse-tool-call(message)
+    R->>R: inc-counter! token.usage(input + output)
+    R->>R: inc-counter! cost.usage(model, $0 for local)
+    R->>TM: telemetry-flush!
+    TM->>OC: POST /v1/metrics (OTLP JSON)
 
-*** Git Operations (Shell, TODO: libgit2)
-- =git_status= - Working tree state [safe]
-- =git_diff= - Show changes [safe]
-- =git_log= - Commit history [safe]
-- =git_commit= - Create commits [unsafe — needs YOLO]
-- =git_push= - Push to remote [unsafe — needs YOLO]
-- =git_add_note= - Attach notes to commits [unsafe — needs YOLO]
+    alt Tool call detected
+        R->>T: execute-tool(tool_name, args)
+        T->>T: check-permission(tool_name, args)
+        T->>TM: inc-counter! tool_decision(accept/reject)
 
-*** Self-Inspection (Pure Guile)
-- =read_logs= - Read sage's own logs
-- =search_logs= - Search log patterns
+        alt Built-in tool
+            T->>T: (tool-fn args) — shell or pure Guile
+            T-->>R: result string
+        else MCP tool (namespaced or bare)
+            T->>MCP: mcp-call-tool(server, tool, args)
+            MCP->>MCP: inc-counter! mcp.tool_call
+            MCP->>SK: POST JSON-RPC tools/call
+            SK-->>MCP: 202 Accepted
+            MCP->>MCP: sse-wait-for-response(port, id)
+            SK-->>MCP: SSE message event (JSON-RPC result)
+            MCP-->>T: result text
+            T-->>R: result string
+        end
 
-*** Agent Tasks (Beads via shell, TODO: native)
-- =sage_task_create= - Create task in beads
-- =sage_task_complete= - Mark task done
-- =sage_task_list= - List pending tasks
-- =sage_task_status= - Agent loop status
+        R->>R: session-add-message("assistant", content, tool-call: #t)
+        R->>R: session-add-message("user", "Tool result for ...")
+        R->>O: ollama-chat(model, context) — follow-up
+        O-->>R: follow-up response
+        R->>R: session-add-message("assistant", follow-up)
+        R->>U: display follow-up
+    else No tool call
+        R->>R: session-add-message("assistant", content)
+        R->>U: display content
+    end
 
-** The AGENTS.md Contract
-
-On startup, sage reads =AGENTS.md= and injects it as a system message.
-This file tells the model:
-
-1. How to use sage's task system
-2. Project-specific workflows
-3. Beads issue tracking conventions
-4. Landing the plane (commit + push) protocol
-
-The model should follow AGENTS.md instructions, using tools to:
-- Track work in beads (not memory)
-- Persist changes to files (not conversation)
-- Commit and push (not just "ready when you are")
-
-* Module Dependencies
-
-#+BEGIN_SRC
-                    ┌─────────┐
-                    │  repl   │
-                    └────┬────┘
-           ┌────────────┼────────────┬───────────┐
-           ▼            ▼            ▼           ▼
-      ┌─────────┐  ┌─────────┐  ┌─────────┐ ┌─────────┐
-      │ session │  │  tools  │  │ ollama  │ │ context │
-      └────┬────┘  └────┬────┘  └────┬────┘ └────┬────┘
-           │            │            │           │
-           ▼            ▼            ▼           ▼
-      ┌─────────┐  ┌─────────┐  ┌─────────┐ ┌─────────┐
-      │ config  │  │  agent  │  │ status  │ │ logging │
-      └────┬────┘  └─────────┘  └─────────┘ └─────────┘
-           │
-           ▼
-      ┌─────────┐
-      │  util   │  (HTTP, JSON - pure Guile)
-      └─────────┘
+    R->>R: context-format-warnings (threshold check)
+    R->>R: inc-counter! active.time(cli)
 #+END_SRC
 
-* Shell Code Smell Tracking
+** Tool-call extraction detail
 
-Goal: Replace all shell calls with pure Guile or native bindings.
+Ollama returns =tool_calls= in the =message= object. The field may be
+a JSON array (list from the JSON parser) or a vector (if sage built
+it). =ollama-parse-tool-call= uses =as-list= from =util.scm= to
+normalize both shapes, then extracts =function.name= and
+=function.arguments=. Fallback: if =tool_calls= is absent, parses
+=```tool\n{...}```= blocks from content text.
 
-| Module     | Shell Usage              | Status      | Alternative          |
-|------------|--------------------------|-------------|----------------------|
-| util.scm   | curl for HTTPS POST      | TODO        | (web client) + gnutls|
-| tools.scm  | git commands             | TODO        | libgit2 bindings     |
-| tools.scm  | grep, find               | TODO        | pure Guile search    |
-| agent.scm  | bd commands              | TODO        | beads Guile API      |
-| context.scm| (none - pure Guile)      | DONE        | -                    |
+* 6. Security and Permission Model
 
-* Session State
+** Safe-tools list (always permitted)
 
-Sessions are saved as JSON files in =.sage/sessions/=:
+These read-only tools require no special mode:
+
+| Tool            | Category       | Notes                    |
+|-----------------+----------------+--------------------------|
+| =read_file=     | File read      |                          |
+| =list_files=    | File read      |                          |
+| =glob_files=    | File read      |                          |
+| =search_files=  | File read      |                          |
+| =git_status=    | Git read       |                          |
+| =git_diff=      | Git read       |                          |
+| =git_log=       | Git read       |                          |
+| =read_logs=     | Self-inspect   |                          |
+| =search_logs=   | Self-inspect   |                          |
+| =sage_task_*=   | Agent tasks    | Beads-managed state only |
+| =generate_image= | Image gen     | Writes to output path    |
+
+** YOLO mode (=SAGE_YOLO_MODE=1=)
+
+All tools are permitted, including:
+
+- =write_file=, =edit_file= (filesystem mutation)
+- =git_commit=, =git_push=, =git_add_note= (git mutation)
+
+** Permission check flow
+
+#+BEGIN_SRC
+execute-tool(name, args)
+  │
+  ├─ name ∈ *safe-tools*?  → ALLOW
+  ├─ SAGE_YOLO_MODE set?   → ALLOW
+  └─ else                  → DENY (log WARN, inc reject counter)
+#+END_SRC
+
+** Path containment (=safe-path?=)
+
+- Absolute paths starting with =/tmp/= are always allowed.
+- Relative paths are resolved against =(workspace)= via =resolve-path=.
+- Blocked patterns: =..=, =.env=, =.git/=, =.ssh=, =.gnupg=.
+- =canonicalize-path-safe= handles symlinks.
+
+** MCP tool policy
+
+MCP tools are registered via =register-tool= with =safe: #f= (the
+default). They are never added to =*safe-tools*=. Therefore *all MCP
+tool invocations require YOLO mode* --- or the model gets a "Permission
+denied" response and can reformulate.
+
+This is a deliberate security posture: MCP tools execute arbitrary
+operations on remote servers. The user must opt in.
+
+* 7. MCP Client Architecture
+
+** Transport: curl + FIFO workaround
+
+The MCP SSE transport cannot use Guile's native =(web client)= due to
+two platform bugs:
+
+1. *Accept header rejection*: Guile's HTTP header validator rejects
+   =Accept: text/event-stream= as an invalid MIME type.
+
+2. *open-input-pipe broken on macOS*: =(open-input-pipe "curl ...")=
+   fails with "Bad file descriptor in execvp" on macOS.
+
+The workaround creates a FIFO (named pipe) at =/tmp/sage-sse-<pid>=,
+runs =curl -sN= in the background writing to the FIFO, and opens the
+FIFO as an input file port. This synchronizes reader and writer
+without polling.
+
+#+BEGIN_SRC
+    sse-open-connection(url, headers)
+      │
+      ├── mkfifo /tmp/sage-sse-<pid>
+      ├── curl -sN -H 'Accept: text/event-stream' <url> > /tmp/sage-sse-<pid> &
+      └── (open-input-file "/tmp/sage-sse-<pid>")  → blocking until curl writes
+          │
+          └── returns: input port for SSE stream
+#+END_SRC
+
+** Lifecycle
+
+1. =mcp-init= reads =~/.claude.json= to discover SSE MCP servers.
+2. For each server: open SSE connection, wait for =endpoint= event,
+   send =initialize= JSON-RPC, wait for SSE response, send
+   =notifications/initialized=.
+3. =mcp-discover-tools!= sends =tools/list=, parses the response.
+4. =mcp-register-tools-from-list= registers each tool under both
+   a namespaced name (=<server>.<tool>=) and a bare name (if no
+   collision with built-in tools).
+5. Tool invocation via =mcp-call-tool=: JSON-RPC =tools/call= POST,
+   wait for SSE response, extract =result.content[].text=.
+
+** Correlation model
+
+HTTP POST (JSON-RPC request) and SSE GET (JSON-RPC response) are
+separate TCP connections. Correlation is by JSON-RPC =id=
+(monotonically increasing integer from =*mcp-next-id*=).
+
+** Invariant reference
+
+See =docs/MCP-CONTRACT.org= for the full set of numbered invariants
+(I01--I23) covering transport, lifecycle, tool discovery, and error
+handling.
+
+* 8. Data Flow --- Observability
+
+#+BEGIN_SRC mermaid
+flowchart TB
+    subgraph sage["sage process"]
+        hooks["Hook points:\nrepl.scm (session, tokens, cost, active.time)\ntools.scm (tool_decision)\nmcp.scm (mcp.tool_call)"]
+        counters["*counters*\n(in-memory hash table)"]
+        telem["telemetry.scm\nbuild-metrics-payload\njson-write-string"]
+        http_debug["util.scm\nhttp-debug-log!"]
+        structured["logging.scm\nlog-info/warn/error"]
+    end
+
+    subgraph nexus["nexus (.100)"]
+        otel["OTel Collector :4318"]
+        prom["Prometheus :9090"]
+        graf["Grafana :3000\n/d/ai-tools/"]
+    end
+
+    subgraph local_files["Local files"]
+        http_log[".logs/http.jsonl"]
+        sage_log[".logs/sage.log"]
+    end
+
+    hooks -- "inc-counter!(name, labels, n)" --> counters
+    counters -- "telemetry-flush!\n(after each chat turn, on exit)" --> telem
+    telem -- "POST /v1/metrics\nOTLP/HTTP JSON" --> otel
+    otel -- "Prometheus exporter" --> prom
+    prom -- "PromQL" --> graf
+
+    hooks -- "HTTP requests/responses\n(SAGE_DEBUG_HTTP=1)" --> http_debug
+    http_debug -- "JSONL append" --> http_log
+
+    hooks -- "Structured events" --> structured
+    structured -- "JSONL append" --> sage_log
+#+END_SRC
+
+** Metrics emitted
+
+| OTLP name                            | Prometheus name                            | Labels                          | Hook site              |
+|--------------------------------------+--------------------------------------------+---------------------------------+------------------------|
+| =guile_sage.session.count=           | =guile_sage_session_count_total=           | =session_id=                    | =repl-start=           |
+| =guile_sage.token.usage=             | =guile_sage_token_usage_tokens_total=      | =model=, =type= (input/output) | =handle-chat=          |
+| =guile_sage.cost.usage=              | =guile_sage_cost_usage_USD_total=          | =model=                         | =handle-chat=          |
+| =guile_sage.active.time=             | =guile_sage_active_time_seconds_total=     | =type= (cli/user)              | main loop              |
+| =guile_sage.code_edit.tool_decision= | =guile_sage_code_edit_tool_decision_total= | =tool_name=, =decision=        | =execute-tool=         |
+| =guile_sage.mcp.tool_call=           | =guile_sage_mcp_tool_call_total=           | =server=, =tool_name=          | =mcp-call-tool=        |
+
+All counters are cumulative (=aggregationTemporality=2=,
+=isMonotonic=#t=). Scope: =com.dsp-dr.guile_sage=. Resource:
+=service.name=guile-sage=.
+
+** SAGE_DEBUG_HTTP wire logging
+
+When =SAGE_DEBUG_HTTP=1= is set, every HTTP request and response
+through =util.scm= is logged as a JSONL line to =.logs/http.jsonl=:
+
+- Request: timestamp, method, URL, headers (Authorization redacted),
+  body (truncated to 8192 chars unless =SAGE_DEBUG_HTTP_FULL=1=).
+- Response: timestamp, URL, status code, elapsed_ms, body.
+- Streaming: chunk_count, first_chunk, last_chunk.
+
+This enables bidirectional protocol verification without rebuilding
+requests manually.
+
+* 9. Model-Tier Auto-Selection
+
+#+BEGIN_SRC
+resolve-model-for-tokens(current_tokens, available_tiers)
+  │
+  ├── tokens < fast_ceiling (2000)?     → fast tier (llama3.2:latest)
+  ├── tokens < standard_ceiling (6000)? → standard tier (qwen2.5-coder:7b)
+  └── else                              → last tier (heaviest available)
+#+END_SRC
+
+Tiers are configurable via env vars:
+
+| Env var                        | Default            |
+|--------------------------------+--------------------|
+| =MODEL_TIER_FAST=              | =llama3.2:latest=  |
+| =MODEL_TIER_STANDARD=          | =qwen2.5-coder:7b= |
+| =MODEL_TIER_CEILING_FAST=      | 2000               |
+| =MODEL_TIER_CEILING_STANDARD=  | 6000               |
+
+At startup, =load-model-tiers= cross-references configured tiers
+against =ollama-list-models= output and filters to only available
+models. Each tier carries a =tools?= flag; the REPL only switches to
+tiers that support native tool calling.
+
+Context limits per model are resolved via =*token-limits*= in
+=config.scm= (pattern-match on model name substring).
+
+* 10. Design Philosophy: Tools Over Memory
+
+Sage is NOT tool-agnostic. It explicitly uses file-based tools rather
+than in-memory state.
+
+| In-Memory (avoided)           | File-Based Tools (preferred)      |
+|-------------------------------+-----------------------------------|
+| TODO list in session state    | =bd create/list/close=            |
+| Notes stored in variables     | =git notes=, =write_file=         |
+| Context in conversation only  | =AGENTS.md= loaded at startup     |
+| Lost on restart               | Persisted in filesystem            |
+
+** The AGENTS.md contract
+
+On startup, sage reads =AGENTS.md= (searched in CWD, project XDG,
+global XDG, =~/.sage/=) and injects the combined contents as a system
+message. This tells the model how to use the task system, project
+workflows, and beads conventions.
+
+* 11. Shell Code Smell Tracking
+
+Goal: replace all shell calls with pure Guile or native bindings.
+
+| Module       | Shell usage                          | Status  | Alternative             |
+|--------------+--------------------------------------+---------+-------------------------|
+| util.scm     | =curl= for HTTPS POST/streaming      | TODO    | =(web client)= + gnutls |
+| mcp.scm      | =curl -sN= + FIFO for SSE            | BLOCKED | Guile HTTP bug (Accept) |
+| mcp.scm      | =mkfifo= for named pipe               | BLOCKED | Guile pipe bug (macOS)  |
+| tools.scm    | =git= commands                        | TODO    | libgit2 bindings        |
+| tools.scm    | =grep=, =find=                        | TODO    | pure Guile search       |
+| agent.scm    | =bd= commands                         | TODO    | beads Guile API         |
+| config.scm   | =mkdir -p= for dir creation           | TODO    | =(mkdir ...)= recursive |
+| context.scm  | (none --- pure Guile)                 | DONE    | ---                     |
+
+* 12. Session State
+
+Sessions are saved as JSON files in =.sage/sessions/= (XDG data dir):
 
 #+BEGIN_SRC json
 {
@@ -200,4 +591,26 @@ Sessions are saved as JSON files in =.sage/sessions/=:
 }
 #+END_SRC
 
-This is file-based persistence, not in-memory.
+File-based persistence, not in-memory.
+
+* 13. Configuration Precedence
+
+=config-get= resolves values in this order:
+
+1. =SAGE_<KEY>= env var (uppercased)
+2. =<KEY>= env var (uppercased)
+3. Hash table entry from =config-load-dotenv=
+4. Default value (caller-provided)
+
+Dotenv files loaded from: =.env= (project), =~/.config/sage/.env=
+(user).
+
+XDG directories follow the freedesktop.org spec with sage-specific
+subdirectories under each base:
+
+#+BEGIN_SRC
+~/.config/sage/     (config)
+~/.local/share/sage/ (data: sessions, agents, projects, commands)
+~/.cache/sage/      (cache)
+~/.local/state/sage/ (state)
+#+END_SRC
