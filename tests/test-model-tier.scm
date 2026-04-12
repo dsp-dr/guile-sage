@@ -46,7 +46,7 @@
     (let ((fast (car *model-tiers*)))
       (assert-equal (tier-name fast) "fast" "name")
       (assert-equal (tier-model fast) "llama3.2:latest" "model")
-      (assert-equal (tier-ceiling fast) 2000 "ceiling")
+      (assert-equal (tier-ceiling fast) 4000 "ceiling")
       (assert-equal (tier-context-limit fast) 8000 "context-limit")
       ;; llama3.2 supports tool calling natively
       (assert-true (tier-supports-tools? fast) "fast supports tools"))))
@@ -55,7 +55,7 @@
   (lambda ()
     (let ((standard (cadr *model-tiers*)))
       (assert-equal (tier-name standard) "standard" "name")
-      (assert-equal (tier-model standard) "qwen2.5-coder:7b" "model")
+      (assert-equal (tier-model standard) "llama3.2:latest" "model")
       (assert-true (tier-supports-tools? standard) "standard has tools"))))
 
 (test "low tokens resolve to fast tier"
@@ -65,8 +65,9 @@
 
 (test "medium tokens resolve to standard tier"
   (lambda ()
-    (let ((tier (resolve-model-for-tokens 3000)))
-      (assert-equal (tier-name tier) "standard" "3000 tokens -> standard"))))
+    ;; With fast ceiling at 4000, 5000 tokens should hit standard
+    (let ((tier (resolve-model-for-tokens 5000)))
+      (assert-equal (tier-name tier) "standard" "5000 tokens -> standard"))))
 
 (test "high tokens resolve to last tier"
   (lambda ()
@@ -80,13 +81,14 @@
 
 (test "boundary: exactly at ceiling resolves to next tier"
   (lambda ()
-    (let ((tier (resolve-model-for-tokens 2000)))
-      (assert-equal (tier-name tier) "standard" "2000 tokens -> standard"))))
+    ;; Fast ceiling is now 4000; exactly 4000 should resolve to standard
+    (let ((tier (resolve-model-for-tokens 4000)))
+      (assert-equal (tier-name tier) "standard" "4000 tokens -> standard"))))
 
 (test "boundary: one below ceiling stays in current tier"
   (lambda ()
-    (let ((tier (resolve-model-for-tokens 1999)))
-      (assert-equal (tier-name tier) "fast" "1999 tokens -> fast"))))
+    (let ((tier (resolve-model-for-tokens 3999)))
+      (assert-equal (tier-name tier) "fast" "3999 tokens -> fast"))))
 
 (test "custom tiers work"
   (lambda ()
@@ -113,9 +115,11 @@
 
 (test "filter-available-tiers keeps matching tiers"
   (lambda ()
-    (let ((filtered (filter-available-tiers *model-tiers* '("qwen2.5-coder:7b"))))
-      (assert-equal (length filtered) 1 "only standard tier")
-      (assert-equal (tier-name (car filtered)) "standard" "standard tier"))))
+    ;; Both default tiers now use llama3.2:latest (guile-28p), so
+    ;; filtering on that name keeps both.
+    (let ((filtered (filter-available-tiers *model-tiers* '("llama3.2:latest"))))
+      (assert-equal (length filtered) 2 "both tiers match llama3.2")
+      (assert-equal (tier-name (car filtered)) "fast" "fast tier"))))
 
 (test "filter-available-tiers returns defaults when nothing matches"
   (lambda ()
