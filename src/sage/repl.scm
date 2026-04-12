@@ -10,6 +10,7 @@
   #:use-module (sage util)
   #:use-module (sage logging)
   #:use-module (sage ollama)
+  #:use-module (sage openai)
   #:use-module (sage session)
   #:use-module (sage tools)
   #:use-module (sage version)
@@ -37,6 +38,20 @@
 
 (define *running* #t)
 (define *debug* #f)
+
+;;; Provider dispatch — SAGE_PROVIDER=ollama (default) or openai/litellm
+(define (current-provider)
+  (let ((p (or (getenv "SAGE_PROVIDER") (config-get "PROVIDER") "ollama")))
+    (if (equal? p "litellm") "openai" p)))
+(define (use-openai?) (equal? (current-provider) "openai"))
+(define (provider-model) (if (use-openai?) (openai-model) (provider-model)))
+(define (provider-host) (if (use-openai?) (openai-host) (ollama-host)))
+(define (provider-chat-with-tools m msgs tools)
+  (if (use-openai?) (openai-chat-with-tools m msgs tools) (ollama-chat-with-tools m msgs tools)))
+(define (provider-parse-tool-call msg)
+  (if (use-openai?) (openai-parse-tool-call msg) (ollama-parse-tool-call msg)))
+(define (provider-extract-token-usage r)
+  (if (use-openai?) (openai-extract-token-usage r) (ollama-extract-token-usage r)))
 (define *streaming* (not (equal? "0" (or (getenv "SAGE_STREAMING") ""))))
 (define *available-tiers* '())
 (define *history-file* #f)  ;; project-scoped readline history path
@@ -90,7 +105,7 @@
          (host (short-hostname))
          (ws (workspace))
          (repo (and ws (extract-repo-name ws)))
-         (model (ollama-model))
+         (model (provider-model))
          (api-host (ollama-host))
          (label (endpoint-label api-host))
          (status (session-status))
@@ -208,7 +223,7 @@
                       (filter (lambda (p) (not (equal? (car p) "model")))
                               *session*))))
         (format #t "Model set to: ~a~%" args))
-      (format #t "Current model: ~a~%" (ollama-model)))
+      (format #t "Current model: ~a~%" (provider-model)))
   #t)
 
 (define (cmd-models args)
@@ -275,7 +290,7 @@
 
 (define (cmd-stream args)
   (set! *streaming* (not *streaming*))
-  (format #t "Streaming: ~a~%" (if *streaming* "ON" "OFF"))
+  (format #t "Streaming: ~a~%" (if (and *streaming* (not (use-openai?))) "ON" "OFF"))
   #t)
 
 (define (cmd-version args)
@@ -412,7 +427,7 @@
         #f)))
 
   (let ((host (ollama-host))
-        (model (ollama-model))
+        (model (provider-model))
         (pass-count 0)
         (fail-count 0))
 
@@ -636,12 +651,12 @@
                tool-calls)
               ;; Re-prompt the model with the tool results (WITH tools so
               ;; the model can request further tool calls in the chain)
-              (let* ((follow-up (ollama-chat-with-tools model
+              (let* ((follow-up (provider-chat-with-tools model
                                                          (session-get-context)
                                                          tools))
                      (follow-msg (assoc-ref follow-up "message"))
                      (follow-content (or (assoc-ref follow-msg "content") ""))
-                     (follow-usage (ollama-extract-token-usage follow-up))
+                     (follow-usage (provider-extract-token-usage follow-up))
                      (follow-tokens (assoc-ref follow-usage 'completion_tokens)))
                 ;; Emit telemetry for the follow-up
                 (inc-counter! "guile_sage.token.usage"
@@ -735,8 +750,8 @@
   (let* ((tokens (session-total-tokens))
          (tier (resolve-model-for-tokens tokens *available-tiers*))
          (current-model (if *session*
-                            (or (assoc-ref *session* "model") (ollama-model))
-                            (ollama-model)))
+                            (or (assoc-ref *session* "model") (provider-model))
+                            (provider-model)))
          (tier-model-name (if (tier-supports-tools? tier)
                               (tier-model tier)
                               current-model)))
@@ -762,8 +777,8 @@
 
       ;; Get context for API
       (let* ((model (if *session*
-                      (or (assoc-ref *session* "model") (ollama-model))
-                      (ollama-model)))
+                      (or (assoc-ref *session* "model") (provider-model))
+                      (provider-model)))
            (messages (session-get-context))
            (tools (tools-to-schema)))
 
@@ -781,7 +796,7 @@
     ;; Call Ollama - streaming or non-streaming
     (catch #t
       (lambda ()
-        (if *streaming*
+        (if (and *streaming* (not (use-openai?)))
             ;; --- Streaming path ---
             (let ((start-time (current-time)))
               (status-stream-start model)
@@ -793,7 +808,7 @@
                                  (time-second start-time)))
                      (message (assoc-ref response "message"))
                      (content (or (assoc-ref message "content") ""))
-                     (usage (ollama-extract-token-usage response))
+                     (usage (provider-extract-token-usage response))
                      (prompt-tokens (assoc-ref usage 'prompt_tokens))
                      (completion-tokens (assoc-ref usage 'completion_tokens)))
 
@@ -822,10 +837,10 @@
                         (format #t "~%~a~%" final-text))))))
 
             ;; --- Non-streaming path (existing behavior) ---
-            (let* ((response (ollama-chat-with-tools model messages tools))
+            (let* ((response (provider-chat-with-tools model messages tools))
                    (message (assoc-ref response "message"))
                    (content (or (assoc-ref message "content") ""))
-                   (usage (ollama-extract-token-usage response))
+                   (usage (provider-extract-token-usage response))
                    (prompt-tokens (assoc-ref usage 'prompt_tokens))
                    (completion-tokens (assoc-ref usage 'completion_tokens)))
 
@@ -907,7 +922,7 @@
   (init-logging)
   (log-info "repl" "REPL starting"
             `(("version" . ,(version-string))
-              ("model" . ,(ollama-model))
+              ("model" . ,(provider-model))
               ("host" . ,(ollama-host))
               ("workspace" . ,(getcwd))))
 
@@ -928,6 +943,7 @@
       (log-info "repl" (format #f "Loaded ~a custom command~a" n
                                 (if (= n 1) "" "s")))))
 
+  (unless (use-openai?)
   ;; Probe available models, configure tiers, and validate that the
   ;; configured model is actually installed locally. If it has been
   ;; removed (e.g. via `ollama rm`), fall back to the first
@@ -941,7 +957,7 @@
                   `(("tiers" . ,(length *available-tiers*))
                     ("models" . ,(length models))))
         ;; Validate the configured model
-        (let* ((preferred (ollama-model))
+        (let* ((preferred (provider-model))
                (chosen (select-fallback-model preferred models)))
           (cond
            ((not chosen)
@@ -960,7 +976,7 @@
     (lambda (key . args)
       (set! *available-tiers* *model-tiers*)
       (log-warn "repl" "Failed to probe models, using defaults"
-                `(("error" . ,(format #f "~a" key))))))
+                `(("error" . ,(format #f "~a" key))))))) ; close catch + unless
 
   ;; Check for debug mode
   (when (config-get "DEBUG")
@@ -1008,8 +1024,8 @@
     (display ver-line) (newline)
     (display "║   Type /help for commands, /exit to quit   ║\n")
     (display "╚════════════════════════════════════════════╝\n")
-    (format #t "Model: ~a~%" (ollama-model))
-    (format #t "Host: ~a~%" (ollama-host))
+    (format #t "Provider: ~a\nModel: ~a\n" (current-provider) (provider-model))
+    (format #t "Host: ~a~%" (provider-host))
     (when yolo?
       (display "Mode: YOLO (all tools enabled)\n"))
     (when *debug*
