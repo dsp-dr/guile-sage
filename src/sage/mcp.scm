@@ -646,7 +646,12 @@ to avoid hanging on the SSE long-lived connection."
 
 (define (mcp-init)
   "Discover MCP servers from ~/.claude.json and connect to SSE servers.
-Fail-soft: logs warnings and continues if anything goes wrong."
+Fail-soft: logs warnings and continues if anything goes wrong.
+Set SAGE_MCP_DISABLE=1 to skip entirely (bd: guile-5ui)."
+  (when (getenv "SAGE_MCP_DISABLE")
+    (log-info "mcp" "MCP disabled via SAGE_MCP_DISABLE")
+    (set! *mcp-servers* '()))
+  (unless (getenv "SAGE_MCP_DISABLE")
   (catch #t
     (lambda ()
       (let* ((config (mcp-read-claude-json))
@@ -680,7 +685,7 @@ Fail-soft: logs warnings and continues if anything goes wrong."
                                        (assoc-ref spec "name") key args)))))
                server-specs)))))
     (lambda (key . args)
-      (log-warn "mcp" (format #f "MCP init failed: ~a ~a" key args)))))
+      (log-warn "mcp" (format #f "MCP init failed: ~a ~a" key args)))))) ; close catch + unless
 
 (define (mcp-shutdown!)
   "Clean up all MCP server connections."

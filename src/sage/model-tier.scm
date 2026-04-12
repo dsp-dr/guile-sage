@@ -32,16 +32,21 @@
 ;;;   context-limit - model's hard context window
 ;;;   tools?        - whether model supports native tool calling
 
+;; Single-model default: llama3.2:latest scores 10/10 native tool calls
+;; in the timing protocol (docs/TIMING-PROTOCOL.org). qwen2.5-coder:7b
+;; scored 0/10 and was removed as the standard tier per guile-28p.
+;; Both tiers point to the same model until a proven larger alternative
+;; is pulled (e.g., llama3.3:8b, mistral-small). The ceiling controls
+;; when the REPL suggests an upgrade; the model just stays the same.
 (define *default-model-tiers*
   `((("name" . "fast")
      ("model" . "llama3.2:latest")
-     ("ceiling" . 2000)
+     ("ceiling" . 4000)
      ("context-limit" . 8000)
-     ;; llama3.2 (1B/3B) supports native tool calling per Meta/Ollama
      ("tools?" . #t))
     (("name" . "standard")
-     ("model" . "qwen2.5-coder:7b")
-     ("ceiling" . 6000)
+     ("model" . "llama3.2:latest")
+     ("ceiling" . 8000)
      ("context-limit" . 8000)
      ("tools?" . #t))))
 
@@ -78,7 +83,7 @@
 ;;; Returns: filtered list of tier alists
 (define* (load-model-tiers #:optional (available-model-names '()))
   (let* ((fast-model (or (config-get "MODEL_TIER_FAST") "llama3.2:latest"))
-         (standard-model (or (config-get "MODEL_TIER_STANDARD") "qwen2.5-coder:7b"))
+         (standard-model (or (config-get "MODEL_TIER_STANDARD") "llama3.2:latest"))
          (fast-ceiling (or (and=> (config-get "MODEL_TIER_CEILING_FAST") string->number)
                            2000))
          (standard-ceiling (or (and=> (config-get "MODEL_TIER_CEILING_STANDARD") string->number)
