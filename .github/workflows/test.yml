@@ -23,6 +23,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     needs: lint
+    env:
+      # CI runs the full suite in YOLO so write/edit/git tools execute.
+      # test-security.scm explicitly unsets YOLO for its denial cases.
+      SAGE_YOLO_MODE: "1"
 
     steps:
     - uses: actions/checkout@v4
@@ -32,48 +36,17 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y guile-3.0
 
-    - name: Run session tests
-      run: guile -L src tests/test-session.scm
+    - name: Run full test suite
+      run: make check
 
-    - name: Run tools tests
-      run: guile -L src tests/test-tools.scm
-
-    - name: Run JSON/util tests (from ollama tests)
-      run: |
-        # Run only the JSON parsing tests (no API calls)
-        guile -L src -c '
-          (add-to-load-path "src")
-          (use-modules (sage util))
-          (define (test name fn)
-            (catch #t
-              (lambda () (fn) (format #t "PASS: ~a~%" name))
-              (lambda args (format #t "FAIL: ~a~%" name))))
-          (test "parse string" (lambda ()
-            (unless (equal? (json-read-string "\"hello\"") "hello")
-              (error "failed"))))
-          (test "parse number" (lambda ()
-            (unless (equal? (json-read-string "42") 42)
-              (error "failed"))))
-          (test "parse object" (lambda ()
-            (let ((obj (json-read-string "{\"a\":1}")))
-              (unless (equal? (assoc-ref obj "a") 1)
-                (error "failed")))))
-          (test "write object" (lambda ()
-            (let ((s (json-write-string (quote (("a" . 1))))))
-              (unless (string-contains s "\"a\"")
-                (error "failed")))))
-        '
+    - name: Run property-based tests
+      run: guile -L src tests/test-pbt.scm
 
     - name: Test summary
       if: always()
       run: |
         echo "## Test Results" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### test-session.scm" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
-        guile -L src tests/test-session.scm 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        echo "### test-tools.scm" >> $GITHUB_STEP_SUMMARY
-        echo '```' >> $GITHUB_STEP_SUMMARY
-        guile -L src tests/test-tools.scm 2>&1 | tail -5 >> $GITHUB_STEP_SUMMARY
+        make check 2>&1 | grep -E "^(Running|Total:|Pass Rate|Tests:|All tests passed)" >> $GITHUB_STEP_SUMMARY
         echo '```' >> $GITHUB_STEP_SUMMARY
