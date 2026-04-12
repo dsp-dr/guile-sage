@@ -197,28 +197,40 @@ Returns a list of alists, each with keys: name, url, headers."
 ;;; ============================================================
 
 (define* (sse-open-connection url headers #:key (timeout 5))
-  "Open a streaming GET to an SSE endpoint.
-Returns the response body port, or #f on failure."
+  "Open a streaming GET to an SSE endpoint via curl + FIFO.
+Guile's native (web client) rejects Accept: text/event-stream (bad
+MIME type in header validator). Guile's open-input-pipe is broken on
+macOS (Bad file descriptor in execvp). So we create a FIFO (named
+pipe), run curl in the background writing to it, and return an
+open-input-file port on the FIFO for line-by-line SSE reading.
+Returns an input port for the SSE stream, or #f on failure.
+The caller reads SSE events from this port via sse-read-event."
   (catch #t
     (lambda ()
-      (let ((extra-headers
-             (cons '(accept . "text/event-stream")
-                   (map (lambda (h)
-                          (cons (string->symbol (car h)) (cdr h)))
-                        headers))))
-        (receive (response body)
-            (http-request url
-                          #:method 'GET
-                          #:headers extra-headers
-                          #:streaming? #t)
-          (if (= 200 (response-code response))
-              body
-              (begin
-                (log-warn "mcp"
-                          (format #f "SSE connection returned ~a for ~a"
-                                  (response-code response) url))
-                (when (port? body) (close-port body))
-                #f)))))
+      (let* ((fifo-path (format #f "/tmp/sage-sse-~a" (getpid)))
+             ;; Clean up any stale FIFO from a previous crash
+             (_ (when (file-exists? fifo-path)
+                  (delete-file fifo-path)))
+             (_ (system (format #f "mkfifo '~a'" fifo-path)))
+             (header-args
+              (string-join
+               (cons "-H 'Accept: text/event-stream'"
+                     (map (lambda (h)
+                            (format #f "-H '~a: ~a'" (car h) (cdr h)))
+                          headers))
+               " "))
+             ;; Run curl in background writing to the FIFO.
+             ;; -s: silent, -N: no-buffer (stream immediately).
+             ;; The & backgrounds it so we can open the FIFO for reading.
+             (cmd (format #f "curl -sN --connect-timeout ~a ~a '~a' > '~a' &"
+                          timeout header-args url fifo-path)))
+        (system cmd)
+        ;; open-input-file blocks until curl starts writing to the FIFO.
+        ;; This is the correct behaviour — it synchronizes the reader
+        ;; with the writer without polling.
+        (let ((port (open-input-file fifo-path)))
+          (log-info "mcp" (format #f "SSE FIFO opened for ~a at ~a" url fifo-path))
+          port)))
     (lambda (key . args)
       (log-warn "mcp" (format #f "SSE connection failed for ~a: ~a ~a"
                               url key args))
