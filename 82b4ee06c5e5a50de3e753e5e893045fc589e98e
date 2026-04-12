@@ -1,0 +1,64 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Test design from docs/REPRO-guile-tpf.md §7
+
+## Testing
+- 4 new tests pass under test-tools.scm
+- Suite total now 40/40 (was 36/36 before this commit)
+- Verified manually that the new tests would FAIL on the
+  pre-fix code: \"honours path=src/sage scope\" check that
+  src/sage/ is in the result and tests/ is NOT — the old code
+  always grepped from workspace root and head -50 truncation
+  meant tests/ leaked through reliably.
+
+## Issues
+- bd: guile-tpf (P2) — closes after this commit lands
+
+## Conjecture (CPRR)
+- Hypothesis: schema-shape assertions (the 4th test) catch a
+  CLASS of regressions that runtime-behaviour tests can miss.
+  If a future refactor drops the path property, the runtime
+  test still passes for the no-arg case but the schema test
+  fails immediately. Cheap insurance against silent contract
+  drift.
+
+## Validation
+- The 4 tests cover the three cells of a 2x2 matrix (scoped/
+  unscoped × success/error) plus the schema-shape regression
+  guard. Together they pin the contract from both directions.
+- Each test uses execute-tool through the public dispatcher,
+  not direct internal calls, so they exercise the same path
+  the model would.
+- The schema test reads through tools-to-schema accessors and
+  doesn't depend on JSON encoding — fast, deterministic, no
+  IO.
+
+## Refutation / known limits
+- The honours path test asserts string-contains \"tests/\" is
+  false. If src/sage ever contains a file named \"tests/\" (it
+  doesn't and shouldn't, but theoretically), the assertion
+  could false-positive. Acceptable for this codebase.
+- No PBT property yet — the 4 cells are exhaustive enough that
+  randomised input doesn't add coverage. A PBT property for
+  the broader class \"any tool that takes a path arg honours
+  scoping\" could be more valuable; filed for follow-up.
+- The default-scope test is intentionally weak (just \"returns
+  some result\") because the exact composition depends on
+  readdir order which is non-deterministic across hosts.
+
+## Meta - research / context / deep-dives
+- Worth a future audit: every register-tool call should have
+  a paired schema-shape assertion in test-tools.scm so the
+  contract drift class of bug becomes a CI failure.
+- Eval idea: build a synthetic model that emits valid args
+  for every property declared in every tool's schema, run
+  execute-tool on each, and assert no exceptions. Catches
+  schema/body mismatches automatically. Would have caught
+  guile-tpf on the day it shipped.
+- The REPRO-guile-tpf.md doc is a great template for any
+  future bug repro. Worth promoting its structure (verdict,
+  phase 1 reproduction, phase 2 wire evidence, phase 3
+  explicit form, phase 4 direct invocation, recommended fix,
+  recommended test) to docs/ as a methodology note. Filed
+  in the followups.
