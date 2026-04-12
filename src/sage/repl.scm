@@ -744,8 +744,10 @@
                               (tier-model tier)
                               current-model)))
 
-    ;; Switch model if tier changed and tier supports tools
-    (when (and (not (equal? tier-model-name current-model))
+    ;; Switch model if tier changed and tier supports tools.
+    ;; SKIP for non-ollama providers — LiteLLM/Gemini manage their own models.
+    (when (and (eq? (current-provider) 'ollama)
+               (not (equal? tier-model-name current-model))
                (tier-supports-tools? tier))
       (format #t "\x1b[2m[model: ~a -> ~a (~a tier, ~a tokens)]\x1b[0m~%"
               current-model tier-model-name (tier-name tier) tokens)
