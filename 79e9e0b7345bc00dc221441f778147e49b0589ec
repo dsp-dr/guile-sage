@@ -1,0 +1,80 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- User ask: \"you need to confirm the timing and tool calls and build the timing protocol\"
+
+## Testing
+- scripts/timing-bench.sh runs to completion at TIMING_BENCH_TRIALS=3 and =10
+- Captured 10-trial baseline for 3 models against live local Ollama
+- Numbers reproducible across re-runs (within ~5% on warm load)
+- Catches one v0 bug during development: bash heredoc + parens in prompt
+  produced JSONDecodeError; rewritten to use python heredoc throughout
+
+## Issues
+- bd: guile-9wx (this protocol, P2)
+- bd: guile-28p (model-tier standard tier needs revisit, P2)
+- bd: guile-dhn (release notes cleanup, P3)
+
+## Conjecture (CPRR)
+- Hypothesis 1: a deterministic timing benchmark catches model
+  regressions that intuition misses. Models change between Ollama
+  releases; this script makes the change visible.
+- Hypothesis 2: native tool_calls invocation rate is the right
+  primary metric for picking a tool-calling model — NOT raw t/s,
+  NOT total time, NOT param count.
+- Hypothesis 3: the >=3B params heuristic was wrong because it
+  conflated 'large enough to do tool format reliably' with
+  'large enough to think well'. They're orthogonal — qwen3:0.6b
+  proves a small model CAN follow the format if trained for it.
+
+## Validation
+- llama3.2:latest 10/10 — CONFIRMS the fast tier default
+- qwen2.5-coder:7b 0/10 — REFUTES the standard tier default
+- qwen3:0.6b 10/10 — REFUTES the >=3B heuristic
+- The bug fixes from this 0.6.x grind (guile-bcy, guile-ecn) were
+  validated end-to-end via this same model so the test path is
+  shared across the bug-fix work and the protocol work.
+
+## Refutation / known limits
+- 10 trials is small. Not a chi-squared test. Bimodal results
+  (10/10 or 0/10) reduced the variance question, but a model
+  scoring 5/10 would need more trials to confirm.
+- Non-streaming. Sage uses streaming; behavior may differ.
+  Streaming variant filed as a follow-up in TIMING-PROTOCOL.org.
+- Single host (mini macOS). FreeBSD numbers may differ. The
+  forthcoming FreeBSD test agent should run this script and
+  produce a parallel measurement table for cross-host comparison.
+- The script assumes Ollama at localhost:11434. Cloud Ollama
+  endpoints would need OLLAMA_API_KEY handling — not in v1.
+- The tool-call test uses ONE prompt and ONE tool definition.
+  A model may handle some tool shapes but not others. v2 should
+  rotate through 3-5 different tool definitions of varying
+  complexity.
+- No measurement of the BUILD-TO-PROD gap: a model may score
+  10/10 on this benchmark but fail in sage's actual REPL flow
+  because of system prompt influence, context length, or
+  streaming-path differences. The benchmark is a NECESSARY but
+  not SUFFICIENT signal.
+
+## Meta - research / context / deep-dives
+- Worth a future deep-dive: rotate through 3-5 tool shapes in
+  Phase 2 (get_weather, write_file, search_files, git_status,
+  custom). Some models may handle simple tools and fail on
+  nested-arg tools. Filed as a follow-up candidate.
+- Worth porting these property-style benchmarks to hegel-guile
+  as a Hypothesis-shrinking timing test. The current sh+python
+  approach has no shrinking and no minimisation; hegel could
+  generate adversarial prompts that maximise tool-call failure
+  rate.
+- The timing data should drive a CI gate: gmake check could
+  invoke a 3-trial smoke version of timing-bench.sh and fail
+  the build if the standard-tier model drops below threshold.
+  Would catch model regressions automatically.
+- Related: docs/UX-FINDINGS-0.6.0.md observed 80% native tool
+  invocation for llama3.2 in the sage REPL flow but this
+  benchmark shows 100% in raw curl. The 20% gap is sage-side
+  (system prompt, streaming, context), not model-side. Worth
+  isolating.
+- Open question: should timing-bench.sh emit OTLP metrics so
+  the protocol gets its own dashboard panel alongside the rest
+  of the AI Tools dashboard? Would track regressions visually.
