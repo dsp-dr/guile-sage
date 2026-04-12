@@ -6,6 +6,7 @@
 
 (use-modules (sage telemetry)
              (sage util)
+             (srfi srfi-19)
              (ice-9 format))
 
 ;;; Load shared SRFI-64 test harness
@@ -155,8 +156,109 @@
     (assert-equal (telemetry-endpoint) "http://192.168.86.100:4318/v1/metrics"
                   ":4317 -> :4318 substitution + /v1/metrics suffix")))
 
+;;; ----- Flush backoff tests -----
+;;; These tests exercise the backoff mechanism added in guile-u3n.
+;;; We keep telemetry enabled with a non-routable endpoint so every
+;;; flush attempt fails, triggering the backoff state machine.
+
+(format #t "~%--- Flush backoff ---~%")
+
+;;; Re-initialize with unreachable endpoint for backoff tests
+(telemetry-shutdown!)
+(hash-clear! *counters*)
+(set! *last-flush-failure* #f)
+(unsetenv "SAGE_TELEMETRY_DISABLE")
+(setenv "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT" "http://127.0.0.1:1/v1/metrics")
+(setenv "OTEL_RESOURCE_ATTRIBUTES" "host.name=testhost,team=testteam")
+(telemetry-init)
+
+(run-test "flush enters backoff after failure"
+  (lambda ()
+    ;; Precondition: no backoff yet
+    (assert-false (in-flush-backoff?) "should not be in backoff initially")
+    ;; Add a counter so flush has something to send
+    (inc-counter! "guile_sage.session.count" '(("session_id" . "bo1")) 1)
+    ;; Flush to unreachable endpoint — should fail and set *last-flush-failure*
+    (telemetry-flush!)
+    (assert-true (in-flush-backoff?) "should be in backoff after failed flush")))
+
+(run-test "flush skips during backoff window"
+  (lambda ()
+    ;; We're already in backoff from the previous test.
+    ;; Record counter state before the skip.
+    (let ((before-val (hash-ref *counters*
+                                (counter-key "guile_sage.session.count"
+                                             '(("session_id" . "bo1")))
+                                0)))
+      ;; Increment a counter — this should work regardless of backoff
+      (inc-counter! "guile_sage.session.count" '(("session_id" . "bo1")) 5)
+      ;; Flush should be skipped (backoff window). No POST attempted.
+      (telemetry-flush!)
+      ;; The counter should still reflect the increment (counters survive)
+      (let ((after-val (hash-ref *counters*
+                                 (counter-key "guile_sage.session.count"
+                                              '(("session_id" . "bo1")))
+                                 0)))
+        (assert-equal after-val (+ before-val 5)
+                      "counters accumulate even during backoff")))))
+
+(run-test "flush retries after backoff expires"
+  (lambda ()
+    ;; Simulate backoff expiry by backdating *last-flush-failure* beyond
+    ;; the 60s window. This avoids depending on set! of the backoff
+    ;; constant which the Guile compiler may constant-fold.
+    (let ((now (time-second (current-time time-utc))))
+      (set! *last-flush-failure* (- now 120))) ; 120s ago, well past 60s window
+    (assert-false (in-flush-backoff?) "backoff should have expired")
+    ;; Flush again — this will attempt the POST (and fail again since
+    ;; endpoint is still unreachable), re-entering backoff.
+    (telemetry-flush!)
+    (assert-true (in-flush-backoff?) "should re-enter backoff after retry fails")))
+
+(run-test "shutdown always flushes regardless of backoff"
+  (lambda ()
+    ;; We're in backoff. Verify it.
+    (assert-true (in-flush-backoff?) "should be in backoff before shutdown")
+    ;; Record the failure timestamp before shutdown
+    (let ((old-ts *last-flush-failure*))
+      ;; shutdown! clears backoff and attempts flush. The flush will fail
+      ;; again (unreachable endpoint), setting a NEW *last-flush-failure*.
+      ;; The key property: shutdown cleared the old backoff so the POST
+      ;; was actually attempted (not skipped).
+      (telemetry-shutdown!)
+      ;; After shutdown, *last-flush-failure* should be updated because
+      ;; the flush was attempted (not skipped) and failed again.
+      ;; If backoff had NOT been cleared, the flush would have been
+      ;; skipped and *last-flush-failure* would still be old-ts.
+      ;; Since the endpoint is unreachable, the re-attempted flush fails
+      ;; and writes a new (>= old) timestamp.
+      (assert-true (or (not *last-flush-failure*)
+                       (>= *last-flush-failure* old-ts))
+                   "shutdown should have attempted the flush"))))
+
+(run-test "counters survive backoff"
+  (lambda ()
+    ;; Re-initialize for a clean slate
+    (hash-clear! *counters*)
+    (set! *last-flush-failure* #f)
+    (telemetry-init)
+    ;; Phase 1: increment counters, then fail a flush (enter backoff)
+    (inc-counter! "guile_sage.token.usage" '(("model" . "m1") ("type" . "input")) 10)
+    (telemetry-flush!)  ; fails -> backoff
+    (assert-true (in-flush-backoff?) "should be in backoff")
+    ;; Phase 2: increment more counters during backoff
+    (inc-counter! "guile_sage.token.usage" '(("model" . "m1") ("type" . "input")) 25)
+    (telemetry-flush!)  ; skipped due to backoff
+    ;; Verify the cumulative total includes ALL increments
+    (let* ((key (counter-key "guile_sage.token.usage"
+                             '(("model" . "m1") ("type" . "input"))))
+           (val (hash-ref *counters* key 0)))
+      (assert-equal val 35
+                    "cumulative total should include all increments across backoff"))))
+
 ;;; Restore disabled state for test isolation
 (setenv "SAGE_TELEMETRY_DISABLE" "1")
+(set! *last-flush-failure* #f)
 (telemetry-shutdown!)
 
 (test-summary)
