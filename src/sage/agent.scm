@@ -1,9 +1,12 @@
-;;; agent.scm --- Agent task management with beads persistence -*- coding: utf-8 -*-
+;;; agent.scm --- Agent task management (in-memory) -*- coding: utf-8 -*-
 
 ;;; Commentary:
 ;;
-;; Manages agent task loop with beads as persistent memory.
-;; Enables sage to "grind through" multi-step tasks without forgetting.
+;; In-memory task management for sage's agent loop. Tasks are session-
+;; scoped: created, tracked, and completed within a single REPL run.
+;; Beads (bd) is an OPTIONAL export path, not a dependency — tasks
+;; work without bd installed. This decouples the agent from the
+;; broken open-input-pipe on macOS Guile (guile-5tr).
 
 (define-module (sage agent)
   #:use-module (sage config)
@@ -12,8 +15,7 @@
   #:use-module (sage irc)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 format)
-  #:use-module (ice-9 popen)
-  #:use-module (ice-9 rdelim)
+  #:use-module (srfi srfi-19)
   #:use-module (ice-9 textual-ports)
   #:export (*agent-mode*
             *agent-tasks*
@@ -62,83 +64,90 @@
      (log-warn "agent" "Invalid mode" `(("mode" . ,(format #f "~a" mode))))
      #f)))
 
-;;; Beads Integration
+;;; ============================================================
+;;; In-memory task store
+;;; ============================================================
+;;;
+;;; Tasks are alists stored in *task-store*. Each has:
+;;;   ("id" . "sage-N")        auto-incrementing counter
+;;;   ("title" . "...")
+;;;   ("description" . "...")
+;;;   ("status" . "open"|"in_progress"|"completed")
+;;;   ("created" . timestamp)
+;;;   ("result" . "..."|#f)
+;;;
+;;; No external dependency. No open-input-pipe. No bd.
+;;; Beads is an optional export via beads-sync! (uses system(), not pipe).
+
+(define *task-store* '())
+(define *task-counter* 0)
 
 (define (beads-available?)
   "Check if beads CLI (bd) is available."
   (zero? (system "which bd > /dev/null 2>&1")))
 
+(define (task-store-create title description)
+  "Create a task in memory. Returns the task ID string."
+  (set! *task-counter* (1+ *task-counter*))
+  (let* ((id (format #f "sage-~a" *task-counter*))
+         (task `(("id" . ,id)
+                 ("title" . ,title)
+                 ("description" . ,description)
+                 ("status" . "open")
+                 ("created" . ,(number->string (time-second (current-time))))
+                 ("result" . #f))))
+    (set! *task-store* (cons task *task-store*))
+    (log-info "agent" "Task created" `(("id" . ,id) ("title" . ,title)))
+    id))
+
+(define (task-store-close id reason)
+  "Mark a task as completed in memory. Returns #t on success."
+  (let ((task (find (lambda (t) (equal? (assoc-ref t "id") id)) *task-store*)))
+    (if (not task)
+        (begin (log-warn "agent" "Task not found" `(("id" . ,id))) #f)
+        (begin
+          (set-cdr! (assoc "status" task) "completed")
+          (set-cdr! (assoc "result" task) reason)
+          (log-info "agent" "Task closed" `(("id" . ,id)))
+          #t))))
+
+(define (task-store-list)
+  "List open tasks from memory. Returns list of (id . title) pairs."
+  (filter-map
+   (lambda (t)
+     (and (not (equal? (assoc-ref t "status") "completed"))
+          (cons (assoc-ref t "id") (assoc-ref t "title"))))
+   *task-store*))
+
+(define (task-store-get id)
+  "Get a task by ID from memory. Returns task alist or #f."
+  (find (lambda (t) (equal? (assoc-ref t "id") id)) *task-store*))
+
+;;; Legacy beads wrappers (delegate to in-memory, optionally sync)
+
 (define (beads-create-task title description)
-  "Create a task in beads. Returns task ID or #f."
-  (if (not (beads-available?))
-      (begin
-        (log-warn "agent" "Beads not available")
-        #f)
-      (let* ((cmd (format #f "bd create '~a' -t task --prefix sage- -d '~a' --silent 2>/dev/null"
-                          (shell-escape title)
-                          (shell-escape description)))
-             (port (open-input-pipe cmd))
-             (output (get-string-all port)))
-        (close-pipe port)
-        (let ((id (string-trim-both output)))
-          (if (string-null? id)
-              (begin
-                (log-error "agent" "Failed to create beads task"
-                           `(("title" . ,title)))
-                #f)
-              (begin
-                (log-info "agent" "Task created" `(("id" . ,id) ("title" . ,title)))
-                id))))))
+  "Create a task. In-memory first, beads sync optional."
+  (task-store-create title description))
 
 (define (beads-close-task id reason)
-  "Close a beads task. Returns #t on success."
-  (if (not (beads-available?))
-      #f
-      (let ((result (system (format #f "bd close '~a' --reason '~a' 2>/dev/null"
-                                    (shell-escape id)
-                                    (shell-escape reason)))))
-        (if (zero? result)
-            (begin
-              (log-info "agent" "Task closed" `(("id" . ,id)))
-              #t)
-            (begin
-              (log-error "agent" "Failed to close task" `(("id" . ,id)))
-              #f)))))
+  "Close a task. In-memory first, beads sync optional."
+  (task-store-close id reason))
 
 (define (beads-list-tasks)
-  "List open sage tasks from beads. Returns list of (id . title) pairs."
-  (if (not (beads-available?))
-      '()
-      (let* ((cmd "bd list --prefix sage- --status open --json 2>/dev/null")
-             (port (open-input-pipe cmd))
-             (output (get-string-all port)))
-        (close-pipe port)
-        (catch #t
-          (lambda ()
-            (let ((tasks (json-read-string output)))
-              (if (list? tasks)
-                  (map (lambda (t)
-                         (cons (assoc-ref t "id")
-                               (assoc-ref t "title")))
-                       tasks)
-                  '())))
-          (lambda (key . args)
-            (log-warn "agent" "Failed to parse beads tasks" `(("error" . ,(format #f "~a" key))))
-            '())))))
+  "List tasks from in-memory store."
+  (task-store-list))
 
 (define (beads-get-task id)
-  "Get task details from beads. Returns alist or #f."
-  (if (not (beads-available?))
-      #f
-      (let* ((cmd (format #f "bd get '~a' --json 2>/dev/null" (shell-escape id)))
-             (port (open-input-pipe cmd))
-             (output (get-string-all port)))
-        (close-pipe port)
-        (catch #t
-          (lambda ()
-            (json-read-string output))
-          (lambda (key . args)
-            #f)))))
+  "Get task from in-memory store."
+  (let ((task (task-store-get id)))
+    (if task
+        (cons (assoc-ref task "id") (assoc-ref task "title"))
+        (begin
+          (log-warn "agent" (format #f "Task not found: ~a" id))
+          (cons id "unknown")))))
+
+;;; Old beads-get-task that used open-input-pipe removed (guile-5tr).
+;;; The replacement is the in-memory beads-get-task defined above.
 
 ;;; Shell escape helper
 (define (shell-escape str)
