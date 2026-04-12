@@ -71,6 +71,15 @@
 ;; Monotonically-increasing JSON-RPC id counter
 (define *mcp-next-id* 0)
 
+;; Per-call FIFO counter for unique paths (avoids collision between
+;; init-time SSE and per-tool-call SSE connections — guile-59i).
+(define *fifo-counter* 0)
+
+(define (next-fifo-path!)
+  "Generate a unique FIFO path for each SSE connection."
+  (set! *fifo-counter* (1+ *fifo-counter*))
+  (format #f "/tmp/sage-sse-~a-~a" (getpid) *fifo-counter*))
+
 ;;; ============================================================
 ;;; JSON-RPC envelope construction (pure, no I/O)
 ;;; ============================================================
@@ -207,7 +216,7 @@ Returns an input port for the SSE stream, or #f on failure.
 The caller reads SSE events from this port via sse-read-event."
   (catch #t
     (lambda ()
-      (let* ((fifo-path (format #f "/tmp/sage-sse-~a" (getpid)))
+      (let* ((fifo-path (next-fifo-path!))
              ;; Clean up any stale FIFO from a previous crash
              (_ (when (file-exists? fifo-path)
                   (delete-file fifo-path)))
@@ -510,43 +519,75 @@ Also registers under the bare tool name if no collision with local tools."
 ;;; Tool execution via JSON-RPC
 ;;; ============================================================
 
+;;; mcp-call-tool-inner: The actual per-call SSE lifecycle.
+;;; Separated from the public mcp-call-tool to keep error handling clean.
+;;; Returns tool result text or an error string.
+(define (mcp-call-tool-inner url headers tool-name args)
+  "Open a fresh SSE session, initialize, call the tool, return result."
+  ;; Step 1: Fresh SSE (new FIFO, new curl, new session)
+  (let ((sse-port (sse-open-connection url headers)))
+    (unless sse-port
+      (throw 'mcp-error "SSE connection failed"))
+    ;; Step 2: Read endpoint
+    (let ((endpoint (sse-read-endpoint-event sse-port url)))
+      (unless endpoint
+        (when (port? sse-port) (close-port sse-port))
+        (throw 'mcp-error "no endpoint event"))
+      ;; Step 3: Initialize (MCP spec requires this before tools/*)
+      (let ((init-ok (mcp-do-initialize! endpoint sse-port headers)))
+        (unless init-ok
+          (when (port? sse-port) (close-port sse-port))
+          (throw 'mcp-error "per-call initialize failed"))
+        (mcp-do-initialized-notification! endpoint headers)
+        ;; Step 4: POST tools/call
+        (receive (id body)
+            (mcp-make-request "tools/call"
+                              `(("name" . ,tool-name)
+                                ("arguments" . ,(or args json-empty-object))))
+          (let ((post-result (mcp-post endpoint body headers #:timeout 10)))
+            (let ((response
+                   (if (and (pair? post-result) (= 202 (car post-result)))
+                       ;; Read response from SSE
+                       (let ((envelope (sse-wait-for-response
+                                        sse-port id #:timeout-seconds 30)))
+                         (if envelope
+                             (mcp-extract-tool-result envelope)
+                             "MCP tool call timed out"))
+                       (format #f "MCP POST failed: ~a"
+                               (if (pair? post-result) (car post-result) "?")))))
+              ;; Step 5: Cleanup
+              (catch #t
+                (lambda () (when (port? sse-port) (close-port sse-port)))
+                (lambda a #f))
+              (system (format #f "rm -f /tmp/sage-sse-~a-* 2>/dev/null" (getpid)))
+              response)))))))
+
 (define (mcp-call-tool server-name tool-name args)
   "Invoke a tool on an MCP server via JSON-RPC tools/call.
+
+Opens a FRESH SSE connection per call to avoid the stale-FIFO
+problem (guile-59i): the init-time SSE pipe goes dead between
+init and the first tool call because the curl process or the
+server-side session expires. Each call does: SSE connect → endpoint
+→ initialize → tools/call → read response → close. The ~200ms SSE
+overhead is negligible vs the 22-26s Ollama inference time.
+
 Returns the tool result text, or an error string."
   (let ((server (assoc-ref *mcp-servers* server-name)))
     (if (not server)
         (format #f "MCP server not connected: ~a" server-name)
-        (let ((endpoint (assoc-ref server "endpoint"))
-              (sse-port (assoc-ref server "sse-port"))
+        (let ((url (assoc-ref server "url"))
               (headers (assoc-ref server "headers")))
-          (catch #t
-            (lambda ()
-              ;; Telemetry
-              (inc-counter! "guile_sage.mcp.tool_call"
-                            `(("server" . ,server-name)
-                              ("tool_name" . ,tool-name))
-                            1)
-
-              ;; Build and send tools/call request
-              (receive (id body)
-                  (mcp-make-request "tools/call"
-                                    `(("name" . ,tool-name)
-                                      ("arguments" . ,(or args
-                                                          json-empty-object))))
-                (let ((result (mcp-post endpoint body headers #:timeout 10)))
-                  (if (and (pair? result) (= 202 (car result)))
-                      ;; Wait for response (I12: timeout)
-                      (let ((envelope (sse-wait-for-response sse-port id
-                                                             #:timeout-seconds 60)))
-                        (if envelope
-                            (mcp-extract-tool-result envelope)
-                            "MCP tool call timed out"))
-                      (format #f "MCP POST failed with status ~a"
-                              (if (pair? result) (car result) "unknown"))))))
-            (lambda (key . rest)
-              (log-warn "mcp"
-                        (format #f "MCP tool call error: ~a ~a" key rest))
-              (format #f "MCP tool error: ~a ~a" key rest)))))))
+          ;; Telemetry
+          (inc-counter! "guile_sage.mcp.tool_call"
+                        `(("server" . ,server-name)
+                          ("tool_name" . ,tool-name))
+                        1)
+          (catch 'mcp-error
+            (lambda () (mcp-call-tool-inner url headers tool-name args))
+            (lambda (key msg)
+              (log-warn "mcp" (format #f "MCP tool call: ~a" msg))
+              (format #f "MCP tool error: ~a" msg)))))))
 
 (define (mcp-extract-tool-result envelope)
   "Extract tool result text from a JSON-RPC response envelope.
