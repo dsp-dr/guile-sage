@@ -39,6 +39,7 @@
 (define *debug* #f)
 (define *streaming* (not (equal? "0" (or (getenv "SAGE_STREAMING") ""))))
 (define *available-tiers* '())
+(define *history-file* #f)  ;; project-scoped readline history path
 
 ;;; Dynamic Prompt
 
@@ -144,6 +145,11 @@
 
 (define (cmd-exit args)
   (display "Goodbye!\n")
+  ;; Save readline history to project-scoped file
+  (when *history-file*
+    (catch #t
+      (lambda () (write-history *history-file*))
+      (lambda args #f)))
   (telemetry-shutdown!)
   (set! *running* #f)
   #t)
@@ -1015,10 +1021,18 @@
     (format #t "~a~a~%" (make-prompt) initial-prompt)
     (repl-eval initial-prompt))
 
-  ;; Activate readline if available
+  ;; Activate readline and load project-scoped history
   (catch #t
     (lambda ()
-      (activate-readline))
+      (activate-readline)
+      ;; Load persistent history from the project-scoped XDG path.
+      ;; Each project gets its own history file so prompts from one
+      ;; repo don't pollute another's up-arrow recall.
+      (let ((history-file (string-append (sage-project-dir) "/history")))
+        (when (file-exists? history-file)
+          (read-history history-file))
+        ;; Stash the path for write-history at shutdown
+        (set! *history-file* history-file)))
     (lambda args #f))
 
   ;; Main loop. Each iteration records two active.time intervals:
@@ -1048,5 +1062,9 @@
         (if (eq? key 'quit)
             (set! *running* #f)
             (format #t "Error: ~a~%" key)))))
-  ;; Final flush for non-/exit termination paths (EOF, quit signal, etc.)
+  ;; Final flush + history save for non-/exit termination paths
+  (when *history-file*
+    (catch #t
+      (lambda () (write-history *history-file*))
+      (lambda args #f)))
   (telemetry-shutdown!))
