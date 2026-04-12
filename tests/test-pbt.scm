@@ -16,6 +16,8 @@
              (sage model-tier)
              (sage tools)
              (sage util)
+             (sage ollama)
+             (sage telemetry)
              (srfi srfi-1)
              (ice-9 format))
 
@@ -555,6 +557,236 @@
            (score-low (compaction-score 0.3 intent compression))
            (score-high (compaction-score 0.9 intent compression)))
       (>= score-high score-low))))
+
+;;; ============================================================
+;;; Property: util.scm — as-list shape coercion (bd: guile-p94)
+;;; ============================================================
+
+(format #t "~%=== PBT: as-list shape coercion ===~%")
+
+(property "as-list of a list returns the same list"
+  (lambda ()
+    (map (lambda (_) (rng-int 0 1000))
+         (iota (rng-int 0 20))))
+  (lambda (lst)
+    (equal? (as-list lst) lst)))
+
+(property "as-list of a vector returns the same elements"
+  (lambda ()
+    (list->vector
+     (map (lambda (_) (rng-int 0 1000))
+          (iota (rng-int 0 20)))))
+  (lambda (vec)
+    (let ((result (as-list vec)))
+      (and (list? result)
+           (= (length result) (vector-length vec))
+           (every equal? result (vector->list vec))))))
+
+(property "as-list of #f returns empty list"
+  (lambda () #f)
+  (lambda (_)
+    (equal? (as-list #f) '())))
+
+(property "as-list of '() returns empty list"
+  (lambda () '())
+  (lambda (_)
+    (equal? (as-list '()) '())))
+
+(property "as-list length matches input length for vector | list | #f"
+  (lambda ()
+    (let ((kind (rng-element '(list vector false empty)))
+          (n (rng-int 0 15)))
+      (case kind
+        ((list)   (iota n))
+        ((vector) (list->vector (iota n)))
+        ((false)  #f)
+        ((empty)  '()))))
+  (lambda (input)
+    (let ((expected (cond
+                     ((not input) 0)
+                     ((null? input) 0)
+                     ((list? input) (length input))
+                     ((vector? input) (vector-length input))
+                     (else -1))))
+      (= (length (as-list input)) expected))))
+
+;;; ============================================================
+;;; Property: util.scm — json-write-string {} sentinel (bd: guile-bw2)
+;;; ============================================================
+
+(format #t "~%=== PBT: json-empty-object sentinel ===~%")
+
+(property "json-empty-object always serialises to literal {}"
+  (lambda () json-empty-object)
+  (lambda (sentinel)
+    (equal? (json-write-string sentinel) "{}")))
+
+(property "json-empty-object survives nesting inside an alist"
+  (lambda ()
+    (let ((key (rng-alpha-string (rng-int 1 8))))
+      (cons key json-empty-object)))
+  (lambda (pair)
+    (let ((s (json-write-string (list pair))))
+      (and (string-contains s "{}")
+           (string-contains s (car pair))))))
+
+(property "json-write-string '() unchanged (still null, backward compat)"
+  (lambda () '())
+  (lambda (_)
+    (equal? (json-write-string '()) "null")))
+
+(property "json-write-string roundtrip for non-empty alists"
+  (lambda ()
+    (let ((k (rng-alpha-string (rng-int 1 8)))
+          (v (rng-alpha-string (rng-int 1 16))))
+      (list (cons k v))))
+  (lambda (alist)
+    (let* ((s (json-write-string alist))
+           (parsed (json-read-string s)))
+      (equal? parsed alist))))
+
+;;; ============================================================
+;;; Property: ollama.scm — model fallback invariants (bd: guile-spo)
+;;; ============================================================
+
+(format #t "~%=== PBT: model fallback invariants ===~%")
+
+(define (rng-fake-model name family format size)
+  `(("name" . ,name)
+    ("size" . ,size)
+    ("details" . (("family" . ,family) ("format" . ,format)))))
+
+(define (rng-chat-model)
+  (rng-fake-model
+   (rng-alpha-string (rng-int 4 12))
+   (rng-element '("llama" "qwen2" "mistral" "deepseek2"))
+   "gguf"
+   (rng-int 100000000 20000000000)))
+
+(define (rng-embed-model)
+  (rng-fake-model
+   (rng-alpha-string (rng-int 4 12))
+   "nomic-bert"
+   "gguf"
+   (rng-int 100000000 1000000000)))
+
+(define (rng-image-model)
+  (rng-fake-model
+   (rng-alpha-string (rng-int 4 12))
+   ""
+   "safetensors"
+   (rng-int 1000000000 15000000000)))
+
+(property "select-fallback-model never returns an embedding model"
+  (lambda ()
+    (append
+     (map (lambda (_) (rng-chat-model)) (iota (rng-int 1 5)))
+     (map (lambda (_) (rng-embed-model)) (iota (rng-int 0 3)))))
+  (lambda (models)
+    (let ((picked (select-fallback-model "definitely-not-installed" models)))
+      (and picked
+           (let ((picked-model (find (lambda (m)
+                                       (equal? (assoc-ref m "name") picked))
+                                     models)))
+             (chat-capable-model? picked-model))))))
+
+(property "select-fallback-model never returns an image model"
+  (lambda ()
+    (append
+     (map (lambda (_) (rng-chat-model)) (iota (rng-int 1 5)))
+     (map (lambda (_) (rng-image-model)) (iota (rng-int 0 3)))))
+  (lambda (models)
+    (let ((picked (select-fallback-model "definitely-not-installed" models)))
+      (and picked
+           (let ((picked-model (find (lambda (m)
+                                       (equal? (assoc-ref m "name") picked))
+                                     models)))
+             (chat-capable-model? picked-model))))))
+
+(property "select-fallback-model returns preferred when present"
+  (lambda ()
+    (let ((chat-models (map (lambda (_) (rng-chat-model))
+                            (iota (rng-int 1 5)))))
+      (cons chat-models (assoc-ref (rng-element chat-models) "name"))))
+  (lambda (input)
+    (let* ((models (car input))
+           (preferred (cdr input)))
+      (equal? (select-fallback-model preferred models) preferred))))
+
+(property "select-fallback-model picks the smallest chat-capable when preferred missing"
+  (lambda ()
+    (map (lambda (_) (rng-chat-model)) (iota (rng-int 2 6))))
+  (lambda (models)
+    (let* ((picked (select-fallback-model "missing-model" models))
+           (sorted (sort models (lambda (a b)
+                                  (< (or (assoc-ref a "size") +inf.0)
+                                     (or (assoc-ref b "size") +inf.0))))))
+      (equal? picked (assoc-ref (car sorted) "name")))))
+
+(property "model-available? is consistent with assoc lookup"
+  (lambda ()
+    (let ((models (map (lambda (_) (rng-chat-model))
+                       (iota (rng-int 1 5)))))
+      (cons models
+            (if (rng-bool)
+                (assoc-ref (rng-element models) "name")
+                "definitely-missing-model"))))
+  (lambda (input)
+    (let* ((models (car input))
+           (name (cdr input))
+           (expected (and (find (lambda (m)
+                                  (equal? (assoc-ref m "name") name))
+                                models) #t)))
+      (eq? (model-available? name models) expected))))
+
+;;; ============================================================
+;;; Property: telemetry.scm — counter / label invariants
+;;; ============================================================
+
+(format #t "~%=== PBT: telemetry invariants ===~%")
+
+(property "normalize-labels output is sorted by key"
+  (lambda ()
+    (map (lambda (_)
+           (cons (rng-alpha-string (rng-int 1 8))
+                 (rng-alpha-string (rng-int 1 16))))
+         (iota (rng-int 0 8))))
+  (lambda (labels)
+    (let* ((normalized (normalize-labels labels))
+           (keys (map car normalized)))
+      (or (< (length keys) 2)
+          (equal? keys (sort keys string<?))))))
+
+(property "normalize-labels is idempotent"
+  (lambda ()
+    (map (lambda (_)
+           (cons (rng-alpha-string (rng-int 1 8))
+                 (rng-alpha-string (rng-int 1 16))))
+         (iota (rng-int 0 8))))
+  (lambda (labels)
+    (equal? (normalize-labels (normalize-labels labels))
+            (normalize-labels labels))))
+
+(property "counter-key is stable across input order (unique keys)"
+  (lambda ()
+    ;; OTLP label sets cannot have duplicate keys — that would be a
+    ;; malformed metric. Generate unique keys via a per-index suffix
+    ;; so the property reflects valid input.
+    (let* ((n (rng-int 1 6))
+           (labels (map (lambda (i)
+                          (cons (string-append
+                                 (rng-alpha-string (rng-int 1 4))
+                                 (number->string i))
+                                (rng-alpha-string (rng-int 1 8))))
+                        (iota n))))
+      (cons (rng-alpha-string (rng-int 4 16)) labels)))
+  (lambda (input)
+    (let* ((name (car input))
+           (labels (cdr input))
+           ;; Reverse the labels to ensure non-trivial reorder
+           (reversed (reverse labels)))
+      (equal? (counter-key name labels)
+              (counter-key name reversed)))))
 
 ;;; ============================================================
 ;;; Summary
