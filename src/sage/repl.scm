@@ -649,8 +649,8 @@
                    (when *debug*
                      (format #t "[DEBUG] Tool: ~a~%" (or tool-name "?"))
                      (format #t "[DEBUG] Args: ~a~%" tool-args))
-                   (format #t "~%[Tool: ~a]~%" (or tool-name "?"))
-                   (format #t "~a~%" result)
+                   (format #t "~%  \x1b[2m[Tool: ~a]\x1b[0m~%" (or tool-name "?"))
+                   (format #t "  ~a~%~%" result)
                    ;; Guard + add to session
                    (let ((guarded (guard-tool-result result)))
                      (session-add-message "user"
@@ -879,12 +879,16 @@
                     (begin
                       (session-add-message "assistant" content
                                            #:tokens completion-tokens)
-                      (format #t "~a~%" content))
+                      (newline)
+                      (format #t "~a~%~%" content))
                     ;; Tool chain — loop until model stops requesting tools
                     (begin
-                      (format #t "~a~%" content)
+                      (when (not (string-null? content))
+                        (newline)
+                        (format #t "~a~%" content))
                       (let ((final-text (execute-tool-chain model message content completion-tokens)))
-                        (format #t "~%~a~%" final-text))))))))
+                        (newline)
+                        (format #t "~a~%~%" final-text))))))))
 
       (lambda (key . args)
         (cond
