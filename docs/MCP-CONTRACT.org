@@ -1,0 +1,1117 @@
+#+TITLE: MCP Contract: Protocol, Transport, Invariants, and Guile Implementation Notes
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-11
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This document is a contract specification for the Model Context Protocol
+(MCP) as we intend to consume it from =guile-sage=. It captures:
+
+- System and container architecture (C4 L1/L2)
+- Byte-level traces of a live MCP server (=skills-hub= at
+  =http://192.168.86.100:8400/sse=) for initialize, tools/list, tools/call
+  (success + error), plus malformed / unknown method handling
+- Sequence diagrams for the SSE lifecycle, initialize, list/call paths
+- Data flow and control flow across =sage REPL → ollama → tools → MCP client
+  → SSE transport → server → tool implementation=
+- Numbered invariants to be enforced in the client and exercised by tests
+- Concrete mapping to existing =src/sage/*= modules, including the JSON
+  array-as-list quirk that already bit =ollama-parse-tool-call=
+
+The authoritative spec is MCP =2024-11-05=:
+
+- Transports: https://modelcontextprotocol.io/specification/2024-11-05/basic/transports
+- Lifecycle: https://modelcontextprotocol.io/specification/2024-11-05/basic/lifecycle
+- Tools:     https://modelcontextprotocol.io/specification/2024-11-05/server/tools
+
+Divergences observed on the live =skills-hub= server are called out in
+the "Observed divergences" section at the end of each relevant chapter.
+
+* 1. C4 Level 1 — System Context
+
+#+BEGIN_SRC plantuml :file images/mcp-c4-l1.png
+@startuml mcp-c4-l1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title guile-sage + MCP — System Context (C4 L1)
+
+Person(user, "Developer", "Interacts with sage REPL at a terminal.")
+
+System_Boundary(sage_boundary, "guile-sage") {
+  System(sage, "sage REPL", "Guile Scheme CLI. Orchestrates prompts, tools, sessions, context window.")
+}
+
+System_Ext(ollama, "Ollama", "Local LLM runtime on nexus. Provides chat completions + native tool_calls.")
+
+System_Ext(skills_hub, "skills-hub MCP server", "Python/uvicorn MCP server exposing ~35 skills as tools over HTTP+SSE on port 8400.")
+
+System_Ext(other_mcp, "Other MCP servers", "Future: additional MCP servers (stdio or SSE) discovered via config.")
+
+Rel(user, sage, "Prompts, slash commands", "stdin/tty")
+Rel(sage, ollama, "POST /api/chat with tools schema", "HTTP+NDJSON (native)")
+Rel(sage, skills_hub, "initialize / tools/list / tools/call", "HTTP POST + SSE, JSON-RPC 2.0")
+Rel(sage, other_mcp, "Same JSON-RPC envelope", "stdio or HTTP+SSE")
+
+Rel_Back(skills_hub, sage, "SSE message events (responses, notifications)", "text/event-stream")
+
+SHOW_LEGEND()
+@enduml
+#+END_SRC
+
+Key relationships:
+
+- =sage= is the *MCP host* and *MCP client* in the same process.
+- =ollama= is orthogonal to MCP. Ollama returns a =tool_calls= array; sage
+  routes the tool to either its own local tool registry (=src/sage/tools.scm=)
+  or to an MCP server.
+- The MCP server *pushes* responses over SSE; the HTTP POST merely returns
+  =202 Accepted=. Request/response correlation is by JSON-RPC =id= across
+  two different HTTP connections.
+
+* 2. C4 Level 2 — Container
+
+#+BEGIN_SRC plantuml :file images/mcp-c4-l2.png
+@startuml mcp-c4-l2
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title guile-sage + MCP — Container (C4 L2)
+
+Person(user, "Developer")
+
+System_Boundary(sage, "guile-sage process") {
+  Container(repl,      "REPL",         "Guile", "src/sage/repl.scm")
+  Container(agent,     "Agent core",   "Guile", "src/sage/agent.scm")
+  Container(ollama_mod,"Ollama client","Guile", "src/sage/ollama.scm")
+  Container(tools_mod, "Local tool registry", "Guile", "src/sage/tools.scm")
+  Container(util,      "HTTP/JSON utilities", "Guile", "src/sage/util.scm")
+  Container(session,   "Session store", "Guile / JSON", "src/sage/session.scm")
+  Container(context,   "Context window manager", "Guile", "src/sage/context.scm")
+
+  Container_Boundary(mcp_client_boundary, "NEW: MCP client (proposed)") {
+    Container(mcp_client,    "mcp-client",      "Guile", "src/sage/mcp/client.scm — top-level API (mcp-connect, mcp-call)")
+    Container(mcp_jsonrpc,   "jsonrpc",         "Guile", "src/sage/mcp/jsonrpc.scm — envelope build/parse, id pool")
+    Container(mcp_transport, "sse-transport",   "Guile", "src/sage/mcp/sse.scm — long-lived SSE reader, POST sender, reconnect")
+    Container(mcp_registry,  "mcp-registry",    "Guile", "src/sage/mcp/registry.scm — maps server-qualified tool names to routes")
+  }
+}
+
+System_Ext(ollama, "Ollama", "nexus:11434")
+
+System_Boundary(skills_hub, "skills-hub (remote, nexus:8400)") {
+  Container(sse_endpoint, "GET /sse",        "uvicorn", "Opens SSE stream, emits `endpoint` event")
+  Container(msg_endpoint, "POST /messages/?session_id=…", "uvicorn", "Receives JSON-RPC, returns 202, dispatches response via SSE")
+  Container(skill_impl,   "Skill executor",  "Python", "Loads SKILL.md from aygp-dr/skills-hub, returns content blocks")
+}
+
+Rel(user, repl, "prompts")
+Rel(repl, agent, "run-turn")
+Rel(agent, ollama_mod, "ollama-chat")
+Rel(ollama_mod, ollama, "POST /api/chat", "HTTP")
+Rel(agent, tools_mod, "execute-tool (local)")
+Rel(agent, mcp_client, "mcp-call (remote)")
+Rel(mcp_client, mcp_jsonrpc, "build/parse envelope")
+Rel(mcp_client, mcp_transport, "send-request / await-response")
+Rel(mcp_transport, util, "http-post, http-get streaming")
+Rel(mcp_transport, sse_endpoint, "GET /sse (long-lived)", "text/event-stream")
+Rel(mcp_transport, msg_endpoint, "POST JSON-RPC", "application/json")
+Rel_Back(sse_endpoint, mcp_transport, "event: endpoint, event: message, : ping", "SSE")
+Rel(msg_endpoint, skill_impl, "dispatch")
+Rel(mcp_client, mcp_registry, "resolve tool-name → server")
+Rel(tools_mod, mcp_registry, "tools-to-schema merges MCP + local")
+
+SHOW_LEGEND()
+@enduml
+#+END_SRC
+
+Container responsibilities:
+
+| Container       | Owns                                                            |
+|-----------------+-----------------------------------------------------------------|
+| =mcp-client=    | Public API, connection lifecycle, handshake state machine       |
+| =jsonrpc=       | Envelope construction, id allocation, correlation map           |
+| =sse-transport= | Long-lived SSE reader thread, POST sender, reconnect, ping skip |
+| =mcp-registry=  | Multi-server fan-out, tool-name namespacing                     |
+
+None of these modules exist yet. They are what this document is the contract for.
+
+* 3. Sequence diagrams
+
+** 3.1 SSE connection lifecycle
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant C as sage<br/>(mcp-client)
+    participant T as sse-transport
+    participant S as skills-hub<br/>(uvicorn)
+
+    C->>T: (mcp-connect "http://nexus:8400/sse" token)
+    T->>S: GET /sse<br/>Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l<br/>Accept: text/event-stream
+    S-->>T: HTTP 200 text/event-stream (keep-alive)
+    S-->>T: event: endpoint\ndata: /messages/?session_id=<hex>\n\n
+    T->>T: derive POST endpoint = base + data
+    T-->>C: connection-ready(session_id, post-url)
+
+    loop keep-alive
+        S-->>T: : ping - 2026-04-11 23:34:13.713903+00:00\n\n
+        Note over T: comment line, ignored
+    end
+
+    Note over C,S: ...normal RPC traffic...
+
+    alt orderly close
+        C->>T: (mcp-disconnect)
+        T->>S: close TCP
+    else network drop
+        S--xT: TCP RST / read 0
+        T->>T: exponential backoff (1s,2s,4s,max 30s)
+        T->>S: GET /sse (reconnect)
+        Note over T,S: NEW session_id — all in-flight<br/>requests must be failed and retried
+    end
+#+END_SRC
+
+** 3.2 Initialize handshake
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant C as sage mcp-client
+    participant T as sse-transport
+    participant S as skills-hub
+
+    Note over C,T: SSE already open, session_id known
+    C->>T: send-request(id=1, method="initialize", params={protocolVersion,capabilities,clientInfo})
+    T->>S: POST /messages/?session_id=<hex>\nContent-Type: application/json\n{"jsonrpc":"2.0","id":1,"method":"initialize",...}
+    S-->>T: HTTP 202 Accepted (8 bytes: "Accepted")
+    Note over T: response NOT in HTTP body<br/>client must wait on SSE
+    S-->>T: event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{...}}\n\n
+    T->>C: resolve pending[id=1] with result
+
+    C->>C: validate protocolVersion == "2024-11-05"
+    C->>C: capture server capabilities (tools, resources, prompts, …)
+
+    C->>T: send-notification(method="notifications/initialized")
+    T->>S: POST /messages/?session_id=<hex>\n{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+    S-->>T: HTTP 202 Accepted
+    Note over C,S: no response expected for notifications
+#+END_SRC
+
+** 3.3 tools/list
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant C as sage mcp-client
+    participant T as sse-transport
+    participant S as skills-hub
+
+    C->>T: send-request(id=2, method="tools/list", params={})
+    T->>S: POST /messages/?session_id=<hex>\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+    S-->>T: HTTP 202 Accepted
+    S-->>T: event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"tools":[...]}}\n\n
+    T->>C: resolve pending[id=2] with result.tools
+    C->>C: for each tool: index by "name", cache "inputSchema"
+    Note over C: no nextCursor observed on skills-hub<br/>pagination code path not yet testable
+#+END_SRC
+
+** 3.4 tools/call (success)
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant C as sage mcp-client
+    participant T as sse-transport
+    participant S as skills-hub
+    participant X as skill executor
+
+    C->>C: validate args against cached inputSchema for "workflow__bd"
+    C->>T: send-request(id=3, method="tools/call", params={name,arguments})
+    T->>S: POST /messages/?session_id=<hex>\n{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"workflow__bd","arguments":{"query":"help"}}}
+    S-->>T: HTTP 202 Accepted
+    S->>X: dispatch "workflow__bd" with args
+    X-->>S: text content (SKILL.md body)
+    S-->>T: event: message\ndata: {"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"..."}],"isError":false}}\n\n
+    T->>C: resolve pending[id=3]
+    C->>C: flatten content[].text → return to caller
+#+END_SRC
+
+** 3.5 tools/call (error)
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant C as sage mcp-client
+    participant T as sse-transport
+    participant S as skills-hub
+
+    C->>T: send-request(id=4, method="tools/call", params={name:"nonexistent__tool",arguments:{}})
+    T->>S: POST /messages/?session_id=<hex>\n{...}
+    S-->>T: HTTP 202 Accepted
+    S-->>T: event: message\ndata: {"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"Unknown tool: nonexistent__tool"}],"isError":true}}\n\n
+    T->>C: resolve pending[id=4]
+    C->>C: detect isError==true → raise mcp-tool-error
+    Note over C,S: skills-hub does NOT use JSON-RPC "error" envelope<br/>for unknown tools — it uses result.isError.<br/>Spec allows either; we must handle both.
+#+END_SRC
+
+** 3.6 Malformed / unknown method
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant C as sage mcp-client
+    participant S as skills-hub
+
+    rect rgba(255,220,220,0.4)
+    Note over C,S: Case A: unparseable JSON in POST body
+    C->>S: POST /messages/?session_id=<hex>\n{not json
+    S-->>C: HTTP 400 Bad Request\nContent-Length: 23\n"Could not parse message"
+    Note over C: synchronous HTTP error<br/>no JSON-RPC envelope, no id
+    end
+
+    rect rgba(255,235,200,0.4)
+    Note over C,S: Case B: valid JSON but missing "method"
+    C->>S: POST /messages/?session_id=<hex>\n{"jsonrpc":"2.0","id":5}
+    S-->>C: HTTP 400 Bad Request\n"Could not parse message"
+    end
+
+    rect rgba(220,240,220,0.4)
+    Note over C,S: Case C: unknown method name ("does/not/exist")
+    C->>S: POST /messages/?session_id=<hex>\n{"jsonrpc":"2.0","id":6,"method":"does/not/exist","params":{}}
+    S-->>C: HTTP 202 Accepted
+    Note over C,S: NO response ever arrives on SSE<br/>pending[id=6] will time out
+    end
+
+    rect rgba(220,220,255,0.4)
+    Note over C,S: Case D: wrong session_id in URL
+    C->>S: POST /messages/?session_id=deadbeef…\n{...}
+    S-->>C: HTTP 404 Not Found\n"Could not find session"
+    end
+#+END_SRC
+
+* 4. Data flow — user prompt to tool result
+
+#+BEGIN_SRC mermaid
+flowchart TD
+    U[User types prompt at sage REPL] --> R[repl.scm handle-input]
+    R --> A[agent.scm run-turn]
+    A --> OS[ollama.scm ollama-chat<br/>POST /api/chat with tools schema]
+    OS -->|HTTP NDJSON| OL[(Ollama nexus:11434)]
+    OL -->|streaming chunks| OS
+    OS --> OPT[ollama-parse-tool-call<br/>decode message.tool_calls]
+    OPT -->|no tool call| FIN[display assistant text] --> U
+    OPT -->|tool_call alist<br/>name, arguments| DISP{tool name in<br/>mcp-registry?}
+
+    DISP -->|no, local| LT[tools.scm execute-tool]
+    LT --> LTR[tool result string] --> FEED
+
+    DISP -->|yes, remote| MCP[mcp/client.scm mcp-call<br/>name, arguments]
+    MCP --> VAL[validate arguments<br/>against cached inputSchema]
+    VAL --> JR[mcp/jsonrpc.scm build-request<br/>assigns id, puts in pending map]
+    JR --> TX[mcp/sse.scm send-post<br/>POST /messages/?session_id=<hex>]
+    TX -->|HTTP 202 Accepted| TX
+    TX -->|waits on SSE| RX[mcp/sse.scm reader loop<br/>read event: message lines]
+    RX --> DEC[mcp/jsonrpc.scm parse-envelope<br/>match by id, pop pending]
+    DEC --> RES[tool result:<br/>content blocks + isError]
+    RES --> FLAT[flatten content[].text<br/>or raise mcp-tool-error]
+    FLAT --> FEED[feed result back to ollama.scm<br/>as role=tool message]
+    FEED --> OS
+    OS --> R
+    R --> U
+
+    subgraph skills-hub [skills-hub nexus:8400]
+        SSE[GET /sse<br/>long-lived stream]
+        POST[POST /messages/?session_id=<hex>]
+        SK[skill executor<br/>loads SKILL.md]
+        POST --> SK
+        SK --> SSE
+    end
+
+    TX -.POST.-> POST
+    SSE -.SSE events.-> RX
+#+END_SRC
+
+The critical asymmetry: the POST and the GET-SSE are two different HTTP
+connections. Request/response correlation is done entirely through the
+JSON-RPC =id= field, not through HTTP.
+
+* 5. Control flow — when sage blocks, polls, streams, fails
+
+** Connection establishment
+
+- *Blocking*: =mcp-connect= blocks the caller until the SSE reader thread
+  has seen the =endpoint= event and parsed out =session_id=. Hard timeout
+  suggested: 5 seconds.
+- *Streaming*: the SSE reader thread is a long-lived Guile thread reading
+  line-by-line from the streaming HTTP body (Guile =(web client)= with
+  =#:streaming? #t=, or curl fallback; see =util.scm= lines 346–379).
+- *Never polls*: SSE is push. Sage does not poll the server.
+
+** Request/response
+
+- *Blocking with timeout*: =mcp-call= returns a future/promise. Public API
+  should block the caller on =(force future)= with a configurable timeout
+  (default 60s, matching sage's existing http timeout patterns).
+- Internally, =mcp-call= does:
+  1. Build envelope, allocate monotonic id, stash =pending[id] = <promise>=
+  2. POST the envelope body, assert HTTP 202
+  3. Wait on the promise (a condition variable or =(ice-9 threads)= mutex)
+  4. Reader thread resolves the promise when it sees the matching =id=
+
+** Keep-alive
+
+- skills-hub emits =: ping - <timestamp>= as an SSE *comment* (colon-prefix
+  lines) roughly every 15s. Comments MUST be silently dropped by the
+  reader — they are not JSON-RPC frames.
+
+** Disconnect / reconnect
+
+- On TCP read returning EOF or an exception in the reader:
+  - Fail all outstanding =pending= promises with =mcp-disconnected=.
+  - Enter reconnect loop with exponential backoff: 1s, 2s, 4s, 8s, 16s,
+    30s (cap). Give up after N attempts (config).
+  - On successful reconnect, the server assigns a *new* =session_id=.
+    Re-run the =initialize= handshake. *Do not* attempt to resume the old
+    session — the server cannot replay in-flight responses.
+
+** Malformed frame handling
+
+- HTTP POST 400: surface as =mcp-protocol-error= synchronously to the
+  caller. Do not touch the pending map (the id was never accepted).
+- SSE =data:= line that is not valid JSON: log at WARN, drop the line,
+  continue reading. Do NOT tear down the connection.
+- SSE =data:= line that is JSON but does not parse as a JSON-RPC envelope:
+  log at WARN, drop.
+- JSON-RPC response with =id= not in pending map: log at WARN, drop.
+  (Likely a late response from a request the caller already timed out.)
+- JSON-RPC response with =error= field: resolve the pending promise with
+  an =mcp-rpc-error= value carrying =code=, =message=, =data=.
+
+** Unknown method
+
+- Observed: skills-hub returns HTTP 202 for unknown methods but *never*
+  emits an SSE response for them. The client MUST therefore have
+  per-request timeouts; it cannot rely on the server signaling
+  =-32601 Method not found=. See invariant I12.
+
+* 6. Contracts and invariants
+
+The client implementation and its tests MUST enforce each of these. Each
+invariant has a short code (I##) so tests can reference it.
+
+** Transport layer
+
+- *I01* — The client MUST open exactly one SSE connection per configured
+  MCP server and keep it open for the lifetime of the session.
+- *I02* — The client MUST NOT issue any POST to =/messages/…= before
+  receiving the =endpoint= event over SSE.
+- *I03* — The POST URL MUST be constructed as =origin + data-line-from-
+  endpoint-event=, preserving the =session_id= query parameter verbatim
+  (no URL-encoding, no normalization).
+- *I04* — SSE lines beginning with a literal colon (=: …=) are comments
+  and MUST be ignored.
+- *I05* — An SSE =event: endpoint= MUST be handled exactly once, during
+  the connect phase. Any subsequent =endpoint= event MUST be treated as a
+  new session and trigger the reconnect path.
+- *I06* — Every HTTP POST to =/messages/…= MUST carry =Content-Type:
+  application/json= and the configured =Authorization: Bearer <token>=
+  header.
+- *I07* — An HTTP POST MUST be treated as accepted iff the status code is
+  exactly =202=. Any other status (400, 401, 404, 5xx) MUST be surfaced as
+  =mcp-transport-error= to the caller.
+
+** JSON-RPC envelope
+
+- *I08* — Every request envelope MUST contain =jsonrpc: "2.0"=, a
+  =method= string, and an =id= (number or string, client-assigned,
+  monotonic within the session). Notifications MUST omit =id=.
+- *I09* — The server's response envelope MUST echo the exact =id= sent in
+  the request. The client MUST NOT rely on any other correlation mechanism.
+- *I10* — Exactly one of =result= or =error= MUST be present in any
+  response envelope. Both-present or both-absent MUST be treated as a
+  protocol violation and the envelope dropped with a WARN log.
+- *I11* — Notifications (no =id=) MUST NOT expect a response. The client
+  MUST NOT add them to the pending map.
+- *I12* — Every outstanding request in the pending map MUST have a
+  timeout. On timeout, the pending entry is dropped and the caller is
+  signaled with =mcp-timeout-error=. The server is not notified (no
+  cancellation notification is sent in the 2024-11-05 spec for this case;
+  see spec §server/utilities/cancellation for later versions).
+
+** Lifecycle
+
+- *I13* — The *first* request the client sends MUST be =initialize=. No
+  =tools/*=, =resources/*=, or =prompts/*= request may be sent before the
+  initialize response is received (spec: "The client SHOULD NOT send
+  requests other than pings before the server has responded to the
+  initialize request").
+- *I14* — The =initialize= request MUST carry =protocolVersion:
+  "2024-11-05"= (or whichever version sage targets at build time),
+  =capabilities= (even if an empty object), and =clientInfo.name= +
+  =clientInfo.version=.
+- *I15* — On receiving the initialize response, the client MUST verify
+  =result.protocolVersion= matches (or is in its supported set). On
+  mismatch the client MUST disconnect and surface
+  =mcp-version-mismatch=.
+- *I16* — After a successful initialize response, the client MUST send
+  exactly one =notifications/initialized= notification before issuing any
+  further requests.
+- *I17* — Server capabilities declared in the initialize response are the
+  ground truth for what sage may use. sage MUST NOT call =tools/*= unless
+  =result.capabilities.tools= is present; MUST NOT call =resources/*=
+  unless =result.capabilities.resources= is present; etc.
+
+** Tools
+
+- *I18* — After a successful =tools/list=, every returned tool MUST be
+  indexed by its =name= and its =inputSchema= cached.
+- *I19* — Before sending =tools/call=, the client MUST validate the
+  =arguments= object against the cached =inputSchema= for that tool. A
+  validation failure MUST raise =mcp-argument-error= locally without
+  round-tripping the server.
+- *I20* — A =tools/call= result envelope has TWO distinguishable failure
+  modes that MUST both be handled:
+  1. JSON-RPC =error= field (unknown tool, invalid params, internal
+     server error) — code in the =-32700..-32000= range.
+  2. =result.isError: true= with =content= still present — tool executed
+     but reported business-logic failure.
+  On live skills-hub, unknown tools take path (2). Sage MUST handle both.
+- *I21* — A =content= array MUST be treated as heterogeneous. Each block
+  is dispatched by =type=: =text=, =image=, =resource=. Unknown types
+  MUST be preserved and passed through to the caller with a WARN log, not
+  dropped.
+
+** Namespacing and routing
+
+- *I22* — When multiple MCP servers are configured, tool names MUST be
+  namespaced before exposure to the LLM. Proposed scheme: =<server-id>.<tool-name>=
+  (e.g. =skills-hub.workflow__bd=). Collisions between a local sage tool
+  name and an MCP tool name MUST be resolved by preferring local and
+  logging a collision at WARN.
+- *I23* — The =mcp-registry= MUST be the single source of truth for "is
+  this a remote tool, and if so which server". =tools.scm execute-tool=
+  MUST consult it before trying local dispatch.
+
+** Observed divergences from spec (live skills-hub, 2026-04-11)
+
+- *D01* — Unknown tool names return =result.isError: true= with a human
+  string ("Unknown tool: …"), not the JSON-RPC =-32602= error the spec's
+  example shows. Implementation MUST tolerate both.
+- *D02* — Unknown method names return HTTP 202 and then *nothing* over
+  SSE. Per spec this should be =-32601 Method not found=. Timeouts are
+  mandatory.
+- *D03* — Malformed JSON in the POST body returns HTTP 400 with a plain
+  string body "Could not parse message", not a JSON-RPC error envelope.
+  Implementation MUST treat any non-202 as transport-level.
+- *D04* — =capabilities.tools= returned by skills-hub is =
+  {"listChanged": false}=, but sage SHOULD still be robust to
+  =list_changed= notifications if any other server sets =true=.
+
+* 7. Captured byte samples (live skills-hub)
+
+All samples below are real bytes captured on 2026-04-11 against
+=http://192.168.86.100:8400/sse= with
+=Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l=.
+
+** 7.1 SSE connect — endpoint event
+
+#+BEGIN_SRC http
+GET /sse HTTP/1.1
+Host: 192.168.86.100:8400
+Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l
+Accept: text/event-stream
+#+END_SRC
+
+Response stream (verbatim):
+
+#+BEGIN_SRC text
+event: endpoint
+data: /messages/?session_id=9e5d90f2c2454d26b40048640405d97e
+
+: ping - 2026-04-11 23:34:13.713903+00:00
+
+#+END_SRC
+
+Note the blank line terminating each SSE frame. The =: ping= line is an
+SSE comment (leading colon) and MUST be dropped by the reader.
+
+** 7.2 Auth failure (no token)
+
+#+BEGIN_SRC http
+HTTP/1.1 401 Unauthorized
+date: Sat, 11 Apr 2026 23:35:22 GMT
+server: uvicorn
+content-length: 51
+content-type: application/json
+
+{"error":"Missing or invalid Authorization header"}
+#+END_SRC
+
+** 7.3 Auth failure (malformed token)
+
+#+BEGIN_SRC http
+HTTP/1.1 401 Unauthorized
+content-length: 39
+content-type: application/json
+
+{"error":"Invalid bearer token format"}
+#+END_SRC
+
+Note: both 401 bodies are plain JSON, *not* JSON-RPC envelopes.
+
+** 7.4 initialize
+
+*Request POST body:*
+
+#+BEGIN_SRC json
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{"listChanged":true},"sampling":{}},"clientInfo":{"name":"guile-sage-probe","version":"0.1.0"}}}
+#+END_SRC
+
+*HTTP response:*
+
+#+BEGIN_SRC http
+HTTP/1.1 202 Accepted
+date: Sat, 11 Apr 2026 23:34:26 GMT
+server: uvicorn
+content-length: 8
+
+Accepted
+#+END_SRC
+
+*SSE response frame (verbatim):*
+
+#+BEGIN_SRC text
+event: message
+data: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{"experimental":{},"prompts":{"listChanged":false},"resources":{"subscribe":false,"listChanged":false},"tools":{"listChanged":false}},"serverInfo":{"name":"skills-hub","version":"1.6.0"},"instructions":"Skills Hub MCP server. Provides Claude Code skills from the skills-hub repository."}}
+
+#+END_SRC
+
+Pretty-printed result payload:
+
+#+BEGIN_SRC json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocolVersion": "2024-11-05",
+    "capabilities": {
+      "experimental": {},
+      "prompts":   { "listChanged": false },
+      "resources": { "subscribe": false, "listChanged": false },
+      "tools":     { "listChanged": false }
+    },
+    "serverInfo": {
+      "name": "skills-hub",
+      "version": "1.6.0"
+    },
+    "instructions": "Skills Hub MCP server. Provides Claude Code skills from the skills-hub repository."
+  }
+}
+#+END_SRC
+
+Findings:
+
+- skills-hub advertises =prompts=, =resources=, =tools=, and
+  =experimental= — but not =logging= or =sampling= (sampling is
+  client-side anyway).
+- =instructions= is present (spec-optional field), carries a string to
+  pass to the LLM system prompt.
+- All sub-capabilities have =listChanged: false=, so sage does not need
+  to subscribe to =notifications/tools/list_changed= for this server.
+
+** 7.5 notifications/initialized
+
+*Request POST body:*
+
+#+BEGIN_SRC json
+{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+#+END_SRC
+
+*HTTP response:*
+
+#+BEGIN_SRC http
+HTTP/1.1 202 Accepted
+content-length: 8
+
+Accepted
+#+END_SRC
+
+No SSE response is emitted — notifications are fire-and-forget.
+
+** 7.6 tools/list
+
+*Request POST body:*
+
+#+BEGIN_SRC json
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+#+END_SRC
+
+*HTTP response:* =HTTP/1.1 202 Accepted=.
+
+*SSE response frame (first tool + shape, truncated):*
+
+#+BEGIN_SRC json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "tools": [
+      {
+        "name": "factory__architect",
+        "description": "Skill: factory/architect",
+        "inputSchema": {
+          "properties": {
+            "query": { "default": "", "title": "Query", "type": "string" }
+          },
+          "title": "factory__architectArguments",
+          "type": "object"
+        }
+      },
+      {
+        "name": "workflow__bd",
+        "description": "Manage issues via bd (beads). Use for creating, querying, and tracking issues with first-class dependency support. Prefer bd over gh for issue tracking when .beads/ exists in the repo.",
+        "inputSchema": {
+          "properties": {
+            "query": { "default": "", "title": "Query", "type": "string" }
+          },
+          "title": "workflow__bdArguments",
+          "type": "object"
+        }
+      }
+      /* 33 more tools elided: factory__*, tools__*, workflow__*, infra__* */
+    ]
+  }
+}
+#+END_SRC
+
+Full tool inventory observed (35 tools):
+
+#+BEGIN_SRC text
+factory__architect     factory__build        factory__deploy
+factory__design        factory__factory_spec factory__improve
+factory__manifest      factory__plan         factory__review
+factory__security_model factory__token_budget factory__validate
+tools__am              tools__forge          tools__gnu_makefile
+tools__handoff         workflow__aq          workflow__bd
+workflow__bootstrap    workflow__cprr        workflow__decompose
+workflow__generate_claude_md workflow__health_check
+workflow__review_prompt workflow__sb         workflow__setup_memory
+workflow__verify_bootstrap   workflow__wire_backlog
+infra__audit_dns       infra__audit_k3s      infra__audit_network
+infra__audit_observability   infra__audit_resources
+infra__remediate       infra__security_screen
+#+END_SRC
+
+All 35 tools share the same =inputSchema= shape: one optional string
+parameter =query= with =default: ""=. This is a skills-hub convention, not
+an MCP requirement, but it makes schema validation trivial to implement.
+
+The response has *no* =result.nextCursor= field, so pagination is not
+exercised by this server; the implementation should still handle
+=nextCursor= when present.
+
+** 7.7 tools/call — success
+
+*Request POST body:*
+
+#+BEGIN_SRC json
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"workflow__bd","arguments":{"query":"help"}}}
+#+END_SRC
+
+*HTTP response:* =HTTP/1.1 202 Accepted=.
+
+*SSE response frame (pretty-printed, content.text truncated):*
+
+#+BEGIN_SRC json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "# bd (workflow)\nSource: /home/jwalsh/ghq/github.com/aygp-dr/skills-hub/workflow/bd/SKILL.md\n\n---\nname: bd\ndescription: Manage issues via bd (beads)...\n---\n\n# bd — Beads Issue Tracker\n\nWraps the `bd` CLI tool for local-first issue tracking with\ndependency chains...\n"
+      }
+    ],
+    "isError": false
+  }
+}
+#+END_SRC
+
+Observations:
+
+- The result is a loaded SKILL.md document. skills-hub implements
+  "calling" a skill as "return the skill's documentation".
+- =content= is an array even for a single block. The client MUST NOT
+  assume length 1.
+- =isError: false= is explicit. Absence should probably also be treated
+  as success, but skills-hub always sets it.
+
+** 7.8 tools/call — error (unknown tool)
+
+*Request POST body:*
+
+#+BEGIN_SRC json
+{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"nonexistent__tool","arguments":{}}}
+#+END_SRC
+
+*HTTP response:* =HTTP/1.1 202 Accepted=.
+
+*SSE response frame:*
+
+#+BEGIN_SRC json
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "content": [
+      { "type": "text", "text": "Unknown tool: nonexistent__tool" }
+    ],
+    "isError": true
+  }
+}
+#+END_SRC
+
+*Key divergence from spec:* the spec's tools example shows unknown tools
+returning a JSON-RPC =error= envelope with code =-32602=:
+
+#+BEGIN_SRC json
+{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"Unknown tool: invalid_tool_name"}}
+#+END_SRC
+
+skills-hub uses the =result.isError: true= path instead. Both are valid
+per the spec's error-handling section, which distinguishes "protocol
+errors" (JSON-RPC =error=) from "tool execution errors" (=isError=).
+skills-hub treats unknown-tool as tool-execution. This is divergence D01.
+
+** 7.9 Malformed JSON (HTTP-level error)
+
+*Request POST body:* =\={not json\==
+
+*HTTP response:*
+
+#+BEGIN_SRC http
+HTTP/1.1 400 Bad Request
+content-length: 23
+
+Could not parse message
+#+END_SRC
+
+** 7.10 Valid JSON, missing =method=
+
+*Request POST body:*
+
+#+BEGIN_SRC json
+{"jsonrpc":"2.0","id":5}
+#+END_SRC
+
+*HTTP response:*
+
+#+BEGIN_SRC http
+HTTP/1.1 400 Bad Request
+content-length: 23
+
+Could not parse message
+#+END_SRC
+
+The server does a structural validation of the POST body and rejects
+anything that does not look like a valid JSON-RPC request at the HTTP
+layer. No SSE envelope is emitted in this case, so the client's pending
+map is never populated for id=5. This is important: the error is
+*synchronous*.
+
+** 7.11 Unknown method (silent drop)
+
+*Request POST body:*
+
+#+BEGIN_SRC json
+{"jsonrpc":"2.0","id":6,"method":"does/not/exist","params":{}}
+#+END_SRC
+
+*HTTP response:* =HTTP/1.1 202 Accepted=.
+
+*SSE response frame:* none. No envelope is ever emitted. This is
+divergence D02 — the spec implies =-32601 Method not found= should be
+returned. Timeouts are mandatory (invariant I12).
+
+** 7.12 Wrong session_id
+
+*Request POST:*
+
+#+BEGIN_SRC http
+POST /messages/?session_id=deadbeefdeadbeefdeadbeefdeadbeef HTTP/1.1
+Host: 192.168.86.100:8400
+Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l
+Content-Type: application/json
+
+{"jsonrpc":"2.0","id":99,"method":"tools/list","params":{}}
+#+END_SRC
+
+*HTTP response:*
+
+#+BEGIN_SRC http
+HTTP/1.1 404 Not Found
+content-length: 22
+
+Could not find session
+#+END_SRC
+
+This confirms that =session_id= is looked up server-side in a session
+map. If the SSE stream drops, the old =session_id= is eventually reaped
+and all subsequent POSTs against it will 404.
+
+* 8. Notes for the Guile implementation
+
+** Where the pieces go
+
+Target module layout (all new files; do not edit existing ones until the
+client is green on unit tests):
+
+- =src/sage/mcp/jsonrpc.scm= — pure functions: =make-request=,
+  =make-notification=, =parse-envelope=, =envelope-id=, =envelope-result=,
+  =envelope-error=. No I/O.
+- =src/sage/mcp/sse.scm= — transport: =sse-connect=, =sse-reader-thread=,
+  =sse-post=, =sse-disconnect=. Owns the session_id and the reader thread.
+- =src/sage/mcp/client.scm= — state machine: =mcp-connect=,
+  =mcp-initialize=, =mcp-list-tools=, =mcp-call-tool=, =mcp-disconnect=.
+  Holds the pending map. Exports the public API.
+- =src/sage/mcp/registry.scm= — multi-server routing, namespacing,
+  integration with =tools.scm execute-tool=.
+
+** Reusing existing modules
+
+*** HTTP — =src/sage/util.scm=
+
+=util.scm= already has what we need for the POST side:
+
+- =http-post url body #:headers= (line 421) — good for the one-shot POST
+  of JSON-RPC requests. Returns =(code . body)= so we just assert
+  =(= code 202)=.
+- =http-post-with-timeout= (line 455) — same with explicit timeout. Use
+  this; MCP POSTs should have a 10s cap.
+- =http-post-streaming-native= (line 346) — native Guile =(web client)=
+  streaming via =#:streaming? #t=. This is almost exactly the SSE reader
+  we need, except it assumes *NDJSON* (one JSON value per line). SSE
+  framing is different: event: / data: / blank-line separated, with
+  comment lines (=: …=). We'll need a new function, probably
+  =http-get-streaming-sse= in =util.scm= or a dedicated parser in
+  =sse.scm=.
+- =http-post-streaming-curl= (line 489) — the curl fallback path. For
+  HTTPS MCP servers (which skills-hub is not, but others will be) we'll
+  need the equivalent curl-backed =GET -N --no-buffer= path.
+
+*** JSON — =src/sage/util.scm=
+
+=json-read-string= (line 126) and =json-write-string= (line 187) are
+fine. *Critical gotcha* captured in =ollama.scm= comment at line 377–378:
+
+#+BEGIN_QUOTE
+util.scm's JSON parser returns arrays as LISTS, but other callers may
+pass vectors. Accept both shapes uniformly.
+#+END_QUOTE
+
+See =ollama-parse-tool-call= at =src/sage/ollama.scm:375–396= for the
+exact shape of the fix:
+
+#+BEGIN_SRC scheme
+(let* ((tool-calls (assoc-ref message "tool_calls"))
+       (first-tc (cond
+                  ((and tool-calls (vector? tool-calls)
+                        (> (vector-length tool-calls) 0))
+                   (vector-ref tool-calls 0))
+                  ((and tool-calls (pair? tool-calls))
+                   (car tool-calls))
+                  (else #f))))
+  ...)
+#+END_SRC
+
+*The MCP client will be hit by this in at least three places:*
+
+1. =result.tools= in =tools/list= — a list of tool descriptors.
+2. =result.content= in =tools/call= — a list of content blocks.
+3. =result.capabilities.experimental= etc — but these are objects not
+   arrays, so no issue there.
+4. Any JSON Schema =required: [...]= arrays inside =inputSchema= — a
+   list of strings.
+
+For every one of these, the MCP client MUST use the same defensive
+=(cond ((vector? ...) ...) ((pair? ...) ...))= dispatch, or else we'll
+hit =(wrong-type-arg vector-ref)= the first time something upstream of us
+decides to hand us a vector instead of a list.
+
+*Recommended helper* to put in =src/sage/mcp/jsonrpc.scm=:
+
+#+BEGIN_SRC scheme
+(define (as-list x)
+  "Accept both list and vector shapes, return a Scheme list."
+  (cond ((list? x) x)
+        ((vector? x) (vector->list x))
+        ((eq? x 'null) '())
+        ((not x) '())
+        (else (error 'mcp-type-error "expected array" x))))
+#+END_SRC
+
+Use =(as-list (assoc-ref result "tools"))= everywhere we pull an array
+out of a decoded envelope.
+
+*JSON writer caveat*: =json-write= at =util.scm:147–185= writes lists as
+JSON arrays unless the first element looks like a string-keyed pair — in
+which case it writes them as objects. This heuristic is fine for the
+request side because our request bodies are hand-built alists, but it
+means *the empty object* =\={}\== MUST be written as a 1-element alist —
+conventionally we'd use =#(("__mcp_empty__" . #f))= and post-process, OR
+we just pass =#(#f)= (a vector) — but neither is clean. The cleanest fix
+is to special-case =(list 'empty-object)= or similar in
+=mcp/jsonrpc.scm= until =util.scm= grows an =empty-object= sentinel.
+
+Concretely, =capabilities.sampling= in the initialize request is
+supposed to be =\={}\== but if we serialize =\='()= we get =null= and if
+we serialize =\'(())= we get a nonsense object. This needs one focused
+test before the client is considered done.
+
+*** Tool registry — =src/sage/tools.scm=
+
+=tools.scm= currently keeps an in-memory list =*tools*= of alist
+descriptors with keys =name=, =description=, =parameters=, =execute=.
+
+Integration plan:
+
+- Add a parallel =*mcp-tools*= map or store everything in =*tools*= with
+  an extra =("transport" . 'local)= / =("transport" . 'mcp)= marker.
+- =register-tool= already filters by name to dedupe; =register-mcp-tool=
+  can reuse this.
+- =execute-tool= (line 131) currently calls =((assoc-ref tool "execute")
+  args)= directly. For MCP tools we replace the execute function with a
+  closure that calls =(mcp-call-tool server-id tool-name args)=.
+- =tools-to-schema= (exported but not shown above) is the function that
+  produces the schema sent to Ollama. It MUST include both local and MCP
+  tools, with the namespacing from I22.
+- =check-permission= (line 120) short-circuits on =*safe-tools*=. MCP
+  tools should default to *unsafe* (require YOLO_MODE or user
+  confirmation), because the server-declared description is not
+  trusted for safety decisions.
+
+*** Ollama integration — =src/sage/ollama.scm=
+
+=ollama-parse-tool-call= (=src/sage/ollama.scm:375=) is where Ollama's
+=tool_calls= field is decoded. Once the MCP client lands, the tool-name
+returned from here gets looked up in =mcp-registry=; if found, dispatch
+via =mcp-call-tool= instead of =execute-tool=. No change is needed to
+=ollama.scm= itself — the dispatch point is in =agent.scm= /
+=tools.scm execute-tool=.
+
+** Threading model
+
+Guile has =(ice-9 threads)= with mutexes and condition variables. The
+minimum viable design:
+
+- 1 reader thread per MCP server, running =sse-reader-loop=.
+- The reader thread does blocking =read-line= on the streaming HTTP body
+  port.
+- A shared =pending= hash table keyed by id, protected by a mutex. Values
+  are condition variables + result cells.
+- Caller thread (the main sage REPL thread) calls =(mcp-call …)=, which:
+  1. Grabs the mutex, inserts =id → (cvar . cell)=, releases.
+  2. POSTs the envelope.
+  3. Waits on the cvar with a timeout.
+  4. Reads the cell, clears the pending entry, returns.
+- Reader thread on =event: message=:
+  1. Parse envelope.
+  2. Grab mutex, look up id, fill cell, signal cvar, release.
+
+This is ~200 lines of Guile. The tricky parts are the streaming HTTP
+read (test it first against =util.scm http-post-streaming-native= to
+confirm the body port survives line-by-line reads across SSE comment
+lines) and the reconnect logic.
+
+** Test strategy
+
+- *Fixture server*: stand up a =test/mcp-fake-server.scm= that listens on
+  a Unix domain socket or a random localhost port and produces scripted
+  SSE frames. Use it to test invariants I01–I23 without needing
+  skills-hub on the LAN.
+- *Property-based tests*: for any invariant involving ordering (I02, I13,
+  I16), use =srfi-64= + random interleaving.
+- *Replay test*: capture a raw SSE byte stream from skills-hub (we have
+  one — see section 7) and replay it through the client's frame parser
+  in a unit test. This locks in the divergence handling (D01, D02, D03).
+- *PBT for the =as-list= helper*: fuzz it with lists, vectors, nested
+  combinations, =#f=, =\'null=, and random trash to confirm it never
+  =wrong-type-arg='s.
+
+** Open questions
+
+1. *Multiple MCP servers in parallel*. First pass should probably only
+   support one, gated on a config key. Multi-server is a strict
+   superset — the registry just grows.
+2. *HTTPS MCP servers*. =util.scm= will fall back to curl for https; the
+   streaming SSE path needs a curl-backed equivalent of
+   =http-post-streaming-curl= for GETs. Probably =curl -sN --no-buffer=
+   piped into a Guile =open-input-pipe=.
+3. *Cancellation*. 2024-11-05 spec doesn't define
+   =notifications/cancelled= on the client side; later versions do.
+   Leave a stub hook in =sse-post= for it.
+4. *Resumption after disconnect*. Not possible with 2024-11-05 SSE
+   transport — new SSE connection = new session_id. If sage needs
+   mid-turn resilience, wrap =mcp-call-tool= in its own retry layer
+   above the transport.
+
+* 9. Summary of findings vs spec
+
+| Concern                     | Spec says                              | skills-hub does                             | Handling            |
+|-----------------------------+----------------------------------------+---------------------------------------------+---------------------|
+| Unknown tool in tools/call  | MAY use JSON-RPC error (example shows) | =result.isError: true= with text block      | Handle both (I20)   |
+| Unknown method              | Should be =-32601 Method not found=    | HTTP 202 then silent drop                   | Timeouts (I12, D02) |
+| Malformed JSON body         | JSON-RPC =-32700 Parse error=          | HTTP 400 plain text "Could not parse …"     | Sync transport err (I07, D03) |
+| Wrong session_id            | not specified                          | HTTP 404 "Could not find session"           | Sync transport err  |
+| Auth failure                | not specified                          | HTTP 401 JSON =\={"error":"..."}\==          | Sync transport err  |
+| tools capability listChanged| MAY be true or false                   | =false=                                     | Skip subscribe path |
+| =instructions= in init result| OPTIONAL                              | Present (one-sentence description)          | Pass to system prompt |
+| SSE keep-alive              | not mandated                           | =: ping - <iso-ts>= approx every 15s        | Drop comment lines (I04) |
+| Session reuse after GET close| not specified                         | Session survives briefly after GET closes   | Do NOT rely on it   |
+
+* 10. Appendix: reproducing the captures
+
+#+BEGIN_SRC sh
+set -o noglob  # zsh globs ?; matters for the session_id URL
+
+# 1. Open SSE channel in background
+curl -sSN \
+  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  -H 'Accept: text/event-stream' \
+  http://192.168.86.100:8400/sse > /tmp/mcp-sse.log &
+
+sleep 1
+
+# 2. Extract the endpoint the server handed us
+SESSION_PATH=$(grep '^data:' /tmp/mcp-sse.log | head -1 | sed 's/^data: //')
+ENDPOINT="http://192.168.86.100:8400${SESSION_PATH}"
+
+# 3. initialize
+curl -sS -X POST -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  --data-raw '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{"listChanged":true},"sampling":{}},"clientInfo":{"name":"guile-sage-probe","version":"0.1.0"}}}' \
+  "$ENDPOINT"
+
+# 4. initialized notification
+curl -sS -X POST -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  --data-raw '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+  "$ENDPOINT"
+
+# 5. tools/list
+curl -sS -X POST -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  --data-raw '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  "$ENDPOINT"
+
+# 6. tools/call (success)
+curl -sS -X POST -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  --data-raw '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"workflow__bd","arguments":{"query":"help"}}}' \
+  "$ENDPOINT"
+
+# 7. All responses will appear in /tmp/mcp-sse.log, not in the POST bodies.
+cat /tmp/mcp-sse.log
+#+END_SRC
