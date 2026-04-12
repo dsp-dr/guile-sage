@@ -1,13 +1,14 @@
 # guile-sage Makefile
 
-GUILE = guile3
-GUILD = guild3
-
-# macOS uses 'guile' not 'guile3'
-ifeq ($(shell uname -s),Darwin)
-GUILE = guile
-GUILD = guild
-endif
+# Detect the local Guile binary at make-time. FreeBSD ships guile3/guild3
+# (because it has multiple Guile majors installed); Linux distros and
+# macOS Homebrew ship plain guile/guild. Try the suffixed names first to
+# preserve the FreeBSD primary-dev behaviour, then fall back. The bare
+# echo at the end keeps Make happy when neither is on PATH so the
+# subsequent `command not found` is a normal compile-time error rather
+# than an empty-variable surprise.
+GUILE := $(shell command -v guile3 2>/dev/null || command -v guile 2>/dev/null || echo guile)
+GUILD := $(shell command -v guild3 2>/dev/null || command -v guild 2>/dev/null || echo guild)
 SRCDIR = src
 TESTDIR = tests
 
