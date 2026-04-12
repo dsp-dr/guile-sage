@@ -198,6 +198,66 @@
       (unless (equal? result "safe result")
         (error "unexpected result" result)))))
 
+;;; ============================================================
+;;; coerce->int / read_logs int-arg robustness  (bd: guile-bcy)
+;;; ============================================================
+;;;
+;;; Regression coverage for the read_logs crash where the model emitted
+;;; "lines": "20" (string) and the underlying (min N other) blew up
+;;; with wrong-type-arg. The tool wrapper now coerces every JSON int
+;;; argument through coerce->int. These tests pin the boundary.
+
+(format #t "~%--- read_logs int-arg coercion ---~%")
+
+(run-test "read_logs accepts integer lines"
+  (lambda ()
+    (let ((result (execute-tool "read_logs" '(("lines" . 5)))))
+      (unless (string? result)
+        (error "expected string result" result))
+      (when (string-contains result "wrong-type-arg")
+        (error "should not crash on integer lines" result)))))
+
+(run-test "read_logs accepts string-int lines (the original bug)"
+  (lambda ()
+    (let ((result (execute-tool "read_logs" '(("lines" . "5")))))
+      (unless (string? result)
+        (error "expected string result" result))
+      (when (string-contains result "wrong-type-arg")
+        (error "should not crash on string-int lines" result)))))
+
+(run-test "read_logs accepts inexact-integer (20.0) lines"
+  (lambda ()
+    ;; Some models emit numbers as floats. (integer? 20.0) is #t in
+    ;; Guile, so a naive coerce that fast-paths on integer? would
+    ;; pass 20.0 through unchanged and downstream math would fail.
+    (let ((result (execute-tool "read_logs" '(("lines" . 20.0)))))
+      (when (string-contains result "wrong-type-arg")
+        (error "should not crash on inexact integer lines" result)))))
+
+(run-test "read_logs accepts unparseable string lines (falls back to default)"
+  (lambda ()
+    (let ((result (execute-tool "read_logs" '(("lines" . "garbage")))))
+      (unless (string? result)
+        (error "expected string result" result))
+      (when (string-contains result "wrong-type-arg")
+        (error "should not crash on garbage lines" result)))))
+
+(run-test "read_logs accepts missing lines arg (uses default)"
+  (lambda ()
+    (let ((result (execute-tool "read_logs" '())))
+      (unless (string? result)
+        (error "expected string result" result))
+      (when (string-contains result "wrong-type-arg")
+        (error "should not crash without lines" result)))))
+
+(run-test "search_logs accepts string-int limit"
+  (lambda ()
+    (let ((result (execute-tool "search_logs"
+                                '(("pattern" . "info")
+                                  ("limit" . "10")))))
+      (when (string-contains result "wrong-type-arg")
+        (error "search_logs should not crash on string limit" result)))))
+
 ;;; Summary
 
 (test-summary)
