@@ -1,0 +1,305 @@
+#+TITLE: guile-sage Telemetry — OTLP/HTTP to NexusHive
+#+AUTHOR: guile-sage
+#+OPTIONS: toc:2
+
+* Overview
+
+guile-sage emits cumulative counter metrics via the OpenTelemetry
+protocol (OTLP/HTTP JSON, proto3 mapping) to the NexusHive observability
+stack on the 192.168.86.0/24 LAN. Counters land in Prometheus with
+=exported_job=guile-sage= and surface on the *AI Tools — Multi-Provider
+Usage* Grafana dashboard alongside Claude Code, Gemini CLI, Codex, and
+Aider.
+
+The implementation lives in =src/sage/telemetry.scm= and is wired into
+five hook points across =src/sage/repl.scm= and =src/sage/tools.scm=. No
+gRPC, no protobuf — just a fail-soft JSON POST through the existing
+=http-post-with-timeout= helper.
+
+* Architecture
+
+#+BEGIN_SRC
+┌──────────────┐    inc-counter!    ┌────────────────┐
+│ repl/tools   │──────────────────▶│ *counters* (in │
+│ (hook points)│                    │  -memory hash) │
+└──────────────┘                    └───────┬────────┘
+                                            │
+                              telemetry-flush!│ (after each chat turn,
+                                            │  on /exit, on REPL EOF)
+                                            ▼
+                                ┌────────────────────┐
+                                │ build-metrics-     │ OTLP/HTTP JSON
+                                │ payload            │ (cumulative,
+                                └────────┬───────────┘  proto3 mapping)
+                                         │
+                                         ▼ POST /v1/metrics
+                                 ┌───────────────┐
+                                 │ OTel Collector│ nexus:4318
+                                 └───────┬───────┘
+                                         │ Prometheus exporter
+                                         ▼
+                                 ┌───────────────┐
+                                 │ Prometheus    │ nexus:9090
+                                 └───────┬───────┘
+                                         │
+                                         ▼
+                                 ┌───────────────┐
+                                 │ Grafana       │ nexus:3000
+                                 │ /d/ai-tools/  │
+                                 └───────────────┘
+#+END_SRC
+
+* Metrics emitted (v1)
+
+| OTLP name                            | Prometheus name                            | Labels                          | Source                       |
+|--------------------------------------+--------------------------------------------+---------------------------------+------------------------------|
+| =guile_sage.session.count=           | =guile_sage_session_count_total=           | =session_id=                    | =repl-start= after init      |
+| =guile_sage.token.usage= (tokens)    | =guile_sage_token_usage_tokens_total=      | =model=, =type=input\|output=   | both =ollama-chat= callsites |
+| =guile_sage.cost.usage= (USD)        | =guile_sage_cost_usage_USD_total=          | =model=                         | both =ollama-chat= callsites (always 0 for local Ollama) |
+| =guile_sage.active.time= (s)         | =guile_sage_active_time_seconds_total=     | =type=cli\|user=                | main REPL loop               |
+| =guile_sage.code_edit.tool_decision= | =guile_sage_code_edit_tool_decision_total= | =tool_name=, =decision=accept\|reject= | =execute-tool=        |
+
+The unit suffixes (=_tokens_total=, =_USD_total=, =_seconds_total=) are
+critical: the OTel Collector's Prometheus exporter derives them from
+each metric's =unit= field. The unit registry lives at
+=*metric-units*= in =src/sage/telemetry.scm=.
+
+* Resource attributes
+
+Every emitted ResourceMetrics carries:
+
+- =service.name=guile-sage= → becomes =exported_job=guile-sage= in Prometheus
+- =service.version= → from =(version-string)= in =src/sage/version.scm=
+- =host.name= → from =OTEL_RESOURCE_ATTRIBUTES= or =(gethostname)=
+- All env-provided =OTEL_RESOURCE_ATTRIBUTES= entries (=team=, =user.*=,
+  =sefaca.*=, =github.*=) are passed through verbatim.
+
+The scope is fixed at =com.dsp-dr.guile_sage= so dashboards can filter
+by =otel_scope_name=.
+
+* Configuration
+
+| Env var                                  | Purpose                                   |
+|------------------------------------------+-------------------------------------------|
+| =OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=    | Full URL (preferred)                      |
+| =OTEL_EXPORTER_OTLP_ENDPOINT=            | Base URL — :4317 → :4318, suffix added    |
+| =OTEL_RESOURCE_ATTRIBUTES=               | Extra resource attrs (k=v,k=v,...)        |
+| =SAGE_TELEMETRY_DISABLE=                 | Set to anything to make all ops no-ops    |
+
+Telemetry is enabled when the endpoint resolves AND
+=SAGE_TELEMETRY_DISABLE= is unset. All other failures are fail-soft —
+the REPL never breaks because telemetry can't reach the collector.
+
+** Three places to put the config
+
+In order of preference:
+
+1. *Shell init* (=~/.zshenv= or =~/.bashrc=) — recommended for
+   personal machines. Co-locates with the OTEL vars you may already
+   have for Claude Code.
+
+2. *XDG-compliant per-user sage config* (=~/.config/sage/.env=) —
+   recommended for shared machines or to keep sage's telemetry
+   independent from Claude Code's. =config-load-dotenv= picks
+   this file up automatically.
+   #+BEGIN_SRC bash
+   mkdir -p ~/.config/sage
+   cat > ~/.config/sage/.env <<'EOF'
+   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://192.168.86.100:4318/v1/metrics
+   OTEL_RESOURCE_ATTRIBUTES=host.name=mini,team=aygp-dr
+   EOF
+   #+END_SRC
+
+3. *Project-local =.env=* — copy =.env.template= to =.env= and
+   uncomment the =OTEL_*= block. Useful for repo-scoped experiments
+   or when you want different attributes per project.
+
+** Required vs optional knobs
+
+Required (sage will not emit without one of these):
+- =OTEL_EXPORTER_OTLP_METRICS_ENDPOINT= OR =OTEL_EXPORTER_OTLP_ENDPOINT=
+
+Optional (have sensible defaults):
+- =OTEL_RESOURCE_ATTRIBUTES= → defaults to =host.name=$(hostname)=
+- =SAGE_TELEMETRY_DISABLE= → unset means enabled
+- =SAGE_LOG_DIR= → defaults to =$cwd/.logs=
+
+* Manual verification harness (current)
+
+This is the *correct* harness for now. Automation comes later.
+
+** Pre-flight
+
+#+BEGIN_SRC bash
+# 1. OTLP endpoint reachable?
+nc -z 192.168.86.100 4317 && echo "OTLP gRPC: OK"
+nc -z 192.168.86.100 4318 && echo "OTLP HTTP: OK"
+nc -z 192.168.86.100 9090 && echo "Prometheus: OK"
+
+# 2. Required env vars present?
+env | grep -E 'OTEL_(METRICS|LOGS|EXPORTER|RESOURCE)|CLAUDE_CODE_ENABLE_TELEMETRY'
+
+# 3. Ollama up locally?
+curl -s http://localhost:11434/api/version
+#+END_SRC
+
+** Run sage in a tmux session
+
+#+BEGIN_SRC bash
+tmux new-session -d -s sage-otel \
+  -c $(pwd) \
+  'SAGE_MODEL=mistral:latest gmake run; exec zsh'
+
+# Attach to drive it manually:
+tmux attach -t sage-otel
+#+END_SRC
+
+** Drive a turn from outside the tmux session
+
+#+BEGIN_SRC bash
+# Send a prompt
+tmux send-keys -t sage-otel 'say hello in three words' Enter
+
+# Wait for response (mistral on local Ollama is ~15s/turn)
+sleep 18
+
+# Capture the pane
+tmux capture-pane -t sage-otel -p | tail -15
+
+# Clean exit so the final flush runs
+tmux send-keys -t sage-otel '/exit' Enter
+#+END_SRC
+
+** Verify in Prometheus
+
+#+BEGIN_SRC bash
+# 1. exported_job should now include guile-sage
+curl -s 'http://192.168.86.100:9090/api/v1/label/exported_job/values' \
+  | python3 -m json.tool
+# Expected: ["claude-code", "github-copilot", "guile-sage"]
+
+# 2. All distinct guile-sage metric names
+curl -s 'http://192.168.86.100:9090/api/v1/query' \
+  --data-urlencode 'query={exported_job="guile-sage"}' \
+  | python3 -c '
+import sys, json
+seen = set()
+for r in json.load(sys.stdin)["data"]["result"]:
+    seen.add(r["metric"]["__name__"])
+for n in sorted(seen):
+    print(" ", n)'
+# Expected (after one chat turn):
+#   guile_sage_active_time_seconds_total
+#   guile_sage_cost_usage_USD_total
+#   guile_sage_session_count_total
+#   guile_sage_token_usage_tokens_total
+
+# 3. Per-metric values
+curl -s 'http://192.168.86.100:9090/api/v1/query?query=guile_sage_token_usage_tokens_total' \
+  | python3 -m json.tool
+
+curl -s 'http://192.168.86.100:9090/api/v1/query?query=guile_sage_session_count_total' \
+  | python3 -m json.tool
+#+END_SRC
+
+** Verify in Grafana
+
+Open: =http://192.168.86.100:3000/d/ai-tools/ai-tools-e28094-multi-provider-usage?from=now-15m=
+
+Confirm a *Guile Sage* row/series is present in:
+- Sessions stat panel
+- Total Cost stat panel
+- Total Tokens stat panel
+- Active Time stat panel
+- Tool Decisions stat panel
+- Cost over time timeseries
+- Tokens over time by provider timeseries
+
+** Failure-mode check
+
+Force the endpoint to a black hole and confirm the REPL stays usable
+and writes a single =WARN telemetry= line per failed flush:
+
+#+BEGIN_SRC bash
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://127.0.0.1:1/v1/metrics \
+  SAGE_MODEL=llama3.2:latest gmake run
+
+# In another shell:
+tail -f .logs/sage.log | grep telemetry
+#+END_SRC
+
+* Diagnosing emission problems
+
+| Symptom                                          | Probable cause                                                |
+|--------------------------------------------------+---------------------------------------------------------------|
+| =exported_job= missing =guile-sage=              | =telemetry-init= took the disabled path — check env + log    |
+| Metric appears with =_total= but no unit suffix  | =*metric-units*= entry missing or wrong                      |
+| =session_id=unknown=                             | =*session*= module-binding race — see =late-bound module-ref= pattern in =src/sage/context.scm:103= |
+| 401 from Grafana when updating dashboard         | urllib BasicAuth challenge fails — pre-set =Authorization: Basic ...= header (see =tmp/dashboard-add-guile-sage.py=) |
+| Counters land but stale series persist           | Prometheus retention is 90d — old wrong-unit names age out naturally |
+
+* Future automation (sketch — not yet implemented)
+
+For the record, two paths considered and explicitly *deferred* until
+the manual harness above stops being sufficient:
+
+** pexpect-driven smoke harness
+
+A Python script that spawns =gmake run=, sends a fixed prompt, waits
+for the next prompt, then sends =/exit=, and finally polls Prometheus
+for the expected counter delta. Skeleton:
+
+#+BEGIN_SRC python
+# scripts/telemetry-smoke.py  (NOT YET IMPLEMENTED)
+import pexpect, time, urllib.request, json
+
+def baseline():
+    r = urllib.request.urlopen(
+        'http://192.168.86.100:9090/api/v1/query'
+        '?query=sum(guile_sage_session_count_total)')
+    return float(json.load(r)['data']['result'][0]['value'][1])
+
+def main():
+    before = baseline()
+    child = pexpect.spawn('gmake run', encoding='utf-8', timeout=120)
+    child.expect(r'sage\[.*\]>')
+    child.sendline('say hi')
+    child.expect(r'sage\[.*\]>')
+    child.sendline('/exit')
+    child.expect(pexpect.EOF)
+    time.sleep(20)  # Prometheus scrape cycle
+    after = baseline()
+    assert after >= before + 1, f'session counter did not advance: {before}->{after}'
+
+if __name__ == '__main__':
+    main()
+#+END_SRC
+
+Why deferred:
+- Manual tmux + curl is fast enough for the current iteration speed.
+- pexpect adds a Python dep to the test loop.
+- The interesting failures so far have been *naming* issues (unit
+  suffixes) and *binding* issues (module-ref) — neither would have
+  been caught by pexpect; they showed up first in Prometheus queries.
+
+** HTTP API verification endpoint
+
+A small Guile-side HTTP handler at, e.g., =GET /telemetry/state= that
+returns the current in-memory =*counters*= as JSON. Useful for:
+- Letting external monitors verify a sage process is emitting without
+  having to round-trip through the collector.
+- A health-check endpoint for k8s/Gatus probes.
+
+Why deferred:
+- Adds an HTTP server to the REPL process — non-trivial for a stdin/
+  stdout REPL today.
+- The OTel Collector debug exporter already provides this visibility
+  on nexus when enabled.
+
+* Reference
+
+- Spec / canonical setup guide: =experiments/notes/nexushive-telemetry-setup.md=
+  (mirrored from gist =aygp-dr/3e394bc89d3a8581eef96b27095b54a7=)
+- Late-bound module-ref pattern: =src/sage/context.scm:103= (commit b39f0e4)
+- Dashboard mutation script: =tmp/dashboard-add-guile-sage.py=
+- Plan that drove this work: =/Users/jwalsh/.claude/plans/curious-knitting-kahan.md=
