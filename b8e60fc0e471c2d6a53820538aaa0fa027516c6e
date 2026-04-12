@@ -1,0 +1,69 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Triggered by user concern after the 0.6.0 push: \"you need to dbouel
+  andtripple check we aren' breaking oure ci ipippline Container /
+  build (push) Failing after 19s\"
+
+## Testing
+- Confirmed local gmake check still 34/37 (baseline, no regression)
+- Confirmed via gh run view 24292880948 (the commit BEFORE 0.6.0)
+  that the Container/build workflow was already failing with the
+  identical guild3-not-found error. This is pre-existing breakage,
+  not a 0.6.0 regression.
+- gmake -p shows GUILD := /opt/homebrew/bin/guild on this Mac after
+  the patch, exactly the same path that `which guild` returns.
+
+## Issues
+- bd: none yet; should file as bd-CI-MAKEFILE
+- github: dsp-dr/guile-sage CI run 24294611645 is the failing one
+  that surfaced this on the 0.6.0 push
+
+## Conjecture (CPRR)
+- Hypothesis: Alpine and most Linux distros package Guile as plain
+  'guile'/'guild' (no version suffix), and FreeBSD packages it as
+  'guile3'/'guild3' (because FreeBSD has multiple Guile majors
+  installable side-by-side). The Makefile had a Darwin override
+  but no general Linux/Alpine override, so the FreeBSD-default
+  names broke for everyone except FreeBSD and macOS.
+
+## Validation
+- `command -v` is POSIX standard and is in busybox on Alpine, so the
+  shell expansion is portable across all CI runners.
+- Local Mac: GUILD resolves to /opt/homebrew/bin/guild (correct).
+- Tests/check workflow runs on a self-hosted FreeBSD box (per the
+  earlier passing runs). On FreeBSD `guile3` is in PATH and
+  `command -v guile3` finds it first — preserves existing behaviour.
+- Alpine in the Container/build workflow has /usr/bin/guile and
+  /usr/bin/guild from the apk guile package — second branch of the
+  cascade matches.
+- The literal-name final fallback gives a deterministic
+  \"command not found\" if neither exists, which is a much better
+  failure mode than an empty variable producing a confusing error.
+
+## Refutation / known limits
+- This patch only fixes the BUILD step. If the runtime Docker image
+  (FROM stage-1) also has the same naming mismatch, the wrapper
+  script installed by 'gmake install' would fail. The Dockerfile
+  needs a separate audit to confirm — out of scope for this commit.
+- We don't validate at make-time that the resolved GUILE/GUILD are
+  actually the right Guile MAJOR version (needs 3.0+). If a Linux
+  box has guile-2.0 only, the build will silently use it and fail
+  later. A `guile --version | grep -q '^guile.*3\\.'` check could
+  be added but that's gold-plating for a CI hotfix.
+
+## Meta - research / context / deep-dives
+- Worth a future audit: src/sage/main.scm and the install wrapper
+  in the Makefile both reference \$GUILE; verify they all see the
+  detected name, not a hard-coded one.
+- The CI failure went unnoticed for at least 2 commits (f708e13
+  and the 8-commit 0.6.0 stack). Worth wiring a Slack/Keybase
+  webhook into the workflow so red builds can't slip past.
+- Eval idea: a Makefile lint target that prints the resolved
+  GUILE / GUILD / GUILE_VERSION / target host triple at the top of
+  every build, so the user sees mismatch immediately.
+- Related: scripts/check-config.sh exists but doesn't currently
+  validate the Guile binary. Could be extended.
+- Open question: should the Container workflow run on FreeBSD too
+  via the qemu cross-build? Catches FreeBSD-specific regressions
+  earlier. Probably not worth the build-time cost.
