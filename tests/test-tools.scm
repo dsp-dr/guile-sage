@@ -258,6 +258,79 @@
       (when (string-contains result "wrong-type-arg")
         (error "search_logs should not crash on string limit" result)))))
 
+;;; ============================================================
+;;; resolve-path / write_file path honesty  (bd: guile-ecn)
+;;; ============================================================
+;;;
+;;; Pre-fix bug: write_file with /tmp/foo wrote to <workspace>/tmp/foo
+;;; (silently anchored to workspace) but reported "Wrote N bytes to
+;;; /tmp/foo" — a confident lie about where the file went. Fix
+;;; introduces (resolve-path path) which honours absolute prefixes
+;;; and is used by every file-writing tool, plus the success messages
+;;; now echo the resolved path verbatim.
+
+(format #t "~%--- write_file path resolution ---~%")
+
+(run-test "write_file absolute path lands at the absolute location"
+  (lambda ()
+    (let ((tmp-path "/tmp/sage-write-test-abs.txt"))
+      ;; Cleanup before test
+      (when (file-exists? tmp-path)
+        (delete-file tmp-path))
+      (let ((result (execute-tool "write_file"
+                                  `(("path" . ,tmp-path)
+                                    ("content" . "abs content")))))
+        ;; Result should mention the resolved (absolute) path
+        (unless (string-contains result tmp-path)
+          (error "result must echo resolved path" result))
+        ;; File must actually exist at the absolute location
+        (unless (file-exists? tmp-path)
+          (error "absolute path file did not land at /tmp/" result))
+        ;; Cleanup
+        (delete-file tmp-path)))))
+
+(run-test "write_file relative path lands under workspace"
+  (lambda ()
+    (let ((rel "tmp/sage-write-test-rel.txt"))
+      ;; Cleanup before test
+      (let ((full (string-append (workspace) "/" rel)))
+        (when (file-exists? full)
+          (delete-file full)))
+      (let ((result (execute-tool "write_file"
+                                  `(("path" . ,rel)
+                                    ("content" . "rel content")))))
+        ;; Result should mention workspace-anchored path, not bare rel
+        (unless (string-contains result (workspace))
+          (error "result should report workspace-anchored path" result))
+        ;; File must exist under workspace
+        (let ((full (string-append (workspace) "/" rel)))
+          (unless (file-exists? full)
+            (error "relative path file did not land in workspace" full))
+          (delete-file full))))))
+
+(run-test "read_file File-not-found error reports the resolved path"
+  (lambda ()
+    (let ((result (execute-tool "read_file"
+                                '(("path" . "/tmp/sage-does-not-exist-xyzzy")))))
+      ;; Should NOT find the file but the error should NAME the
+      ;; absolute path the user asked for, not silently substitute
+      ;; a workspace-anchored one.
+      (unless (string-contains result "/tmp/sage-does-not-exist-xyzzy")
+        (error "error must echo the absolute path" result))
+      (unless (string-contains result "not found")
+        (error "should report not-found" result)))))
+
+(run-test "edit_file File-not-found echoes the resolved path"
+  (lambda ()
+    (let ((result (execute-tool "edit_file"
+                                '(("path" . "/tmp/sage-does-not-exist-xyzzy")
+                                  ("search" . "x")
+                                  ("replace" . "y")))))
+      (unless (string-contains result "/tmp/sage-does-not-exist-xyzzy")
+        (error "edit_file error must echo the absolute path" result))
+      (unless (string-contains result "not found")
+        (error "should report not-found" result)))))
+
 ;;; Summary
 
 (test-summary)

@@ -58,12 +58,33 @@
 (define (set-workspace! path)
   (set! *workspace* path))
 
+;;; resolve-path: Map a tool-supplied path to its actual filesystem location.
+;;;
+;;; - Absolute paths (starting with "/") are kept as-is, so /tmp/foo
+;;;   ends up at /tmp/foo on disk, NOT at <workspace>//tmp/foo. Before
+;;;   this helper, write_file/edit_file/read_file/list_files all did
+;;;   (string-append (workspace) "/" path) which silently produced a
+;;;   workspace-relative file for absolute inputs and then echoed the
+;;;   ORIGINAL path back to the user, lying about where the file went.
+;;;   See bd guile-ecn and docs/UX-FINDINGS-0.6.0.md gap #1.
+;;;
+;;; - Relative paths are anchored to the current workspace.
+;;;
+;;; This is a pure function — no I/O, no canonicalisation. safe-path?
+;;; uses it for the /tmp / workspace check; tool implementations use
+;;; it both to find the file AND to report the resolved path back to
+;;; the caller.
+(define (resolve-path path)
+  (cond
+   ((not path) #f)
+   ((string-null? path) (workspace))
+   ((string-prefix? "/" path) path)
+   (else (string-append (workspace) "/" path))))
+
 ;;; safe-path?: Check if path is within workspace
 (define (safe-path? path)
   (let ((ws (workspace))
-        (expanded (if (string-prefix? "/" path)
-                      path
-                      (string-append (workspace) "/" path))))
+        (expanded (resolve-path path)))
     ;; Allow /tmp for temporary files, otherwise check workspace containment
     (or (string-prefix? "/tmp/" expanded)
         (and (not (string-contains path ".."))
@@ -207,10 +228,10 @@
    (lambda (args)
      (let ((path (assoc-ref args "path")))
        (if (safe-path? path)
-           (let ((full-path (string-append (workspace) "/" path)))
+           (let ((full-path (resolve-path path)))
              (if (file-exists? full-path)
                  (call-with-input-file full-path get-string-all)
-                 (format #f "File not found: ~a" path)))
+                 (format #f "File not found: ~a" full-path)))
            (format #f "Unsafe path: ~a" path)))))
 
   ;; list_files
@@ -227,7 +248,7 @@
      (let ((path (or (assoc-ref args "path") "."))
            (pattern (or (assoc-ref args "pattern") "*")))
        (if (safe-path? path)
-           (let ((full-path (string-append (workspace) "/" path)))
+           (let ((full-path (resolve-path path)))
              (if (file-exists? full-path)
                  (string-join
                   (scandir full-path
@@ -250,10 +271,14 @@
      (let ((path (assoc-ref args "path"))
            (content (assoc-ref args "content")))
        (if (safe-path? path)
-           (let ((full-path (string-append (workspace) "/" path)))
+           (let ((full-path (resolve-path path)))
              (call-with-output-file full-path
                (lambda (port) (display content port)))
-             (format #f "Wrote ~a bytes to ~a" (string-length content) path))
+             ;; Echo the RESOLVED path so /tmp/foo (absolute) lands at
+             ;; /tmp/foo and the user is told that. Workspace-relative
+             ;; paths still appear as workspace-anchored absolute.
+             ;; bd: guile-ecn.
+             (format #f "Wrote ~a bytes to ~a" (string-length content) full-path))
            (format #f "Unsafe path: ~a" path)))))
 
   ;; git_status
@@ -378,17 +403,17 @@
            (search (assoc-ref args "search"))
            (replace (assoc-ref args "replace")))
        (if (safe-path? path)
-           (let ((full-path (string-append (workspace) "/" path)))
+           (let ((full-path (resolve-path path)))
              (if (file-exists? full-path)
                  (let* ((content (call-with-input-file full-path get-string-all))
                         (new-content (string-replace-substring content search replace)))
                    (if (equal? content new-content)
-                       (format #f "No match found for search text in ~a" path)
+                       (format #f "No match found for search text in ~a" full-path)
                        (begin
                          (call-with-output-file full-path
                            (lambda (port) (display new-content port)))
-                         (format #f "Replaced text in ~a" path))))
-                 (format #f "File not found: ~a" path)))
+                         (format #f "Replaced text in ~a" full-path))))
+                 (format #f "File not found: ~a" full-path)))
            (format #f "Unsafe path: ~a" path)))))
 
   ;; run_tests - Execute test suite

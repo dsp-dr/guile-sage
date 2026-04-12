@@ -786,6 +786,67 @@
            (not (string-contains result "wrong-type-arg"))))))
 
 ;;; ============================================================
+;;; Property: write_file path honesty (bd: guile-ecn)
+;;; ============================================================
+;;;
+;;; Property: for any path the user supplies (relative or absolute
+;;; under /tmp/), write_file's reported "Wrote N bytes to PATH"
+;;; success message must name a path that actually exists on disk
+;;; with the byte count claimed, and read_file with the SAME path
+;;; must return the bytes that were written.
+
+(format #t "~%=== PBT: write_file path honesty ===~%")
+
+(define (rng-hex-token len)
+  ;; lowercase a-f0-9 for filename safety
+  (list->string
+   (map (lambda (_)
+          (let ((c (rng-int 0 15)))
+            (integer->char (if (< c 10) (+ c 48) (+ c 87)))))
+        (iota len))))
+
+(property "write_file -> read_file roundtrip works for absolute /tmp/ paths"
+  (lambda ()
+    (let ((basename (string-append "sage-pbt-" (rng-hex-token 8) ".txt"))
+          (content (rng-alpha-string (rng-int 1 64))))
+      (cons (string-append "/tmp/" basename) content)))
+  (lambda (path+content)
+    (let* ((path (car path+content))
+           (content (cdr path+content))
+           (write-result (execute-tool "write_file"
+                                       `(("path" . ,path)
+                                         ("content" . ,content))))
+           ;; The success message must name the resolved path, which
+           ;; for /tmp/* equals the input path.
+           (path-honest? (string-contains write-result path))
+           ;; Read it back via read_file
+           (read-back (execute-tool "read_file" `(("path" . ,path))))
+           (roundtrip-ok? (equal? read-back content)))
+      ;; Cleanup
+      (when (file-exists? path) (delete-file path))
+      (and path-honest? roundtrip-ok?))))
+
+(property "write_file -> read_file roundtrip works for workspace-relative paths"
+  (lambda ()
+    (let ((basename (string-append "sage-pbt-" (rng-hex-token 8) ".txt"))
+          (content (rng-alpha-string (rng-int 1 64))))
+      ;; Force into workspace tmp/ which is now gitignored
+      (cons (string-append "tmp/" basename) content)))
+  (lambda (path+content)
+    (let* ((rel (car path+content))
+           (content (cdr path+content))
+           (full (string-append (or (getenv "SAGE_WORKSPACE") (getcwd)) "/" rel))
+           (write-result (execute-tool "write_file"
+                                       `(("path" . ,rel)
+                                         ("content" . ,content))))
+           ;; Result should mention the FULL resolved path, not just rel
+           (path-honest? (string-contains write-result full))
+           (read-back (execute-tool "read_file" `(("path" . ,rel))))
+           (roundtrip-ok? (equal? read-back content)))
+      (when (file-exists? full) (delete-file full))
+      (and path-honest? roundtrip-ok?))))
+
+;;; ============================================================
 ;;; Property: telemetry.scm — counter / label invariants
 ;;; ============================================================
 
