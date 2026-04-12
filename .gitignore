@@ -27,3 +27,8 @@ worktrees/
 # Sage tool-call demo / project hygiene
 pwned.txt
 tmp/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
