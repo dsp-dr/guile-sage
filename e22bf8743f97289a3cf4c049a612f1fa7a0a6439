@@ -1,0 +1,50 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Triggered by rebase against Daria Pascal's commit 5bcc284 which moved
+  write/edit/git mutating tools out of *safe-tools* (matching long-standing
+  documented intent)
+
+## Testing
+- gmake check now reports 36/36 PASS, 100%, \"All tests passed!\" — first
+  fully-green run in this session
+- test-pbt.scm 61/61 properties, 6100 trials at seed 42
+- test-tools.scm 36/36 with the 6 new bug-fix tests
+- Live verified by running both files standalone after the rebase
+
+## Issues
+- bd: none new
+- github: fallout from 5bcc284 (Daria) + 728bcc4 (resolve-path) + 9cadb4f (PBT)
+
+## Conjecture (CPRR)
+- Hypothesis: Daria's \"write_file requires YOLO\" test leaks an unset
+  SAGE_YOLO_MODE state at its end. Any downstream test that exercises
+  write/edit through execute-tool will hit permission-denied unless it
+  re-sets YOLO at its own start. Defensive setenv per test is the
+  cheapest fix.
+
+## Validation
+- Before this commit: 3 of my new tests (write_file abs, write_file rel,
+  edit_file File-not-found) failed with Permission-denied results
+- After this commit: all 6 new tests pass deterministically
+- The PBT roundtrip property also needed the same setenv at module load
+- Suite total now 100% pass for the first time
+
+## Refutation / known limits
+- Defensive setenv per test is duplicative. Cleaner long-term fix:
+  test-harness.scm could provide a (with-yolo thunk) helper that
+  saves/sets/restores YOLO state. Filed as a candidate follow-up.
+- The leak in Daria's test could also be fixed at source. Two reasonable
+  fixes — pick whichever the maintainers prefer. I went with defensive
+  per-test because it doesn't touch Daria's commit.
+
+## Meta - research / context / deep-dives
+- Worth a future pass: a test-harness scoping primitive like
+  (with-env (\"SAGE_YOLO_MODE\" \"1\") thunk) that saves and restores any
+  env var. Would prevent this whole class of test order coupling.
+- Related: test-security.scm explicitly unsets YOLO at its top. Same
+  pattern; same risk if test-security is followed by a YOLO-requiring
+  test in the runner. Worth auditing the test order in gmake check.
+- Eval idea: a property test that runs every test file in random order
+  10 times and asserts deterministic pass count. Catches order coupling
+  automatically.
