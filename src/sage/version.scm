@@ -34,4 +34,4 @@
     ("patch" . ,*version-patch*)
     ("guile" . ,(version))
     ("name" . "guile-sage")
-    ("description" . "AI REPL with Tool Calling")))
+    ("description" . "AI REPL with Tool Calling and Guardrails")))
