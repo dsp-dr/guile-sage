@@ -1,0 +1,62 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+
+## Testing
+- gmake version reports v0.6.0
+- Welcome banner in REPL shows v0.6.0 (after clearing stale ccache;
+  see Refutation below)
+- Full suite still 34/37 baseline (3 known security failures)
+
+## Issues
+- bd: none
+- github: none. After this commit lands the user can: git tag v0.6.0,
+  git push --tags, and either gmake release or gh release create
+  v0.6.0 -F docs/RELEASE-0.6.0.org
+
+## Conjecture (CPRR)
+- Hypothesis: 0.6.0 is the right semver bump for this release.
+  Telemetry is a meaningful new public surface (env vars, log
+  files, dashboard panels), the streaming tool_calls fix is a
+  bugfix not breaking change, and the model fallback changes a
+  default but not a public API.
+
+## Validation
+- Bumped MAJOR.MINOR not MAJOR.PATCH because telemetry is a
+  feature addition
+- Bumped MINOR not MAJOR because no public API was removed or
+  renamed; existing sage scripts continue to work unchanged
+- The .env.template gained sections but didn't remove any
+- model-tier.scm changed defaults but the env override knobs
+  (MODEL_TIER_FAST/MODEL_TIER_STANDARD) work as before
+
+## Refutation / known limits
+- Guile auto-compiled .go files in ~/.cache/guile/ccache can
+  carry stale version constants from before this commit. We hit
+  this during smoke testing — the welcome banner showed v0.5.0
+  after editing version.scm to v0.6.0 because the cache was
+  newer than my cache invalidation logic understood. Workaround:
+  rm -rf ~/.cache/guile/ccache && gmake clean && gmake. Worth
+  surfacing in the README troubleshooting section.
+- The version-string function is duplicated in spirit across
+  src/sage/version.scm and a few status displays. A single
+  source of truth would be cleaner.
+
+## Meta - research / context / deep-dives
+- Tag conventions: this repo uses v0.X.Y. The tag command in
+  the Makefile (gmake tag) handles it.
+- The release process per Makefile help:
+  1. gmake patch/minor/major  (already done — minor)
+  2. git add -A && git commit  (NO — we use stacked progressive
+     commits, see project memory feedback_stacked_diffs_with_notes.md)
+  3. gmake tag                 (creates v0.6.0 tag)
+  4. git push && git push --tags
+  5. gmake release             (gh release create)
+- Notes are NOT pushed by default. To share these notes:
+  git push origin refs/notes/commits
+- Open question: should we adopt --depth or --shallow tags so
+  the per-commit notes survive shallow clones? Probably not
+  worth the complexity for a small repo.
+- Worth a follow-up: a gmake notes-push target that does the
+  refs/notes/commits push so users don't have to remember the
+  ref name.
