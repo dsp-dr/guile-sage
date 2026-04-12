@@ -29,7 +29,9 @@
   #:export (repl-start
             repl-eval
             handle-command
-            *commands*))
+            *commands*
+            tool-result-needs-guard?
+            *tool-error-guard-message*))
 
 ;;; REPL State
 
@@ -554,6 +556,29 @@
     ("/undefine-command" . ,cmd-undefine-command)
     ("/commands"  . ,cmd-commands)))
 
+;;; Tool Result Guard (anti-hallucination)
+
+(define (tool-result-needs-guard? result)
+  "Return #t if the tool result is an error, empty, or failure that
+   the model is likely to hallucinate over."
+  (or (string-null? (string-trim-both result))
+      (string-contains result "Tool error:")
+      (string-contains result "Permission denied")
+      (string-contains result "Unsafe path:")
+      (string-contains result "File not found:")
+      (string-contains result "No match found")
+      (string-contains result "not found")
+      (string-contains result "No file results")))
+
+(define *tool-error-guard-message*
+  "IMPORTANT: The tool returned an error or empty result. Report the EXACT tool output to the user verbatim. Do NOT fabricate, invent, guess, or hallucinate any content. If the tool failed, say it failed and suggest what the user can try next.")
+
+(define (guard-tool-result result)
+  "If result indicates error/empty, append the anti-hallucination guard."
+  (if (tool-result-needs-guard? result)
+      (string-append result "\n\n" *tool-error-guard-message*)
+      result))
+
 ;;; Agent Loop
 
 (define (run-agent-loop)
@@ -730,9 +755,11 @@
                         (format #t "~%[Tool: ~a]~%" tool-name)
                         (format #t "~a~%" result)
 
-                        (session-add-message "user"
-                                            (format #f "Tool result for ~a:\n~a"
-                                                    tool-name result))
+                        ;; Guard tool result to suppress hallucination
+                        (let ((guarded (guard-tool-result result)))
+                          (session-add-message "user"
+                                              (format #f "Tool result for ~a:\n~a"
+                                                      tool-name guarded)))
 
                         ;; Non-streaming follow-up after tool execution
                         (let* ((follow-up (ollama-chat model (session-get-context)))
@@ -789,9 +816,11 @@
                         (format #t "~%[Tool: ~a]~%" tool-name)
                         (format #t "~a~%" result)
 
-                        (session-add-message "user"
-                                            (format #f "Tool result for ~a:\n~a"
-                                                    tool-name result))
+                        ;; Guard tool result to suppress hallucination
+                        (let ((guarded (guard-tool-result result)))
+                          (session-add-message "user"
+                                              (format #f "Tool result for ~a:\n~a"
+                                                      tool-name guarded)))
 
                         (let* ((follow-up (ollama-chat model (session-get-context)))
                                (follow-msg (assoc-ref follow-up "message"))
