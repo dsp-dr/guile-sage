@@ -24,7 +24,11 @@
             json-read-string
             json-write-string
             string-replace-substring
-            make-temp-file))
+            make-temp-file
+            ;; HTTP debug logging (SAGE_DEBUG_HTTP=1)
+            http-debug-enabled?
+            http-debug-log-file
+            http-debug-log!))
 
 ;;; ============================================================
 ;;; JSON Parser (minimal implementation)
@@ -185,6 +189,82 @@
     (lambda (port) (json-write obj port))))
 
 ;;; ============================================================
+;;; HTTP Debug Logging
+;;; ============================================================
+;;;
+;;; When SAGE_DEBUG_HTTP=1, every request/response that passes through
+;;; http-post / http-post-with-timeout / http-post-streaming gets dumped
+;;; as one JSONL line to .logs/http.jsonl. Lets us bidirectionally
+;;; verify model/protocol compliance (compare what sage sends vs what
+;;; curl would send) without rebuilding the request by hand.
+;;;
+;;; Bodies > 8192 chars are truncated unless SAGE_DEBUG_HTTP_FULL=1.
+;;; Logging failures are silently swallowed so they never break the
+;;; HTTP path itself.
+
+(define (http-debug-enabled?)
+  (and (getenv "SAGE_DEBUG_HTTP") #t))
+
+(define (http-debug-full-bodies?)
+  (and (getenv "SAGE_DEBUG_HTTP_FULL") #t))
+
+(define (http-debug-log-file)
+  (let ((dir (or (getenv "SAGE_LOG_DIR")
+                 (string-append (getcwd) "/.logs"))))
+    (string-append dir "/http.jsonl")))
+
+(define (http-debug-now-iso)
+  ;; ISO 8601 in UTC, microsecond precision
+  (let* ((t (gettimeofday))
+         (sec (car t))
+         (usec (cdr t))
+         (gm (gmtime sec)))
+    (format #f "~4,'0d-~2,'0d-~2,'0dT~2,'0d:~2,'0d:~2,'0d.~6,'0dZ"
+            (+ 1900 (tm:year gm))
+            (+ 1 (tm:mon gm))
+            (tm:mday gm)
+            (tm:hour gm)
+            (tm:min gm)
+            (tm:sec gm)
+            usec)))
+
+(define (http-debug-truncate s)
+  (cond
+   ((not (string? s)) "")
+   ((http-debug-full-bodies?) s)
+   ((> (string-length s) 8192)
+    (string-append (substring s 0 8192)
+                   (format #f "...[truncated, full size=~a]" (string-length s))))
+   (else s)))
+
+(define (http-debug-log! entry)
+  "Append a JSONL entry to .logs/http.jsonl. Never throws."
+  (when (http-debug-enabled?)
+    (catch #t
+      (lambda ()
+        (let* ((path (http-debug-log-file))
+               (dir (dirname path)))
+          (unless (file-exists? dir)
+            (system (format #f "mkdir -p '~a'" dir)))
+          (let ((port (open-file path "a")))
+            (display (json-write-string entry) port)
+            (newline port)
+            (close-port port))))
+      (lambda args #f))))
+
+(define (http-debug-headers->display headers)
+  ;; Render header alist as a list of "k: v" pairs for the log entry.
+  ;; Redacts Authorization values to avoid leaking bearer tokens.
+  (map (lambda (h)
+         (let ((k (car h))
+               (v (cdr h)))
+           (if (and (string? k)
+                    (string-ci=? k "Authorization"))
+               (format #f "~a: <redacted>" k)
+               (format #f "~a: ~a" k v))))
+       headers))
+
+;;; ============================================================
 ;;; HTTP Client
 ;;; - Native Guile (web client) for HTTP requests
 ;;; - curl fallback for HTTPS (gnutls cert issues)
@@ -339,24 +419,71 @@
 
 ;;; http-post: Native for HTTP, curl fallback for HTTPS
 (define* (http-post url body #:key (headers '()))
-  (catch #t
-    (lambda ()
-      (if (https? url)
-          (http-post-curl url body #:headers headers)
-          (http-post-native url body #:headers headers)))
-    (lambda (key . args)
-      (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
+  (let ((start (gettimeofday)))
+    (http-debug-log!
+     `(("ts" . ,(http-debug-now-iso))
+       ("type" . "request")
+       ("method" . "POST")
+       ("url" . ,url)
+       ("headers" . ,(list->vector (http-debug-headers->display headers)))
+       ("body_size" . ,(string-length (or body "")))
+       ("body" . ,(http-debug-truncate (or body "")))))
+    (let* ((result (catch #t
+                     (lambda ()
+                       (if (https? url)
+                           (http-post-curl url body #:headers headers)
+                           (http-post-native url body #:headers headers)))
+                     (lambda (key . args)
+                       (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
+           (now (gettimeofday))
+           (elapsed-ms (+ (* 1000 (- (car now) (car start)))
+                          (quotient (- (cdr now) (cdr start)) 1000)))
+           (code (if (pair? result) (car result) 0))
+           (resp (if (pair? result) (cdr result) "")))
+      (http-debug-log!
+       `(("ts" . ,(http-debug-now-iso))
+         ("type" . "response")
+         ("url" . ,url)
+         ("code" . ,code)
+         ("elapsed_ms" . ,elapsed-ms)
+         ("body_size" . ,(string-length (or resp "")))
+         ("body" . ,(http-debug-truncate (or resp "")))))
+      result)))
 
 ;;; http-post-with-timeout: POST with explicit timeout in seconds
 ;;; Native for HTTP (timeout ignored -- local network), curl for HTTPS
 (define* (http-post-with-timeout url body timeout #:key (headers '()))
-  (catch #t
-    (lambda ()
-      (if (https? url)
-          (http-post-curl url body #:headers headers #:timeout timeout)
-          (http-post-native url body #:headers headers)))
-    (lambda (key . args)
-      (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
+  (let ((start (gettimeofday)))
+    (http-debug-log!
+     `(("ts" . ,(http-debug-now-iso))
+       ("type" . "request")
+       ("method" . "POST")
+       ("url" . ,url)
+       ("timeout_s" . ,timeout)
+       ("headers" . ,(list->vector (http-debug-headers->display headers)))
+       ("body_size" . ,(string-length (or body "")))
+       ("body" . ,(http-debug-truncate (or body "")))))
+    (let* ((result (catch #t
+                     (lambda ()
+                       (if (https? url)
+                           (http-post-curl url body #:headers headers #:timeout timeout)
+                           (http-post-native url body #:headers headers)))
+                     (lambda (key . args)
+                       (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
+           (now (gettimeofday))
+           (elapsed-ms (+ (* 1000 (- (car now) (car start)))
+                          (quotient (- (cdr now) (cdr start)) 1000)))
+           (code (if (pair? result) (car result) 0))
+           (resp (if (pair? result) (cdr result) "")))
+      (http-debug-log!
+       `(("ts" . ,(http-debug-now-iso))
+         ("type" . "response")
+         ("url" . ,url)
+         ("code" . ,code)
+         ("elapsed_ms" . ,elapsed-ms)
+         ("body_size" . ,(string-length (or resp "")))
+         ("body" . ,(http-debug-truncate (or resp "")))))
+      result)))
 
 ;;; http-post-streaming-curl: Curl fallback for HTTPS streaming
 (define* (http-post-streaming-curl url body on-chunk
@@ -413,15 +540,52 @@
 ;;; Returns: The final chunk (where "done" is #t), or #f
 (define* (http-post-streaming url body on-chunk
                               #:key (timeout 30) (headers '()))
-  (catch #t
-    (lambda ()
-      (if (https? url)
-          (http-post-streaming-curl url body on-chunk
-                                    #:timeout timeout #:headers headers)
-          (http-post-streaming-native url body on-chunk
-                                      #:timeout timeout #:headers headers)))
-    (lambda (key . args)
-      #f)))
+  (let ((start (gettimeofday))
+        ;; Capture chunks for the debug log without disturbing the
+        ;; caller's on-chunk handler. Each chunk is the parsed JSON
+        ;; alist, so we just count and serialize the count + first/last.
+        (chunk-count 0)
+        (first-chunk #f)
+        (last-chunk #f))
+    (http-debug-log!
+     `(("ts" . ,(http-debug-now-iso))
+       ("type" . "request")
+       ("method" . "POST-stream")
+       ("url" . ,url)
+       ("timeout_s" . ,timeout)
+       ("headers" . ,(list->vector (http-debug-headers->display headers)))
+       ("body_size" . ,(string-length (or body "")))
+       ("body" . ,(http-debug-truncate (or body "")))))
+    (let* ((wrapped-on-chunk
+            (if (http-debug-enabled?)
+                (lambda (chunk)
+                  (set! chunk-count (1+ chunk-count))
+                  (unless first-chunk (set! first-chunk chunk))
+                  (set! last-chunk chunk)
+                  (on-chunk chunk))
+                on-chunk))
+           (result (catch #t
+                     (lambda ()
+                       (if (https? url)
+                           (http-post-streaming-curl url body wrapped-on-chunk
+                                                     #:timeout timeout #:headers headers)
+                           (http-post-streaming-native url body wrapped-on-chunk
+                                                       #:timeout timeout #:headers headers)))
+                     (lambda (key . args) #f)))
+           (now (gettimeofday))
+           (elapsed-ms (+ (* 1000 (- (car now) (car start)))
+                          (quotient (- (cdr now) (cdr start)) 1000))))
+      (http-debug-log!
+       `(("ts" . ,(http-debug-now-iso))
+         ("type" . "response-stream")
+         ("url" . ,url)
+         ("elapsed_ms" . ,elapsed-ms)
+         ("chunk_count" . ,chunk-count)
+         ("first_chunk" . ,(http-debug-truncate
+                            (if first-chunk (json-write-string first-chunk) "")))
+         ("last_chunk" . ,(http-debug-truncate
+                           (if last-chunk (json-write-string last-chunk) "")))))
+      result)))
 
 ;;; ============================================================
 ;;; String Utilities
