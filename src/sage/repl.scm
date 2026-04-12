@@ -3,14 +3,14 @@
 ;;; Commentary:
 ;;
 ;; Interactive REPL for guile-sage with slash commands.
-;; Manages conversation flow with Ollama backend.
+;; Manages conversation flow via provider dispatch (Ollama, Gemini, OpenAI).
 
 (define-module (sage repl)
   #:use-module (sage config)
   #:use-module (sage util)
   #:use-module (sage logging)
   #:use-module (sage ollama)
-  #:use-module (sage openai)
+  #:use-module (sage provider)
   #:use-module (sage session)
   #:use-module (sage tools)
   #:use-module (sage version)
@@ -39,19 +39,6 @@
 (define *running* #t)
 (define *debug* #f)
 
-;;; Provider dispatch — SAGE_PROVIDER=ollama (default) or openai/litellm
-(define (current-provider)
-  (let ((p (or (getenv "SAGE_PROVIDER") (config-get "PROVIDER") "ollama")))
-    (if (equal? p "litellm") "openai" p)))
-(define (use-openai?) (equal? (current-provider) "openai"))
-(define (provider-model) (if (use-openai?) (openai-model) (provider-model)))
-(define (provider-host) (if (use-openai?) (openai-host) (ollama-host)))
-(define (provider-chat-with-tools m msgs tools)
-  (if (use-openai?) (openai-chat-with-tools m msgs tools) (ollama-chat-with-tools m msgs tools)))
-(define (provider-parse-tool-call msg)
-  (if (use-openai?) (openai-parse-tool-call msg) (ollama-parse-tool-call msg)))
-(define (provider-extract-token-usage r)
-  (if (use-openai?) (openai-extract-token-usage r) (ollama-extract-token-usage r)))
 (define *streaming* (not (equal? "0" (or (getenv "SAGE_STREAMING") ""))))
 (define *available-tiers* '())
 (define *history-file* #f)  ;; project-scoped readline history path
@@ -106,7 +93,7 @@
          (ws (workspace))
          (repo (and ws (extract-repo-name ws)))
          (model (provider-model))
-         (api-host (ollama-host))
+         (api-host (provider-host))
          (label (endpoint-label api-host))
          (status (session-status))
          (tokens (or (assoc-ref status "total_tokens") 0))
@@ -227,7 +214,7 @@
   #t)
 
 (define (cmd-models args)
-  (let ((models (ollama-list-models)))
+  (let ((models (provider-list-models)))
     (display "Available models:\n")
     (for-each
      (lambda (m)
@@ -290,13 +277,13 @@
 
 (define (cmd-stream args)
   (set! *streaming* (not *streaming*))
-  (format #t "Streaming: ~a~%" (if (and *streaming* (not (use-openai?))) "ON" "OFF"))
+  (format #t "Streaming: ~a~%" (if *streaming* "ON" "OFF"))
   #t)
 
 (define (cmd-version args)
   (format #t "guile-sage v~a~%" (version-string))
   (format #t "Guile: ~a~%" (version))
-  (format #t "Backend: Ollama (~a)~%" (ollama-host))
+  (format #t "Backend: ~a (~a)~%" (current-provider) (provider-host))
   #t)
 
 (define (cmd-reload args)
@@ -309,10 +296,11 @@
       (reload-module (resolve-module '(sage config)))
       (reload-module (resolve-module '(sage logging)))
       (reload-module (resolve-module '(sage ollama)))
+      (reload-module (resolve-module '(sage provider)))
       (reload-module (resolve-module '(sage tools)))
       (reload-module (resolve-module '(sage session)))
       ;; Don't reload repl - we're running in it!
-      (display "Reloaded: util, config, logging, ollama, tools, session\n")
+      (display "Reloaded: util, config, logging, ollama, provider, tools, session\n")
       (display "Note: repl module requires restart\n"))
     (lambda (key . args)
       (format #t "Reload error: ~a ~a~%" key args)))
@@ -426,7 +414,7 @@
         (format #t "  ✗ ~a: ~a~%" label key)
         #f)))
 
-  (let ((host (ollama-host))
+  (let ((host (provider-host))
         (model (provider-model))
         (pass-count 0)
         (fail-count 0))
@@ -453,7 +441,7 @@
         (display "\nModels:\n")
         (catch #t
           (lambda ()
-            (let ((models (ollama-list-models)))
+            (let ((models (provider-list-models)))
               (for-each
                (lambda (m)
                  (let ((name (assoc-ref m "name")))
@@ -796,11 +784,11 @@
     ;; Call Ollama - streaming or non-streaming
     (catch #t
       (lambda ()
-        (if (and *streaming* (not (use-openai?)))
+        (if *streaming*
             ;; --- Streaming path ---
             (let ((start-time (current-time)))
               (status-stream-start model)
-              (let* ((response (ollama-chat-streaming
+              (let* ((response (provider-chat-streaming
                                 model messages
                                 status-stream-token
                                 #:tools tools))
@@ -922,8 +910,9 @@
   (init-logging)
   (log-info "repl" "REPL starting"
             `(("version" . ,(version-string))
+              ("provider" . ,(symbol->string (current-provider)))
               ("model" . ,(provider-model))
-              ("host" . ,(ollama-host))
+              ("host" . ,(provider-host))
               ("workspace" . ,(getcwd))))
 
   ;; Initialize tools
@@ -943,40 +932,40 @@
       (log-info "repl" (format #f "Loaded ~a custom command~a" n
                                 (if (= n 1) "" "s")))))
 
-  (unless (use-openai?)
   ;; Probe available models, configure tiers, and validate that the
-  ;; configured model is actually installed locally. If it has been
-  ;; removed (e.g. via `ollama rm`), fall back to the first
-  ;; chat-capable model and tell the user.
+  ;; configured model is actually installed locally. For Ollama, fall
+  ;; back to the first chat-capable model if the configured one was
+  ;; removed. For Gemini/OpenAI, just probe the model list.
   (catch #t
     (lambda ()
-      (let* ((models (ollama-list-models))
+      (let* ((models (provider-list-models))
              (model-names (map (lambda (m) (assoc-ref m "name")) models)))
         (set! *available-tiers* (load-model-tiers model-names))
         (log-info "repl" "Model tiers loaded"
                   `(("tiers" . ,(length *available-tiers*))
                     ("models" . ,(length models))))
-        ;; Validate the configured model
-        (let* ((preferred (provider-model))
-               (chosen (select-fallback-model preferred models)))
-          (cond
-           ((not chosen)
-            (log-error "repl" "No models installed locally"
-                       `(("preferred" . ,preferred)))
-            (format #t "ERROR: ~a not found and no chat models installed.~%"
-                    preferred)
-            (format #t "       Run `ollama pull llama3.2` to fix.~%"))
-           ((not (equal? preferred chosen))
-            (log-warn "repl" "Configured model unavailable, falling back"
-                      `(("preferred" . ,preferred) ("chosen" . ,chosen)))
-            (format #t "~%WARNING: model '~a' is not installed locally.~%" preferred)
-            (format #t "         Falling back to '~a'.~%" chosen)
-            (format #t "         Override with: SAGE_MODEL=<name>~%~%")
-            (setenv "SAGE_MODEL" chosen))))))
+        ;; Validate the configured model (Ollama-specific fallback)
+        (when (eq? (current-provider) 'ollama)
+          (let* ((preferred (provider-model))
+                 (chosen (select-fallback-model preferred models)))
+            (cond
+             ((not chosen)
+              (log-error "repl" "No models installed locally"
+                         `(("preferred" . ,preferred)))
+              (format #t "ERROR: ~a not found and no chat models installed.~%"
+                      preferred)
+              (format #t "       Run `ollama pull llama3.2` to fix.~%"))
+             ((not (equal? preferred chosen))
+              (log-warn "repl" "Configured model unavailable, falling back"
+                        `(("preferred" . ,preferred) ("chosen" . ,chosen)))
+              (format #t "~%WARNING: model '~a' is not installed locally.~%" preferred)
+              (format #t "         Falling back to '~a'.~%" chosen)
+              (format #t "         Override with: SAGE_MODEL=<name>~%~%")
+              (setenv "SAGE_MODEL" chosen)))))))
     (lambda (key . args)
       (set! *available-tiers* *model-tiers*)
       (log-warn "repl" "Failed to probe models, using defaults"
-                `(("error" . ,(format #f "~a" key))))))) ; close catch + unless
+                `(("error" . ,(format #f "~a" key)))))) ; close catch
 
   ;; Check for debug mode
   (when (config-get "DEBUG")
