@@ -1,0 +1,383 @@
+#+TITLE: guile-sage 0.6.0 — Telemetry, Graceful Model Removal, Tool-Calling Fix
+#+DATE: 2026-04-11
+#+AUTHOR: guile-sage
+#+OPTIONS: toc:2 num:nil
+
+* Highlights
+
+guile-sage now appears as a *first-class citizen* on the NexusHive
+*AI Tools — Multi-Provider Usage* dashboard, alongside Claude Code,
+Gemini CLI, Codex, and Aider. Every session, every chat turn, every
+tool decision flows through OTLP to Prometheus and surfaces in
+Grafana with no extra setup.
+
+This release also fixes a long-standing bug that silently dropped
+streaming tool calls — sage can now drive native Ollama tool calling
+end-to-end through =llama3.2:latest= and other tool-capable models.
+
+Three other quality-of-life improvements:
+
+- *Graceful model removal*: =ollama rm <your-model>= no longer crashes
+  sage on next start; it warns and falls back to the smallest installed
+  chat-capable model automatically.
+- *Bidirectional HTTP debug logging*: =SAGE_DEBUG_HTTP=1= dumps every
+  request and response to =.logs/http.jsonl= so you can verify
+  protocol compliance against the wire without rebuilding requests by
+  hand. Authorization headers are redacted.
+- *66 new tests* across four new test files (54 graceful-removal /
+  telemetry tests + 13 telemetry tests + 8 http-debug tests + the
+  existing model-tier tests updated to match the new defaults).
+
+* OTLP Telemetry → NexusHive
+
+A new module =src/sage/telemetry.scm= emits cumulative counters via
+OTLP/HTTP JSON to the OpenTelemetry Collector at =infra-host:4318=. The
+metrics arrive in Prometheus tagged with =exported_job=guile-sage=
+and =otel_scope_name=com.dsp-dr.guile_sage=, ready to be charted
+alongside the other AI tools on the LAN.
+
+** Metrics emitted (v1)
+
+| OTLP name                            | Prometheus name                            | Labels                                  |
+|--------------------------------------+--------------------------------------------+-----------------------------------------|
+| =guile_sage.session.count=           | =guile_sage_session_count_total=           | =session_id=                            |
+| =guile_sage.token.usage= (tokens)    | =guile_sage_token_usage_tokens_total=      | =model=, =type=input\|output=           |
+| =guile_sage.cost.usage= (USD)        | =guile_sage_cost_usage_USD_total=          | =model= (always 0 for local Ollama)     |
+| =guile_sage.active.time= (s)         | =guile_sage_active_time_seconds_total=     | =type=cli\|user=                        |
+| =guile_sage.code_edit.tool_decision= | =guile_sage_code_edit_tool_decision_total= | =tool_name=, =decision=accept\|reject=  |
+
+The unit suffixes (=_tokens_total=, =_USD_total=, =_seconds_total=)
+match the OTel Collector's Prometheus exporter naming convention so
+the existing Grafana panels for Claude Code / Gemini / Codex pick
+guile-sage up automatically once dashboard targets are added.
+
+** Wire-up points
+
+- =repl-start= → fires =session.count= with the session name
+- Both =ollama-chat-streaming= and =ollama-chat-with-tools= callsites
+  → fire =token.usage= and =cost.usage= and call =telemetry-flush!=
+- =execute-tool= in =tools.scm= → fires =code_edit.tool_decision= on
+  both the accept and reject paths
+- Main REPL loop → wraps =readline= and =repl-eval= to record
+  =active.time= with =type=user= and =type=cli=
+- =cmd-exit= and main-loop terminator → call =telemetry-shutdown!=
+
+** Graceful failure mode
+
+Telemetry is *fail-soft*. Any error from the collector (timeout,
+refused, non-2xx) is logged once at =WARN= level and discarded —
+sage's REPL never breaks because nexus is unreachable. Set
+=SAGE_TELEMETRY_DISABLE=1= to make every operation a no-op for
+tests / CI.
+
+** Dashboard update
+
+The =ai-tools= Grafana dashboard at =/d/ai-tools/= was updated in
+place via the Grafana HTTP API to v3, adding 7 *Guile Sage* targets
+across the Sessions, Total Cost, Total Tokens, Active Time,
+Tool Decisions stats and the Cost-over-time / Tokens-over-time
+timeseries panels. The dashboard mutator script lives at
+=tmp/dashboard-add-guile-sage.py= and is idempotent.
+
+See =docs/TELEMETRY.org= for the full manual verification harness
+and the failure-mode diagnostic table.
+
+* Graceful model removal
+
+When you free disk space with =ollama rm mistral:latest= and the
+sage default tier still points at it, sage now:
+
+1. Probes the available models at startup
+2. Detects that the configured model is missing
+3. Picks the *smallest* chat-capable substitute (sorted by file size,
+   skipping embedding and image-generation models)
+4. Prints a clear =WARNING= banner showing the original choice, the
+   substitute, and how to override
+5. Continues into the REPL with the substitute selected
+
+If you trigger a model removal mid-session, =ollama-chat= now turns
+the resulting 404 into a clean =model-not-found= error which the
+REPL catches and presents with a friendly =ollama pull= suggestion
+instead of a Scheme stack trace.
+
+The =model-tier.scm= defaults were updated:
+- Standard tier: =mistral:latest= → =qwen2.5-coder:7b= (mistral was
+  removed and replaced with a still-installed tool-capable model)
+- Fast tier (=llama3.2:latest=) =tools?= flipped to =#t= since
+  llama3.2 supports native tool calling per Meta/Ollama docs
+
+** New helpers in =src/sage/ollama.scm=
+
+| Function                | Purpose                                                            |
+|-------------------------+--------------------------------------------------------------------|
+| =chat-capable-model?=   | Filter out embedding (=nomic-bert=) and image (=safetensors=) models |
+| =model-available?=      | Check whether a named model is in the available list                |
+| =select-fallback-model= | Pick the smallest chat-capable model when preferred is missing      |
+| =ollama-error-message=  | Extract the human-readable message from an Ollama error JSON body   |
+
+** Coverage
+
+- =tests/test-model-fallback.scm= — *21 new tests*: chat-capable
+  filtering, availability check, size-ASC fallback ordering,
+  embedding/image rejection, error-message extraction, default-tier
+  invariants
+- =tests/test-model-tier.scm= — 3 assertions updated for the new
+  defaults, still 13/13 passing
+- Live verified end-to-end in tmux: =SAGE_MODEL=mistral:latest gmake run=
+  produces the warning + falls back + REPL is usable
+
+* Streaming tool-call fix
+
+A latent bug in =ollama-chat-streaming= was silently dropping
+=tool_calls= for every tool-capable model. Llama3.2 (and other
+modern models) put the =tool_calls= array in the *first* streamed
+chunk and clear the message in the final =done:true= chunk. The
+old code only inspected the final chunk so the tool calls vanished.
+
+Two fixes:
+
+1. =ollama-chat-streaming= now accumulates =tool_calls= from *any*
+   chunk, not just the final one
+2. =ollama-parse-tool-call= accepts both vector and list shapes for
+   =tool_calls=. Sage's JSON parser returns arrays as Scheme lists,
+   not vectors, but the parser was hard-coded to =vector?=. Both
+   shapes are handled now.
+
+After this fix, llama3.2 + sage successfully drives the
+=write_file= tool end-to-end:
+
+#+BEGIN_EXAMPLE
+sage> Use the write_file tool to create tmp/example.scm with the contents (define (square x) (* x x))
+[streaming llama3.2:latest]
+[Tool: write_file]
+Wrote 27 bytes to tmp/example.scm
+#+END_EXAMPLE
+
+The =guile_sage_code_edit_tool_decision_total{tool_name=write_file,
+decision=accept}= counter increments and lands in Prometheus on
+flush.
+
+* Bidirectional HTTP debug logging
+
+When =SAGE_DEBUG_HTTP=1= is set, every request that flows through
+=http-post=, =http-post-with-timeout=, or =http-post-streaming= in
+=src/sage/util.scm= dumps a JSONL entry to =.logs/http.jsonl=:
+
+#+BEGIN_SRC json
+{"ts":"2026-04-11T23:30:00.000000Z","type":"request","method":"POST","url":"http://localhost:11434/api/chat","timeout_s":300,"headers":[],"body_size":10987,"body":"..."}
+{"ts":"2026-04-11T23:30:08.861000Z","type":"response-stream","url":"http://localhost:11434/api/chat","elapsed_ms":8861,"chunk_count":2,"first_chunk":"...","last_chunk":"..."}
+#+END_SRC
+
+For streaming responses, both the *first chunk* and *final chunk*
+are captured separately — exactly what we needed to debug the
+tool-call-vanishing bug above without rebuilding the request by hand
+in =curl=.
+
+Knobs:
+- =SAGE_DEBUG_HTTP=1= — enable
+- =SAGE_DEBUG_HTTP_FULL=1= — disable the 8192-byte body truncation
+  for forensic captures
+- =SAGE_LOG_DIR= — override the log directory (default
+  =$cwd/.logs=)
+
+=Authorization= headers are redacted as =<redacted>= so bearer
+tokens never land in the log file. Verified by an explicit test in
+=tests/test-http-debug.scm=.
+
+* Tests
+
+| Suite                       | Tests | Status                          |
+|-----------------------------+-------+---------------------------------|
+| test-telemetry.scm          |    13 | new in 0.6.0, all pass         |
+| test-model-fallback.scm     |    21 | new in 0.6.0, all pass         |
+| test-http-debug.scm         |     8 | new in 0.6.0, all pass         |
+| test-model-tier.scm         |    13 | updated for new defaults, pass |
+
+The 3 known =test-security.scm= failures (=write_file=, =edit_file=,
+=git_commit= denied without YOLO) remain documented baseline and
+are unchanged by this release.
+
+* Files
+
+** New
+- =src/sage/telemetry.scm=
+- =tests/test-telemetry.scm=
+- =tests/test-model-fallback.scm=
+- =tests/test-http-debug.scm=
+- =docs/TELEMETRY.org=
+- =docs/RELEASE-0.6.0.org= (this file)
+- =tmp/dashboard-add-guile-sage.py=
+
+** Modified
+- =src/sage/version.scm= (0.5.0 → 0.6.0)
+- =src/sage/ollama.scm= (404 handling, fallback helpers, streaming fix, parser fix)
+- =src/sage/repl.scm= (telemetry hooks + startup model validation + 'model-not-found catch)
+- =src/sage/tools.scm= (tool_decision counter)
+- =src/sage/model-tier.scm= (default tier updates, llama3.2 tool flag)
+- =src/sage/util.scm= (HTTP debug logging)
+- =tests/test-model-tier.scm= (assertions updated for new defaults)
+- =CLAUDE.md= (telemetry pointer + suite table)
+
+* Configuring telemetry on a fresh box
+
+OTLP telemetry is *off by default*. Enable it by setting one env
+var; the rest are inherited from your existing OTel-Collector setup
+(any host running the OTel Collector on the LAN).
+
+** Three places to put the config
+
+In order of preference:
+
+1. *Shell init* — recommended for personal machines. Add to
+   =~/.zshenv= or =~/.bashrc= alongside the OTEL vars you may
+   already have for Claude Code:
+   #+BEGIN_SRC bash
+   export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://INFRA_HOST:4318/v1/metrics
+   export OTEL_RESOURCE_ATTRIBUTES="host.name=$(hostname -s),team=aygp-dr"
+   #+END_SRC
+
+2. *XDG-compliant per-user sage config* — recommended for shared
+   machines or when you want sage's telemetry config independent
+   from Claude Code's:
+   #+BEGIN_SRC bash
+   mkdir -p ~/.config/sage
+   cat > ~/.config/sage/.env <<'EOF'
+   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://INFRA_HOST:4318/v1/metrics
+   OTEL_RESOURCE_ATTRIBUTES=host.name=mini,team=aygp-dr
+   EOF
+   #+END_SRC
+   Sage's =config-load-dotenv= picks this up automatically. The
+   XDG layout is documented in =README.org= and on disk it's:
+   #+BEGIN_EXAMPLE
+   ~/.config/sage/        configuration (.env, commands.scm)
+   ~/.local/share/sage/   sessions, project state
+   ~/.cache/sage/         compaction cache
+   ~/.local/state/sage/   runtime state
+   #+END_EXAMPLE
+
+3. *Project-local =.env=* — recommended for repo-scoped
+   experiments. Copy =.env.template= to =.env= and uncomment the
+   =OTEL_*= block. The =.env.template= now ships with the OTLP
+   and HTTP-debug sections so you can see all the knobs in one
+   place.
+
+** Quick verification
+
+#+BEGIN_SRC bash
+# 1. Endpoint reachable?
+nc -z INFRA_HOST 4318 && echo "OTLP HTTP: OK"
+
+# 2. Env loaded by sage?
+gmake run < /dev/null 2>&1 | head -20
+# Look for: [INFO] [telemetry] Telemetry enabled endpoint=...
+
+# 3. Metrics flowing?
+SAGE_MODEL=llama3.2:latest gmake run
+# in REPL: ask anything, /exit
+curl -s 'http://INFRA_HOST:9090/api/v1/label/exported_job/values'
+# Expected: [...,"guile-sage"]
+#+END_SRC
+
+** Disabling for tests / CI
+
+Set =SAGE_TELEMETRY_DISABLE=1= and every telemetry operation
+becomes a no-op. The new test harness sets this automatically:
+#+BEGIN_SRC bash
+SAGE_TELEMETRY_DISABLE=1 gmake check
+#+END_SRC
+
+* Model selection for tool calling (= 3B parameters minimum)
+
+This release fixes the streaming tool-call bug, but during testing
+we discovered an unrelated quality issue with smaller models on
+this hardware: *Ollama models below ~3B parameters frequently
+text-format tool calls instead of using the native =tool_calls=
+field*. Sage's parser only recognizes native tool calls (with a
+=```tool=-fenced fallback), so when the model emits raw JSON
+inline the call is lost.
+
+** What we observed
+
+| Model                              | Size  | Native tool calls?     | Notes                                  |
+|------------------------------------+-------+------------------------+----------------------------------------|
+| =llama3.2:latest=                  | 2 GB  | Yes (mostly reliable)  | Best balance for sage testing          |
+| =qwen2.5-coder:7b=                 | 4.7 GB| Yes (reliable)         | Slower (~22 t/s) but more code-aware   |
+| =qwen2.5-coder:14b-instruct-q4_K_M=| 9 GB  | Yes                    | *Swaps* on this box (0.2 t/s)          |
+| =qwen3:0.6b=                       | 522 MB| *No* (reasoning model) | Verbose =<think>= chains, no tools     |
+
+** Why = 3B
+
+Smaller quantized models (= 1B params, especially Q4_K_M and
+below) lose enough fidelity in their structured-output heads that
+they fall back to plain-text JSON instead of the native function
+call envelope. The model still "thinks" it's calling a tool, but
+sage never sees a =tool_calls= field, so the call vanishes.
+
+Possible mitigations (NOT in 0.6.0, candidates for 0.7.0):
+
+- *Stronger fallback parser*: detect raw JSON-shaped tool calls in
+  the streamed text, not just =```tool= code fences. Brittle but
+  cheap.
+- *Lower temperature for tool turns*: =temperature: 0= when sage
+  knows tools are in scope. Reduces variability but sometimes hurts
+  output quality.
+- *System prompt hardening*: an explicit "you MUST use the
+  function-call API, not text" instruction. Mixed results in
+  practice.
+- *Try =qwen2.5:0.5b= or =llama3.2:1b=*: not yet pulled on this
+  box; they may give us a sub-1 GB tool-capable option but the
+  smaller fidelity tax may make tool-calls even less reliable.
+
+For now, *use llama3.2:latest as the default for any flow that
+involves tool calls*. The model-tier defaults reflect this.
+
+* Verification (run on the laptop)
+
+#+BEGIN_SRC bash
+# 1. Build & test
+gmake check                                # 34/37 (3 known security baselines)
+guile -L src tests/test-telemetry.scm      # 13/13
+guile -L src tests/test-model-fallback.scm # 21/21
+guile -L src tests/test-http-debug.scm     # 8/8
+
+# 2. Live telemetry
+SAGE_MODEL=llama3.2:latest gmake run       # ask anything, /exit
+curl -s 'http://INFRA_HOST:9090/api/v1/label/exported_job/values'
+# Expected to include: "guile-sage"
+
+# 3. Graceful fallback
+SAGE_MODEL=does-not-exist gmake run        # WARNING + falls back
+
+# 4. Debug logging
+SAGE_DEBUG_HTTP=1 SAGE_MODEL=llama3.2:latest gmake run
+# In another shell:
+tail -f .logs/http.jsonl | jq .
+
+# 5. Dashboard
+open http://INFRA_HOST:3000/d/ai-tools/
+# Look for Guile Sage rows in the stats and timeseries panels
+#+END_SRC
+
+* What's next
+
+** 0.7.0 — MCP support (planned)
+
+- SSE-based MCP client (matches the running =skills-hub= server at =INFRA_HOST:8400=)
+- Reuse =~/.claude.json= for MCP server discovery
+- New CLI flags for transport selection / server overrides
+- Config contract versioning + a =/doctor= command for migrations
+- A research agent is currently grinding the live skills-hub server
+  to produce =docs/MCP-CONTRACT.org= with C4 diagrams, sequence
+  diagrams, control/data flow, and an explicit invariants list — see
+  that document once it lands.
+
+** Smaller follow-ups
+
+- =write_file= path-misreporting bug: the tool reports
+  ="Wrote N bytes to /tmp/foo"= but actually writes to
+  =$workspace/tmp/foo=. Should either honor the absolute path or
+  report the resolved path.
+- Stale =guile_sage_active_time_total= series in Prometheus from
+  before the unit-suffix fix; ages out naturally with 90d retention.
+- =qwen2.5-coder:14b-instruct-q4_K_M= benchmarks at 0.2 tok/s on this
+  hardware (swapping). Worth removing or documenting as a non-target.

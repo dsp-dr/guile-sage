@@ -36,8 +36,13 @@ src/sage/
   status.scm        Status display
   util.scm          HTTP/JSON utilities
   irc.scm           IRC integration (optional)
+  telemetry.scm     OTLP/HTTP JSON metric emission to infra-host:4318
   version.scm       Semver constants
 ```
+
+OTLP telemetry: see `docs/TELEMETRY.org` for the manual verification harness
+and metric naming. Counters land in Prometheus on nexus and surface on the
+AI Tools — Multi-Provider dashboard at `/d/ai-tools/`.
 
 ## Test Suites
 
@@ -49,6 +54,7 @@ src/sage/
 | test-compaction.scm | 9 | Context compression |
 | test-compaction-security.scm | 4 | Compaction + safety |
 | test-pbt.scm | 40 | Property-based (4,000 trials) |
+| test-telemetry.scm | 13 | OTLP payload + counter accumulation |
 
 ## Conventions
 

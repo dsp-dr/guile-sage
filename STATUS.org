@@ -1,8 +1,8 @@
 #+TITLE: guile-sage Project Status
-#+DATE: 2026-01-26
+#+DATE: 2026-04-11
 #+OPTIONS: toc:2 num:nil
 
-* Project Status: v0.5.0
+* Project Status: v0.6.0
 
 ** Summary
 
@@ -50,11 +50,13 @@ guile-sage is a functional AI REPL written in Guile Scheme that provides:
 |------------+-------+--------|
 | test-session.scm | 18/18 | PASS |
 | test-tools.scm | 26/26 | PASS |
-| test-security.scm | 31/34 | PASS (3 minor) |
+| test-security.scm | 31/34 | PASS (3 known) |
 | test-compaction.scm | 9/9 | PASS |
 | test-compaction-security.scm | 4/4 | PASS |
-
-Total: 88 tests, 85 passing
+| test-telemetry.scm | 13/13 | PASS (new in 0.6.0) |
+| test-model-fallback.scm | 21/21 | PASS (new in 0.6.0) |
+| test-http-debug.scm | 8/8 | PASS (new in 0.6.0) |
+| test-model-tier.scm | 13/13 | PASS |
 
 ** Platform Support
 
@@ -72,11 +74,14 @@ Total: 88 tests, 85 passing
 
 | Version | Date | Highlights |
 |---------+------+------------|
+| v0.6.0 | 2026-04-11 | OTLP telemetry, graceful model removal, streaming tool_calls fix, debug HTTP logging |
 | v0.5.0 | 2026-01-26 | Agent tasks, logging, test fixes |
 | v0.4.0 | 2026-01-25 | Context compaction strategies |
 | v0.3.0 | 2026-01-25 | AGENTS.md support, XDG paths |
 | v0.2.0 | 2026-01-24 | Session persistence, git tools |
 | v0.1.0 | 2026-01-24 | Initial release |
+
+See =docs/RELEASE-0.6.0.org= for the full 0.6.0 changelog.
 
 ** Configuration
 

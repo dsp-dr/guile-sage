@@ -127,7 +127,8 @@ guile-sage follows the XDG Base Directory specification:
 
 #+begin_example
 $XDG_CONFIG_HOME/sage/     # ~/.config/sage
-└── (config files)
+├── .env                   # Optional: per-user dotenv (loaded at startup)
+└── commands.scm           # Custom slash commands
 
 $XDG_DATA_HOME/sage/       # ~/.local/share/sage
 ├── sessions/              # Saved conversation sessions
@@ -141,6 +142,15 @@ $XDG_CACHE_HOME/sage/      # ~/.cache/sage
 $XDG_STATE_HOME/sage/      # ~/.local/state/sage
 └── (state files)
 #+end_example
+
+*** Optional: OTLP Telemetry (new in 0.6.0)
+
+guile-sage can emit OpenTelemetry counters (sessions, tokens, tool
+decisions, active time) to any OTel Collector. Enable by setting
+=OTEL_EXPORTER_OTLP_METRICS_ENDPOINT= in any of the three places
+sage looks for config — shell init, =~/.config/sage/.env=, or the
+project-local =.env=. See =docs/TELEMETRY.org= for the full setup
+and verification harness.
 
 Override with environment variables:
 
