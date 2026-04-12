@@ -84,6 +84,30 @@
     (when (check-permission "eval_scheme" '())
       (error "eval_scheme should be unsafe"))))
 
+;;; ADR-0003 contract: every name in the static *safe-tools* list
+;;; must resolve to a registered tool. Catches typos like
+;;; "git_diif" or stale entries left behind after a tool rename.
+(run-test "every *safe-tools* entry is registered"
+  (lambda ()
+    (for-each
+     (lambda (name)
+       (unless (get-tool name)
+         (error "*safe-tools* references unknown tool" name)))
+     *safe-tools*)))
+
+;;; ADR-0003 contract: the mutating tools listed in the ADR must
+;;; never appear in *safe-tools*. Pins the post-5bcc284 fix so a
+;;; future re-add to *safe-tools* trips this assertion immediately.
+(run-test "ADR-unsafe tools are absent from *safe-tools*"
+  (lambda ()
+    (for-each
+     (lambda (name)
+       (when (member name *safe-tools*)
+         (error "tool must not be in *safe-tools*" name)))
+     '("write_file" "edit_file"
+       "git_commit" "git_add_note" "git_push"
+       "eval_scheme" "create_tool" "reload_module" "run_tests"))))
+
 ;;; Path Safety Tests
 
 (format #t "~%--- Path Safety Tests ---~%")
