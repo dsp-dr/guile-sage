@@ -1,0 +1,37 @@
+#+TITLE: Sage System Context (C4 Level 1)
+
+* 1. System Context
+
+#+BEGIN_SRC plantuml :file images/arch-c4-l1.png
+@startuml arch-c4-l1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title guile-sage --- System Context (C4 L1)
+
+Person(user, "Developer", "Terminal interaction via readline.")
+
+System_Boundary(sage_boundary, "guile-sage") {
+  System(sage, "sage REPL", "GNU Guile 3.0 CLI.\nOrchestrates prompts, tool dispatch,\nsessions, context window, telemetry.")
+}
+
+System_Ext(ollama, "Ollama", "LLM runtime.\nlocalhost:11434 (or cloud).\nChat completions + native tool_calls.")
+
+System_Ext(skills_hub, "skills-hub MCP", "Python/uvicorn MCP server.\nnexus:8400/sse.\n~35 skills as tools over HTTP+SSE.")
+
+System_Ext(otel, "OTel Collector", "nexus:4318.\nReceives OTLP/HTTP JSON metrics.")
+
+System_Ext(prometheus, "Prometheus", "nexus:9090.\nScrapes OTel Collector.")
+
+System_Ext(grafana, "Grafana", "nexus:3000.\nAI Tools dashboard /d/ai-tools/.")
+
+Rel(user, sage, "Prompts, /commands", "stdin/tty")
+Rel(sage, ollama, "POST /api/chat\n(NDJSON streaming + tools)", "HTTP")
+Rel(sage, skills_hub, "initialize, tools/list, tools/call", "HTTP POST + SSE\nJSON-RPC 2.0")
+Rel(sage, otel, "POST /v1/metrics", "OTLP/HTTP JSON")
+Rel(otel, prometheus, "Prometheus remote-write", "internal")
+Rel(prometheus, grafana, "PromQL queries", "internal")
+Rel_Back(skills_hub, sage, "SSE message events\n(JSON-RPC responses)", "text/event-stream")
+
+SHOW_LEGEND()
+@enduml
+#+END_SRC
