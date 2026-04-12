@@ -23,6 +23,8 @@
             http-post-streaming
             json-read-string
             json-write-string
+            json-empty-object
+            as-list
             string-replace-substring
             make-temp-file
             ;; HTTP debug logging (SAGE_DEBUG_HTTP=1)
@@ -144,11 +146,30 @@
            (else (display c p))))
        s))))
 
+;;; json-empty-object: Sentinel for an empty JSON object {}.
+;;;
+;;; The JSON parser in this file collapses both [] and {} to '() because
+;;; Scheme has no native distinction between empty list and empty alist.
+;;; That's a one-way lossy decoding which is fine for inbound traffic
+;;; (callers either don't care or specialise on context), but it means
+;;; outbound writers can never produce {} from '() because (null? obj)
+;;; eagerly emits "null".
+;;;
+;;; This sentinel exists so callers that NEED to emit {} explicitly can:
+;;;
+;;;   (json-write-string `(("capabilities" . (("sampling" . ,json-empty-object)))))
+;;;   ;; => "{\"capabilities\":{\"sampling\":{}}}"
+;;;
+;;; Required by MCP's `initialize` request shape (see
+;;; docs/MCP-CONTRACT.org). bd: guile-bw2.
+(define json-empty-object 'json-empty-object)
+
 (define (json-write obj port)
   (cond
    ((eq? obj #t) (display "true" port))
    ((eq? obj #f) (display "false" port))
    ((eq? obj 'null) (display "null" port))
+   ((eq? obj json-empty-object) (display "{}" port))
    ((null? obj) (display "null" port))
    ((number? obj) (display obj port))
    ((string? obj)
@@ -187,6 +208,39 @@
 (define (json-write-string obj)
   (call-with-output-string
     (lambda (port) (json-write obj port))))
+
+;;; as-list: Coerce vector / list / #f / '() to a Scheme list.
+;;;
+;;; sage's JSON parser returns JSON arrays as Scheme LISTS, not vectors.
+;;; But every place in the codebase that *constructs* a JSON array uses
+;;; (list->vector ...) to make it serialize correctly. So a roundtrip
+;;; (parse -> mutate -> serialize) sees BOTH shapes for what is
+;;; semantically the same data: vector when sage built it, list when
+;;; sage parsed it.
+;;;
+;;; The defensive pattern was first established in
+;;; src/sage/ollama.scm:ollama-parse-tool-call (commit 0a7f24c) which
+;;; accepted both shapes for the streaming-tool-call fix. The MCP
+;;; envelope decoder will need the same shape coercion. Centralising
+;;; here keeps the workaround in one place.
+;;;
+;;; Edge cases:
+;;;   #f      -> '()  (treat \"missing\" as empty for callers using
+;;;                    (assoc-ref obj \"key\") which returns #f)
+;;;   '()     -> '()
+;;;   list    -> identity
+;;;   vector  -> (vector->list v)
+;;;
+;;; Anything else throws so the caller catches the type confusion early.
+;;; bd: guile-p94.
+(define (as-list obj)
+  (cond
+   ((not obj) '())
+   ((null? obj) '())
+   ((list? obj) obj)
+   ((vector? obj) (vector->list obj))
+   (else
+    (error "as-list: cannot coerce" obj))))
 
 ;;; ============================================================
 ;;; HTTP Debug Logging
