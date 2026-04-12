@@ -2,7 +2,12 @@
 
 ## Status
 
-Open — 3 security tests failing since safe-tools expansion.
+Resolved 2026-04-11. `*safe-tools*` no longer contains `write_file`,
+`edit_file`, `git_commit`, `git_add_note`, `git_push` — these now require
+`SAGE_YOLO_MODE`. `tests/test-security.scm` unsets YOLO at the top of the
+file so denial tests work even when CI sets `SAGE_YOLO_MODE=1` globally,
+and `tests/test-tools.scm`'s "write_file is safe (dev mode)" was rewritten
+as "write_file requires YOLO" to exercise both paths.
 
 ## Problem
 

@@ -37,14 +37,17 @@
 ;;; Tool Registry
 
 (define *tools* '())
+;; Tools always permitted, no YOLO required.
+;; Filesystem/git mutating tools (write_file, edit_file, git_commit,
+;; git_add_note, git_push) are intentionally absent: they require
+;; SAGE_YOLO_MODE. Task and image tools remain here because they only
+;; touch sage-managed state, not source files or git history.
 (define *safe-tools* '("read_file" "list_files" "git_status" "git_diff"
                        "git_log" "glob_files" "search_files"
-                       "write_file" "edit_file"
-                       "git_commit" "git_add_note" "git_push"
                        "read_logs" "search_logs"
                        "sage_task_create" "sage_task_complete"
                        "sage_task_list" "sage_task_status"
-                       "generate_image"))  ;; Full dev + agent
+                       "generate_image"))
 (define *workspace* #f)
 
 ;;; workspace: Get current workspace directory
