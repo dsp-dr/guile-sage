@@ -740,6 +740,52 @@
       (eq? (model-available? name models) expected))))
 
 ;;; ============================================================
+;;; Property: tools.scm — coerce->int never crashes (bd: guile-bcy)
+;;; ============================================================
+
+(format #t "~%=== PBT: coerce->int input-shape coverage ===~%")
+
+;; coerce->int is module-private, but execute-tool exposes it
+;; transitively via read_logs. The property we want: for ANY input
+;; shape (int, float, string-of-int, string-of-float, garbage,
+;; #f, '()), read_logs returns a string and never produces a
+;; wrong-type-arg crash.
+
+(property "read_logs survives any lines input shape (no wrong-type-arg)"
+  (lambda ()
+    (let ((kind (rng-element '(int string-int float string-float garbage missing nil))))
+      (case kind
+        ((int)         (rng-int 1 200))
+        ((string-int)  (number->string (rng-int 1 200)))
+        ((float)       (+ (rng-int 1 200) 0.0))
+        ((string-float) (string-append (number->string (rng-int 1 200)) ".5"))
+        ((garbage)     (rng-alpha-string (rng-int 3 10)))
+        ((missing)     #f)
+        ((nil)         '()))))
+  (lambda (lines-arg)
+    (let* ((args (if lines-arg `(("lines" . ,lines-arg)) '()))
+           (result (execute-tool "read_logs" args)))
+      (and (string? result)
+           (not (string-contains result "wrong-type-arg"))))))
+
+(property "search_logs survives any limit input shape (no wrong-type-arg)"
+  (lambda ()
+    (let ((kind (rng-element '(int string-int float string-float garbage missing))))
+      (case kind
+        ((int)          (rng-int 1 200))
+        ((string-int)   (number->string (rng-int 1 200)))
+        ((float)        (+ (rng-int 1 200) 0.0))
+        ((string-float) (string-append (number->string (rng-int 1 200)) ".5"))
+        ((garbage)      (rng-alpha-string (rng-int 3 10)))
+        ((missing)      #f))))
+  (lambda (limit-arg)
+    (let* ((args `(("pattern" . "info")
+                   ,@(if limit-arg `(("limit" . ,limit-arg)) '())))
+           (result (execute-tool "search_logs" args)))
+      (and (string? result)
+           (not (string-contains result "wrong-type-arg"))))))
+
+;;; ============================================================
 ;;; Property: telemetry.scm — counter / label invariants
 ;;; ============================================================
 

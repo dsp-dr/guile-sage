@@ -70,6 +70,30 @@
              (string-prefix? ws (canonicalize-path-safe expanded))
              (not (regexp-exec (make-regexp "(\\.env|\\.git/|\\.ssh|\\.gnupg)") path))))))
 
+;;; coerce->int: Force a JSON-supplied value to a Scheme exact integer.
+;;;
+;;; LLM-emitted tool arguments are inconsistent: the model sometimes
+;;; produces `"lines": 20` (int), sometimes `"lines": "20"` (string),
+;;; sometimes `"lines": 20.0` (inexact float). util.scm's JSON parser
+;;; passes all of these through unchanged, so any tool that does
+;;; (min N other) or (take lst N) crashes on the wrong-type input.
+;;;
+;;; This helper normalises at the tool boundary. NOTE: Guile's
+;;; (integer? 20.0) is #t — 20.0 is mathematically an integer, just
+;;; inexact — so we cannot fast-path on integer? alone. Always run
+;;; through (inexact->exact (round ...)) to guarantee exactness.
+;;;
+;;; bd: guile-bcy.
+(define (coerce->int v default)
+  (let ((raw (cond
+              ((not v) default)
+              ((number? v) v)
+              ((string? v) (or (string->number v) default))
+              (else default))))
+    (if (number? raw)
+        (inexact->exact (round raw))
+        default)))
+
 ;;; canonicalize-path-safe: Safe path canonicalization
 (define (canonicalize-path-safe path)
   (catch #t
@@ -535,7 +559,7 @@
                                   ("description" . "Filter by level: debug|info|warn|error")))))
      ("required" . #()))
    (lambda (args)
-     (let ((lines (or (assoc-ref args "lines") 50))
+     (let ((lines (coerce->int (assoc-ref args "lines") 50))
            (level (assoc-ref args "level")))
        (read-recent-logs #:lines lines
                          #:level (and level (string->symbol level))))))
@@ -555,7 +579,7 @@
    (lambda (args)
      (let ((pattern (assoc-ref args "pattern"))
            (level (assoc-ref args "level"))
-           (limit (or (assoc-ref args "limit") 100)))
+           (limit (coerce->int (assoc-ref args "limit") 100)))
        (search-logs pattern
                     #:level (and level (string->symbol level))
                     #:limit limit))))
@@ -625,7 +649,7 @@
            (tool (assoc-ref args "tool"))
            (from-t (assoc-ref args "from_time"))
            (to-t (assoc-ref args "to_time"))
-           (limit (or (assoc-ref args "limit") 100)))
+           (limit (coerce->int (assoc-ref args "limit") 100)))
        (log-search-advanced #:level level
                             #:module mod
                             #:message-pattern msg-pat
