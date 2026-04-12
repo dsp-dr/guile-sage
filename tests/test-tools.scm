@@ -303,22 +303,21 @@
 (run-test "write_file relative path lands under workspace"
   (lambda ()
     (setenv "SAGE_YOLO_MODE" "1")
-    (let ((rel "tmp/sage-write-test-rel.txt"))
-      ;; Cleanup before test
-      (let ((full (string-append (workspace) "/" rel)))
-        (when (file-exists? full)
-          (delete-file full)))
+    ;; Flat filename in the workspace root: a tmp/ subdir would require
+    ;; the parent to exist (write_file does not mkdir -p) and only
+    ;; "passes" when something else created tmp/ first.
+    (let* ((rel (format #f "sage-write-test-rel-~a.txt" (getpid)))
+           (full (string-append (workspace) "/" rel)))
+      (when (file-exists? full)
+        (delete-file full))
       (let ((result (execute-tool "write_file"
                                   `(("path" . ,rel)
                                     ("content" . "rel content")))))
-        ;; Result should mention workspace-anchored path, not bare rel
         (unless (string-contains result (workspace))
           (error "result should report workspace-anchored path" result))
-        ;; File must exist under workspace
-        (let ((full (string-append (workspace) "/" rel)))
-          (unless (file-exists? full)
-            (error "relative path file did not land in workspace" full))
-          (delete-file full))))))
+        (unless (file-exists? full)
+          (error "relative path file did not land in workspace" full))
+        (delete-file full)))))
 
 (run-test "read_file File-not-found error reports the resolved path"
   (lambda ()
