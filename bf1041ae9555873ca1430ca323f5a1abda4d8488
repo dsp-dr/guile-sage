@@ -1,0 +1,53 @@
+## Attribution
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+- Pair: jwalsh + Claude
+- Surfaced by CI run 24294720813 after the Makefile fix b8e60fc
+
+## Testing
+- Cannot test locally (no Alpine Docker on this Mac), but the fix
+  matches Alpine's documented package layout: guile core does NOT
+  include readline; guile-readline is a separate apk package.
+- Will be validated by the next push triggering CI run.
+
+## Issues
+- bd: should file as bd-CI-DOCKER follow-up to bd-CI-MAKEFILE
+- github: dsp-dr/guile-sage CI run 24294720813 is the failing one
+
+## Conjecture (CPRR)
+- Hypothesis: Alpine splits Guile's optional bindings into
+  separate apk packages to keep the base image small. readline,
+  curses, and bytestructures are all separate. Distros that ship
+  monolithic packages (FreeBSD ports, Homebrew, Debian) include
+  readline by default which is why the bug only surfaced in CI.
+
+## Validation
+- Searching apk for the readline binding:
+  apk info guile-readline → \"Guile readline support\"
+- Build error stack trace explicitly named (ice-9 readline) as
+  the missing module — direct evidence.
+
+## Refutation / known limits
+- We don't pin the package version (no =3.0.x suffix), so an
+  Alpine package upgrade could break the build later. Acceptable
+  for now; can pin in a follow-up if Alpine ships a guile-readline
+  with an ABI break.
+- We don't audit the runtime image for OTHER missing optional
+  bindings (curses, threads, etc). If sage starts using more
+  ice-9 modules, we may hit the same class of error again.
+- Build matrix only covers amd64. ARM64 image would need its own
+  validation; out of scope.
+
+## Meta - research / context / deep-dives
+- Worth a future audit: sweep src/sage/*.scm for all (use-modules
+  (ice-9 ...)) imports and confirm each one has an apk package
+  installed in the Dockerfile. Could be a Makefile target like
+  'gmake docker-deps-check'.
+- Related: the two Dockerfile stages are nearly identical now.
+  Could refactor to a single base layer with a build-only stage
+  on top, but trades simplicity for image-size optimisation.
+- Open question: should we publish the multi-arch image
+  (linux/amd64 + linux/arm64) for users on Apple Silicon? The
+  builder uses qemu emulation which is slow but possible.
+- Future enhancement: add a docker-smoke-test step that runs
+  `docker run guile-sage --version` after build to verify the
+  runtime stage is also healthy. Right now we only verify build.
