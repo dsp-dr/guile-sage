@@ -1,1 +1,3 @@
-(define *email* "[EMAIL REDACTED]")
+(define *contacts*
+  '("[EMAIL REDACTED]"
+    "[EMAIL REDACTED]"))
