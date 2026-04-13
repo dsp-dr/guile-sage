@@ -1,0 +1,18 @@
+## Context
+Audit of scripts/ directory found 9 scripts with no Makefile wrapper and
+2 scripts missing executable permissions.
+
+## Problem
+Running scripts required knowing exact paths and interpreters. No single
+entry point for `gmake help` to surface them.
+
+## Resolution
+- Added 9 Makefile targets wrapping each unwrapped script
+- Added help text under new "Scripts:" section in `gmake help`
+- chmod +x generate-showcase.scm, generate-synthetic-session.py
+
+## Result
+- All 15 executable scripts now have Makefile targets
+- `gmake lint` passes (0 errors, 2 warnings — both pre-existing)
+- All shell scripts pass `bash -n` syntax check
+- doc-check.sh: PASS | lint-contracts.sh: PASS | generate-test-pii.py: valid JSON
