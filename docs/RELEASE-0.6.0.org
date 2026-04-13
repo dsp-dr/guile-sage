@@ -232,7 +232,7 @@ In order of preference:
    =~/.zshenv= or =~/.bashrc= alongside the OTEL vars you may
    already have for Claude Code:
    #+BEGIN_SRC bash
-   export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://192.168.86.100:4318/v1/metrics
+   export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=${OTEL_HTTP_ENDPOINT}/v1/metrics
    export OTEL_RESOURCE_ATTRIBUTES="host.name=$(hostname -s),team=aygp-dr"
    #+END_SRC
 
@@ -242,7 +242,7 @@ In order of preference:
    #+BEGIN_SRC bash
    mkdir -p ~/.config/sage
    cat > ~/.config/sage/.env <<'EOF'
-   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://192.168.86.100:4318/v1/metrics
+   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=${OTEL_HTTP_ENDPOINT}/v1/metrics
    OTEL_RESOURCE_ATTRIBUTES=host.name=mini,team=aygp-dr
    EOF
    #+END_SRC
@@ -265,7 +265,7 @@ In order of preference:
 
 #+BEGIN_SRC bash
 # 1. Endpoint reachable?
-nc -z 192.168.86.100 4318 && echo "OTLP HTTP: OK"
+nc -z infra-host 4318 && echo "OTLP HTTP: OK"
 
 # 2. Env loaded by sage?
 gmake run < /dev/null 2>&1 | head -20
@@ -274,7 +274,7 @@ gmake run < /dev/null 2>&1 | head -20
 # 3. Metrics flowing?
 SAGE_MODEL=llama3.2:latest gmake run
 # in REPL: ask anything, /exit
-curl -s 'http://192.168.86.100:9090/api/v1/label/exported_job/values'
+curl -s '${PROMETHEUS_URL}/api/v1/label/exported_job/values'
 # Expected: [...,"guile-sage"]
 #+END_SRC
 
@@ -342,7 +342,7 @@ guile -L src tests/test-http-debug.scm     # 8/8
 
 # 2. Live telemetry
 SAGE_MODEL=llama3.2:latest gmake run       # ask anything, /exit
-curl -s 'http://192.168.86.100:9090/api/v1/label/exported_job/values'
+curl -s '${PROMETHEUS_URL}/api/v1/label/exported_job/values'
 # Expected to include: "guile-sage"
 
 # 3. Graceful fallback
@@ -354,7 +354,7 @@ SAGE_DEBUG_HTTP=1 SAGE_MODEL=llama3.2:latest gmake run
 tail -f .logs/http.jsonl | jq .
 
 # 5. Dashboard
-open http://192.168.86.100:3000/d/ai-tools/
+open ${GRAFANA_URL}/d/ai-tools/
 # Look for Guile Sage rows in the stats and timeseries panels
 #+END_SRC
 
@@ -362,7 +362,7 @@ open http://192.168.86.100:3000/d/ai-tools/
 
 ** 0.7.0 — MCP support (planned)
 
-- SSE-based MCP client (matches the running =skills-hub= server at =192.168.86.100:8400=)
+- SSE-based MCP client (matches the running =skills-hub= server at =infra-host:8400=)
 - Reuse =~/.claude.json= for MCP server discovery
 - New CLI flags for transport selection / server overrides
 - Config contract versioning + a =/doctor= command for migrations

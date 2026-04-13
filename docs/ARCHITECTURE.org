@@ -159,12 +159,12 @@ flowchart LR
     prom -- "PromQL" --> graf
 #+END_SRC
 
-All traffic is on the 192.168.86.0/24 LAN. No Tailscale.
+All traffic is on the LAN LAN. No Tailscale.
 
 | Host       | IP              | Services                               |
 |------------+-----------------+----------------------------------------|
-| mini       | 192.168.86.22   | sage REPL, Ollama (localhost:11434)    |
-| nexus      | 192.168.86.100  | skills-hub :8400, OTel :4318, Prometheus :9090, Grafana :3000 |
+| mini       | dev-host   | sage REPL, Ollama (localhost:11434)    |
+| nexus      | infra-host  | skills-hub :8400, OTel :4318, Prometheus :9090, Grafana :3000 |
 
 * 4. Startup Sequence
 

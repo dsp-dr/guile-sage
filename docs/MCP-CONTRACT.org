@@ -11,7 +11,7 @@ This document is a contract specification for the Model Context Protocol
 
 - System and container architecture (C4 L1/L2)
 - Byte-level traces of a live MCP server (=skills-hub= at
-  =http://192.168.86.100:8400/sse=) for initialize, tools/list, tools/call
+  =${SKILLS_HUB_URL}/sse=) for initialize, tools/list, tools/call
   (success + error), plus malformed / unknown method handling
 - Sequence diagrams for the SSE lifecycle, initialize, list/call paths
 - Data flow and control flow across =sage REPL → ollama → tools → MCP client
@@ -511,14 +511,14 @@ invariant has a short code (I##) so tests can reference it.
 * 7. Captured byte samples (live skills-hub)
 
 All samples below are real bytes captured on 2026-04-11 against
-=http://192.168.86.100:8400/sse= with
+=${SKILLS_HUB_URL}/sse= with
 =Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l=.
 
 ** 7.1 SSE connect — endpoint event
 
 #+BEGIN_SRC http
 GET /sse HTTP/1.1
-Host: 192.168.86.100:8400
+Host: infra-host:8400
 Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l
 Accept: text/event-stream
 #+END_SRC
@@ -841,7 +841,7 @@ returned. Timeouts are mandatory (invariant I12).
 
 #+BEGIN_SRC http
 POST /messages/?session_id=deadbeefdeadbeefdeadbeefdeadbeef HTTP/1.1
-Host: 192.168.86.100:8400
+Host: infra-host:8400
 Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l
 Content-Type: application/json
 
@@ -1080,13 +1080,13 @@ set -o noglob  # zsh globs ?; matters for the session_id URL
 curl -sSN \
   -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
   -H 'Accept: text/event-stream' \
-  http://192.168.86.100:8400/sse > /tmp/mcp-sse.log &
+  ${SKILLS_HUB_URL}/sse > /tmp/mcp-sse.log &
 
 sleep 1
 
 # 2. Extract the endpoint the server handed us
 SESSION_PATH=$(grep '^data:' /tmp/mcp-sse.log | head -1 | sed 's/^data: //')
-ENDPOINT="http://192.168.86.100:8400${SESSION_PATH}"
+ENDPOINT="${SKILLS_HUB_URL}${SESSION_PATH}"
 
 # 3. initialize
 curl -sS -X POST -H 'Content-Type: application/json' \

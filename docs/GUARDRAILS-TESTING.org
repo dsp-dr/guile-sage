@@ -7,7 +7,7 @@
 
 End-to-end testing of LiteLLM guardrails through guile-sage 0.7.0.
 Sage talks to Gemini 2.5 Flash via the LiteLLM proxy at
-=192.168.86.22:4000= using the OpenAI-compat provider. Guardrails
+=dev-host:4000= using the OpenAI-compat provider. Guardrails
 are configured as =pre_call= content filters in LiteLLM.
 
 * Test Setup
@@ -15,7 +15,7 @@ are configured as =pre_call= content filters in LiteLLM.
 | Component | Version | Config |
 |-----------+---------+--------|
 | guile-sage | 0.7.0 | SAGE_PROVIDER=openai |
-| LiteLLM | 1.83.4 | http://192.168.86.22:4000 |
+| LiteLLM | 1.83.4 | http://dev-host:4000 |
 | Model | gemini-2.5-flash | via LiteLLM proxy |
 | Auth | sk-litellm-local | master key |
 
@@ -147,7 +147,7 @@ including tool execution. Use =SAGE_STREAMING=0= for non-streaming
 
 #+BEGIN_SRC bash
 SAGE_PROVIDER=openai \
-SAGE_OPENAI_BASE=http://192.168.86.22:4000/v1 \
+SAGE_OPENAI_BASE=http://dev-host:4000/v1 \
 SAGE_OPENAI_API_KEY=sk-litellm-local \
 SAGE_MODEL=gemini-2.5-flash \
 SAGE_MCP_DISABLE=1 \
@@ -163,7 +163,7 @@ Confirm guardrails evaluated per request:
 curl -sS -D /tmp/headers.txt \
   -H "Authorization: Bearer sk-litellm-local" \
   -H "Content-Type: application/json" \
-  http://192.168.86.22:4000/v1/chat/completions \
+  http://dev-host:4000/v1/chat/completions \
   -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"test@example.com"}]}' \
   > /dev/null
 grep x-litellm-applied-guardrails /tmp/headers.txt
