@@ -49,8 +49,8 @@ done
 
 echo
 # 3. No hardcoded IPs in docs/
-echo "--- No hardcoded IPs ---"
-count=$(grep -rn '192\.168\.' docs/ CLAUDE.md README.org .env.template 2>/dev/null | wc -l | tr -d ' ')
+echo "--- No hardcoded IPs (living docs only, not reports/) ---"
+count=$(grep -rn '192\.168\.' docs/*.org docs/*.md CLAUDE.md README.org .env.template 2>/dev/null | wc -l | tr -d ' ')
 if [ "$count" -eq 0 ]; then
   pass "zero hardcoded IPs"
 else
