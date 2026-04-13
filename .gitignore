@@ -28,6 +28,9 @@ worktrees/
 pwned.txt
 tmp/
 
+# Generated showcase images (promoted copies live in images/)
+tests/fixtures/showcase/
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
