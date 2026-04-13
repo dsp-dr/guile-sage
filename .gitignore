@@ -33,3 +33,4 @@ tmp/
 *.db
 .beads-credential-key
 profiles/*.env
+__pycache__/
