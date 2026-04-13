@@ -104,18 +104,31 @@ after acceptance. Record WHY a decision was made.
 
 ## Test Suites
 
-| Suite | Tests | Notes |
-|-------|-------|-------|
-| test-session.scm | 18 | Session CRUD |
-| test-tools.scm | 42 | Tool dispatch, safety, path scope |
-| test-security.scm | 37 | Sandbox enforcement (all green) |
-| test-compaction.scm | 9 | Context compression strategies |
-| test-compaction-security.scm | 4 | Compaction + safety |
-| test-compaction-deep.scm | 98 | 5 strategies × 3 provider fixtures |
-| test-auto-compact.scm | 10 | 80% threshold + /compact command |
-| test-pbt.scm | 64+ | Property-based (6400+ trials) |
-| test-telemetry.scm | 18 | OTLP payload + backoff |
-| test-model-fallback.scm | 21 | Graceful model removal |
+| Suite | Notes |
+|-------|-------|
+| test-session.scm | Session CRUD |
+| test-tools.scm | Tool dispatch, safety, path scope, coerce->int |
+| test-security.scm | Sandbox enforcement |
+| test-compaction.scm | Context compression strategies |
+| test-compaction-security.scm | Compaction + safety |
+| test-compaction-deep.scm | 5 strategies × 3 provider fixtures |
+| test-auto-compact.scm | 80% threshold + /compact command |
+| test-pbt.scm | Property-based (6400+ trials) |
+| test-telemetry.scm | OTLP payload + backoff |
+| test-model-fallback.scm | Graceful model removal |
+| test-model-tier.scm | Tier selection + defaults |
+| test-model-capability.scm | Model capability checks |
+| test-http-debug.scm | Wire-level debug logging |
+| test-mcp.scm | MCP SSE + JSON-RPC |
+| test-provider.scm | Multi-provider dispatch |
+| test-repl.scm | REPL integration |
+| test-repl-chains.scm | Multi-step tool chain loop |
+| test-repl-guard.scm | Anti-hallucination guard |
+| test-commands.scm | Slash command dispatch |
+| test-context.scm | Context window management |
+| test-ollama.scm | Ollama client + JSON parser |
+| test-log-introspection.scm | Log search/stats tools |
+| test-image-gen.scm | Image generation (flux) |
 | test-model-tier.scm | 13 | Tier selection + defaults |
 | test-http-debug.scm | 8 | Wire-level debug logging |
 | test-mcp.scm | 17 | MCP SSE + JSON-RPC |
