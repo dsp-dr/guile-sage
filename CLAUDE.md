@@ -5,7 +5,7 @@
 ```bash
 gmake check          # Run test suite (42+ tests, all green)
 gmake run            # Start sage REPL (Ollama provider, YOLO mode)
-source profiles/pitcrew.env.template  # See LiteLLM provider example
+cp .env.template .env && $EDITOR .env  # Configure provider
 bd ready             # Find available work
 bd show <id>         # View issue details
 bd update <id> --claim  # Claim work
