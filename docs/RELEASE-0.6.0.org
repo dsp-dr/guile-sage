@@ -1,4 +1,4 @@
-#+TITLE: guile-sage 0.6.0 — Telemetry, Graceful Model Removal, Tool-Calling Fix
+#+TITLE: guile-sage — Release 0.6.0
 #+DATE: 2026-04-11
 #+AUTHOR: guile-sage
 #+OPTIONS: toc:2 num:nil

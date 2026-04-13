@@ -1,4 +1,4 @@
-#+TITLE: Sage Tool Building Guide
+#+TITLE: guile-sage — Tool Guide
 #+AUTHOR: dsp-dr
 #+DATE: 2026-01-25
 

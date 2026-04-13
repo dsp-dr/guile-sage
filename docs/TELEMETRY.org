@@ -1,4 +1,4 @@
-#+TITLE: guile-sage Telemetry — OTLP/HTTP to NexusHive
+#+TITLE: guile-sage — Telemetry
 #+AUTHOR: guile-sage
 #+OPTIONS: toc:2
 

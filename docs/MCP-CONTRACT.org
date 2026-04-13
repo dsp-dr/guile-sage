@@ -1,4 +1,4 @@
-#+TITLE: MCP Contract: Protocol, Transport, Invariants, and Guile Implementation Notes
+#+TITLE: guile-sage — MCP Contract
 #+AUTHOR: guile-sage research
 #+DATE: 2026-04-11
 #+OPTIONS: toc:3 num:t ^:nil
