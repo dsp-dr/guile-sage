@@ -58,6 +58,7 @@ gRPC, no protobuf — just a fail-soft JSON POST through the existing
 | =guile_sage.cost.usage= (USD)        | =guile_sage_cost_usage_USD_total=          | =model=                         | both =ollama-chat= callsites (always 0 for local Ollama) |
 | =guile_sage.active.time= (s)         | =guile_sage_active_time_seconds_total=     | =type=cli\|user=                | main REPL loop               |
 | =guile_sage.code_edit.tool_decision= | =guile_sage_code_edit_tool_decision_total= | =tool_name=, =decision=accept\|reject= | =execute-tool=        |
+| =guile_sage.mcp.tool_call=          | =guile_sage_mcp_tool_call_total=           | =server=, =tool_name=           | =mcp-call-tool=               |
 
 The unit suffixes (=_tokens_total=, =_USD_total=, =_seconds_total=) are
 critical: the OTel Collector's Prometheus exporter derives them from

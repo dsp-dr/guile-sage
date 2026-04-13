@@ -102,7 +102,7 @@ uninstall:
 tags:
 	etags $(SOURCES)
 
-lint: lint-code lint-org lint-docs
+lint: lint-code lint-org lint-docs lint-contracts
 	@echo "All lint checks passed."
 
 lint-code:
@@ -130,6 +130,10 @@ lint-org:
 lint-docs:
 	@echo "=== Documentation lint ==="
 	@scripts/doc-check.sh
+
+lint-contracts:
+	@echo "=== Contract boundary lint ==="
+	@scripts/lint-contracts.sh
 
 init:
 	@sh scripts/init.sh
