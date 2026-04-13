@@ -26,7 +26,7 @@ GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push
+.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench
 
 all: $(OBJECTS)
 
@@ -206,6 +206,34 @@ check-verbose:
 	echo ""; \
 	echo "=== TOTAL: $$passed/$$total tests passed ==="
 
+# Script wrappers
+claude-ollama:
+	@scripts/claude-ollama.sh
+
+generate-showcase:
+	@$(GUILE) -L $(SRCDIR) scripts/generate-showcase.scm
+
+generate-synthetic-session:
+	@python3 scripts/generate-synthetic-session.py $(ARGS)
+
+generate-test-pii:
+	@python3 scripts/generate-test-pii.py
+
+monitor:
+	@scripts/monitor-parallel.sh
+
+promote-images:
+	@scripts/promote-images.sh
+
+sage-commit:
+	@scripts/sage-commit.sh "$(MSG)"
+
+test-guardrails:
+	@scripts/test-guardrails.sh
+
+timing-bench:
+	@scripts/timing-bench.sh
+
 # Version bumping (semantic versioning)
 patch:
 	@sh scripts/bump-version.sh patch
@@ -289,6 +317,17 @@ help:
 	@echo "  docs          - Build documentation"
 	@echo "  publish       - Build and prepare for publishing"
 	@echo "  clean         - Remove compiled files"
+	@echo ""
+	@echo "Scripts:"
+	@echo "  claude-ollama          - Launch Claude Code backed by Ollama"
+	@echo "  generate-showcase      - Generate 100 showcase images"
+	@echo "  generate-synthetic-session - Generate synthetic session (ARGS='name')"
+	@echo "  generate-test-pii      - Generate synthetic PII test data (JSON)"
+	@echo "  monitor                - Monitor parallel sage sessions"
+	@echo "  promote-images         - Copy showcase images to images/"
+	@echo "  sage-commit            - Commit as guile-sage identity (MSG='msg')"
+	@echo "  test-guardrails        - Run LiteLLM guardrail policy tests"
+	@echo "  timing-bench           - Run per-model timing benchmarks"
 	@echo ""
 	@echo "Version & Release:"
 	@echo "  patch         - Bump patch version (0.1.0 -> 0.1.1)"
