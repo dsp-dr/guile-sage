@@ -1,4 +1,4 @@
-#+TITLE: guile-sage Timing Protocol
+#+TITLE: guile-sage — Timing Protocol
 #+AUTHOR: guile-sage
 #+OPTIONS: toc:2 num:nil
 

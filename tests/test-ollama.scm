@@ -108,19 +108,28 @@
         (error "expected string" host))
       (format #t "  Host: ~a~%" host))))
 
-;;; Ollama API Tests (requires running ollama server)
+;;; Ollama API Tests (skipped when Ollama is not running — e.g., CI)
 
 (format #t "~%=== Ollama API Tests ===~%")
 
-(run-test "ollama-list-models returns list"
-  (lambda ()
-    (let ((models (ollama-list-models)))
-      (unless (list? models)
-        (error "expected list" models))
-      (format #t "  Found ~a models~%" (length models))
-      (for-each (lambda (m)
-                  (format #t "    - ~a~%" (assoc-ref m "name")))
-                models))))
+(define (ollama-reachable?)
+  (catch #t
+    (lambda ()
+      (let ((r (http-get "http://localhost:11434/api/version")))
+        (and (pair? r) (= (car r) 200))))
+    (lambda args #f)))
+
+(if (not (ollama-reachable?))
+    (format #t "SKIP: Ollama not running at localhost:11434~%")
+    (run-test "ollama-list-models returns list"
+      (lambda ()
+        (let ((models (ollama-list-models)))
+          (unless (list? models)
+            (error "expected list" models))
+          (format #t "  Found ~a models~%" (length models))
+          (for-each (lambda (m)
+                      (format #t "    - ~a~%" (assoc-ref m "name")))
+                    models)))))
 
 ;;; Tool API Format Tests
 

@@ -1,4 +1,4 @@
-#+TITLE: AI CLI Feature Comparison — guile-sage vs Claude Code, Gemini CLI, Codex CLI, Aider
+#+TITLE: guile-sage — CLI Feature Comparison
 #+AUTHOR: guile-sage
 #+DATE: 2026-04-12
 #+OPTIONS: toc:2 num:nil ^:nil

@@ -1,4 +1,4 @@
-#+TITLE: EU AI Act Article 5 — Guardrail Validation Report
+#+TITLE: guile-sage — EU AI Act Guardrails
 #+DATE: 2026-04-12
 #+AUTHOR: jwalsh
 #+PROPERTY: header-args:shell :results output :exports both
