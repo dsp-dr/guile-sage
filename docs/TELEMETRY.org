@@ -6,7 +6,7 @@
 
 guile-sage emits cumulative counter metrics via the OpenTelemetry
 protocol (OTLP/HTTP JSON, proto3 mapping) to the NexusHive observability
-stack on the LAN_SUBNET LAN. Counters land in Prometheus with
+stack on the LAN LAN. Counters land in Prometheus with
 =exported_job=guile-sage= and surface on the *AI Tools — Multi-Provider
 Usage* Grafana dashboard alongside Claude Code, Gemini CLI, Codex, and
 Aider.
@@ -105,7 +105,7 @@ In order of preference:
    #+BEGIN_SRC bash
    mkdir -p ~/.config/sage
    cat > ~/.config/sage/.env <<'EOF'
-   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://INFRA_HOST:4318/v1/metrics
+   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=${OTEL_HTTP_ENDPOINT}/v1/metrics
    OTEL_RESOURCE_ATTRIBUTES=host.name=mini,team=aygp-dr
    EOF
    #+END_SRC
@@ -132,9 +132,9 @@ This is the *correct* harness for now. Automation comes later.
 
 #+BEGIN_SRC bash
 # 1. OTLP endpoint reachable?
-nc -z INFRA_HOST 4317 && echo "OTLP gRPC: OK"
-nc -z INFRA_HOST 4318 && echo "OTLP HTTP: OK"
-nc -z INFRA_HOST 9090 && echo "Prometheus: OK"
+nc -z infra-host 4317 && echo "OTLP gRPC: OK"
+nc -z infra-host 4318 && echo "OTLP HTTP: OK"
+nc -z infra-host 9090 && echo "Prometheus: OK"
 
 # 2. Required env vars present?
 env | grep -E 'OTEL_(METRICS|LOGS|EXPORTER|RESOURCE)|CLAUDE_CODE_ENABLE_TELEMETRY'
@@ -174,12 +174,12 @@ tmux send-keys -t sage-otel '/exit' Enter
 
 #+BEGIN_SRC bash
 # 1. exported_job should now include guile-sage
-curl -s 'http://INFRA_HOST:9090/api/v1/label/exported_job/values' \
+curl -s '${PROMETHEUS_URL}/api/v1/label/exported_job/values' \
   | python3 -m json.tool
 # Expected: ["claude-code", "github-copilot", "guile-sage"]
 
 # 2. All distinct guile-sage metric names
-curl -s 'http://INFRA_HOST:9090/api/v1/query' \
+curl -s '${PROMETHEUS_URL}/api/v1/query' \
   --data-urlencode 'query={exported_job="guile-sage"}' \
   | python3 -c '
 import sys, json
@@ -195,16 +195,16 @@ for n in sorted(seen):
 #   guile_sage_token_usage_tokens_total
 
 # 3. Per-metric values
-curl -s 'http://INFRA_HOST:9090/api/v1/query?query=guile_sage_token_usage_tokens_total' \
+curl -s '${PROMETHEUS_URL}/api/v1/query?query=guile_sage_token_usage_tokens_total' \
   | python3 -m json.tool
 
-curl -s 'http://INFRA_HOST:9090/api/v1/query?query=guile_sage_session_count_total' \
+curl -s '${PROMETHEUS_URL}/api/v1/query?query=guile_sage_session_count_total' \
   | python3 -m json.tool
 #+END_SRC
 
 ** Verify in Grafana
 
-Open: =http://INFRA_HOST:3000/d/ai-tools/ai-tools-e28094-multi-provider-usage?from=now-15m=
+Open: =${GRAFANA_URL}/d/ai-tools/ai-tools-e28094-multi-provider-usage?from=now-15m=
 
 Confirm a *Guile Sage* row/series is present in:
 - Sessions stat panel
@@ -255,7 +255,7 @@ import pexpect, time, urllib.request, json
 
 def baseline():
     r = urllib.request.urlopen(
-        'http://INFRA_HOST:9090/api/v1/query'
+        '${PROMETHEUS_URL}/api/v1/query'
         '?query=sum(guile_sage_session_count_total)')
     return float(json.load(r)['data']['result'][0]['value'][1])
 

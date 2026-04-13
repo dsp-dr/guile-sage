@@ -3,9 +3,9 @@
 ## Quick Start
 
 ```bash
-gmake check          # Run test suite (34/37 passing, 3 known)
-gmake run            # Start sage REPL
-guile3 -L src        # Load modules manually
+gmake check          # Run test suite (42+ tests, all green)
+gmake run            # Start sage REPL (Ollama provider, YOLO mode)
+source profiles/pitcrew.env.template  # See LiteLLM provider example
 bd ready             # Find available work
 bd show <id>         # View issue details
 bd update <id> --claim  # Claim work
@@ -14,74 +14,120 @@ bd close <id>        # Complete work
 
 ## Runtime
 
-- **ONLY use guile3** (not guile, not guile2)
-- FreeBSD 14.3, amd64, GNU Guile 3.0.10
-- Load path: `guile3 -L src`
+- GNU Guile 3.x (`guile` on macOS/Linux, `guile3` on FreeBSD)
+- Makefile auto-detects via `command -v`
+- Load path: `guile -L src`
 
 ## Architecture
 
 ```
 src/sage/
-  main.scm          CLI entry point
-  repl.scm          Interactive REPL (readline, /commands)
-  agent.scm         Agent task system (beads integration)
-  ollama.scm        Ollama API client (HTTP via curl)
-  tools.scm         Tool registry (22 tools, safe/unsafe split)
-  session.scm       Session persistence (JSON)
+  main.scm          CLI entry point (-p, -m, -y, --plan flags)
+  repl.scm          Interactive REPL (readline, /commands, history)
+  provider.scm      Multi-provider dispatch (ollama|openai|gemini)
+  ollama.scm        Ollama native API client (/api/chat)
+  openai.scm        OpenAI-compat client (LiteLLM, vLLM, etc.)
+  gemini.scm        Google AI Gemini client
+  mcp.scm           MCP SSE client (skills-hub, tools/list, tools/call)
+  tools.scm         Tool registry (22+ built-in, safe/unsafe split)
+  agent.scm         In-memory task system
+  session.scm       Session persistence (JSON, XDG paths)
   compaction.scm    Context compaction (5 strategies)
-  context.scm       Context window management
-  config.scm        Configuration (XDG, env vars)
-  model-tier.scm    Model selection (capability-based)
+  context.scm       Context window management + warnings
+  config.scm        Configuration (XDG, env vars, .env files)
+  model-tier.scm    Model tier selection (auto by token count)
+  telemetry.scm     OTLP/HTTP JSON metric emission
   logging.scm       Structured JSONL logging
-  status.scm        Status display
-  util.scm          HTTP/JSON utilities
-  irc.scm           IRC integration (optional)
-  telemetry.scm     OTLP/HTTP JSON metric emission to infra-host:4318
+  status.scm        Status display (thinking, streaming, done)
+  util.scm          HTTP/JSON utilities, as-list, json-empty-object
+  irc.scm           IRC integration (optional, only when connected)
   version.scm       Semver constants
 ```
 
-OTLP telemetry: see `docs/TELEMETRY.org` for the manual verification harness
-and metric naming. Counters land in Prometheus on nexus and surface on the
-AI Tools — Multi-Provider dashboard at `/d/ai-tools/`.
+## Providers
+
+sage supports three LLM backends via `SAGE_PROVIDER`:
+
+| Provider | Env var | Endpoint | Use case |
+|----------|---------|----------|----------|
+| `ollama` (default) | `SAGE_OLLAMA_HOST` | `/api/chat` | Local inference, free |
+| `openai` / `litellm` | `SAGE_OPENAI_BASE`, `SAGE_OPENAI_API_KEY` | `/v1/chat/completions` | LiteLLM proxy with guardrails |
+| `gemini` | `GEMINI_API_KEY` | Google AI API | Native Gemini |
+
+## Hosts (conceptual roles)
+
+| Role | Service | What it does |
+|------|---------|--------------|
+| **dev-host** | Ollama, sage, LiteLLM proxy | Local inference + REPL + proxy |
+| **infra-host** | OTel Collector, Prometheus, Grafana, skills-hub | Observability + MCP server |
+
+Configure host addresses via env vars / `.env` files — never hardcoded.
+
+## Observability
+
+Telemetry flows: sage → OTLP/HTTP JSON → OTel Collector → Prometheus → Grafana.
+See `docs/TELEMETRY.org` for setup, metric names, and verification.
+
+Counters emitted: `session.count`, `token.usage`, `cost.usage`, `active.time`, `code_edit.tool_decision`, `mcp.tool_call`.
+
+LiteLLM guardrail headers (`x-litellm-applied-guardrails`) are surfaced in the REPL as 🛡️ emoji.
 
 ## Test Suites
 
 | Suite | Tests | Notes |
 |-------|-------|-------|
 | test-session.scm | 18 | Session CRUD |
-| test-tools.scm | 26 | Tool dispatch, safety |
-| test-security.scm | 31 (3 known fail) | Sandbox enforcement |
-| test-compaction.scm | 9 | Context compression |
+| test-tools.scm | 42 | Tool dispatch, safety, path scope |
+| test-security.scm | 37 | Sandbox enforcement (all green) |
+| test-compaction.scm | 9 | Context compression strategies |
 | test-compaction-security.scm | 4 | Compaction + safety |
-| test-pbt.scm | 40 | Property-based (4,000 trials) |
-| test-telemetry.scm | 13 | OTLP payload + counter accumulation |
+| test-compaction-deep.scm | 98 | 5 strategies × 3 provider fixtures |
+| test-auto-compact.scm | 10 | 80% threshold + /compact command |
+| test-pbt.scm | 64+ | Property-based (6400+ trials) |
+| test-telemetry.scm | 18 | OTLP payload + backoff |
+| test-model-fallback.scm | 21 | Graceful model removal |
+| test-model-tier.scm | 13 | Tier selection + defaults |
+| test-http-debug.scm | 8 | Wire-level debug logging |
+| test-mcp.scm | 17 | MCP SSE + JSON-RPC |
+| test-provider.scm | 25 | Multi-provider dispatch |
+| test-repl-chains.scm | 9 | Multi-step tool chain loop |
+| test-repl-guard.scm | 17 | Anti-hallucination guard |
 
 ## Conventions
 
 - Progressive commits: one concept per commit, explicit staging
 - Never `git add -A` or `git add .`
 - Commit format: `<type>(<scope>): <description>`
+- Structured git notes (CPRR): attribution, testing, conjecture, validation, research
 - Documentation in org-mode except AGENTS.md and CLAUDE.md
 - Tools over memory: persist state to files, not conversation
+- Use `bd` for all issue tracking (not TaskCreate or markdown TODOs)
+- Use tmux for long-running / non-blocking work
 
 ## Session Completion
 
 1. Run quality gates: `gmake check`
 2. Update issues via bd
-3. Push to remote: `git pull --rebase && bd sync && git push`
+3. Push to remote: `git pull --rebase && bd dolt push && git push`
 
 ## Known Issues
 
-- 3 test-security.scm failures: write_file, edit_file, git_commit in *safe-tools*
-- Uses shell `curl` for HTTP — guile-curl migration planned (guile-sage-eeh)
-- Shell calls for git — native Guile migration planned (guile-sage-k53)
+- Context limit defaults to 8000 (Ollama tier) for all providers — should read model capability from LiteLLM
+- `run_tests` output can blow up context (needs truncation + ANSI stripping)
+- Streaming disabled for openai provider (SSE format differs from Ollama NDJSON)
 
-## Roadmap (epics)
+## Roadmap (v0.7.0 epics)
 
-- v0.2.0 (guile-sage-m81): Robustness & streaming
-- v0.3.0 (guile-sage-rtz): Context & memory
-- v0.4.0 (guile-sage-00g): MCP protocol
-- v0.5.0 (guile-sage-grv): Agent modes
+| Epic | Priority | Status |
+|------|----------|--------|
+| Multi-step tool chains | P1 | ✓ shipped (dispatch loop) |
+| /compact slash command | P1 | ✓ wired (5 strategies) |
+| Stdio MCP transport | P1 | open |
+| Multi-provider (Ollama + Gemini + LiteLLM) | P1 | ✓ shipped |
+| Prompt caching via Ollama | P2 | open |
+| Web search tool | P2 | open |
+| Plan/read-only mode | P2 | open |
+| Auto-memory | P2 | open |
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->

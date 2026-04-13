@@ -297,7 +297,7 @@ the chain-decomposition failure at all.
   (the model fired `read_file` instead), so no `/tmp/sage-chain-test.txt` or
   workspace-relative `./tmp/sage-chain-test.txt` was created.
 - **Exit:** sage received `/exit` cleanly; telemetry counters flushed on the way out
-  (confirmed by the trailing `POST http://INFRA_HOST:4318/v1/metrics` entries in
+  (confirmed by the trailing `POST ${OTEL_HTTP_ENDPOINT}/v1/metrics` entries in
   `.logs/http.jsonl`).
 - **`.logs/http.jsonl` contamination:** the shared log also picked up entries from the
   other running sage sessions (`qwen3:0.6b` streams, prior `sage-qwen3-test.txt`
