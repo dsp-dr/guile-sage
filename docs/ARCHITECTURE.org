@@ -1,4 +1,4 @@
-#+TITLE: Sage Architecture (v0.6.0)
+#+TITLE: Sage Architecture (v0.7.0)
 #+AUTHOR: guile-sage
 #+DATE: 2026-04-11
 #+OPTIONS: toc:3 num:t ^:nil

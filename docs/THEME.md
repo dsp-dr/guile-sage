@@ -119,7 +119,7 @@ set -g message-style 'bg=#9a8a5a,fg=#0a0f0a'
 
 ```
 ╔════════════════════════════════════════════╗
-║             guile-sage v0.5.0              ║  ← SAGE-500 border
+║             guile-sage v0.7.0              ║  ← SAGE-500 border
 ║   Type /help for commands, /exit to quit   ║
 ╚════════════════════════════════════════════╝
 
