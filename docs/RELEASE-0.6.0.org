@@ -335,7 +335,7 @@ involves tool calls*. The model-tier defaults reflect this.
 
 #+BEGIN_SRC bash
 # 1. Build & test
-gmake check                                # 34/37 (3 known security baselines)
+gmake check                                # all green (security tests fixed in 5bcc284)
 guile -L src tests/test-telemetry.scm      # 13/13
 guile -L src tests/test-model-fallback.scm # 21/21
 guile -L src tests/test-http-debug.scm     # 8/8

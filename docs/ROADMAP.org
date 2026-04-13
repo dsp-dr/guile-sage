@@ -128,7 +128,7 @@ Target: Specialized interaction patterns
 - Copilot CLI: Explore and Task agents
 - Continue.dev: pause/resume sessions
 
-** v0.6.0 - Multi-Model & Providers
+** v0.6.0 - Multi-Model & Providers (shipped)
 
 Target: Model flexibility
 
