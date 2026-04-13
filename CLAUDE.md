@@ -40,6 +40,7 @@ src/sage/
   logging.scm       Structured JSONL logging
   status.scm        Status display (thinking, streaming, done)
   util.scm          HTTP/JSON utilities, as-list, json-empty-object
+  commands.scm      Custom /command registry (XDG-persisted)
   irc.scm           IRC integration (optional, only when connected)
   version.scm       Semver constants
 ```
@@ -71,6 +72,35 @@ See `docs/TELEMETRY.org` for setup, metric names, and verification.
 Counters emitted: `session.count`, `token.usage`, `cost.usage`, `active.time`, `code_edit.tool_decision`, `mcp.tool_call`.
 
 LiteLLM guardrail headers (`x-litellm-applied-guardrails`) are surfaced in the REPL as 🛡️ emoji.
+
+## Documentation Architecture
+
+docs/ and reports/ have different contracts:
+
+**`docs/`** — Living documents. MUST match the current implementation.
+If a doc describes something that doesn't match `src/`, that's a bug.
+Update the doc when changing the code. These are the contract barrier
+for the architecture level.
+
+| Document | What it covers | Update when |
+|----------|---------------|-------------|
+| `ARCHITECTURE.org` | C4 diagrams, module list, startup sequence, data flow | Any module added/removed/renamed |
+| `TELEMETRY.org` | Metric names, OTLP setup, verification | Any counter added or endpoint changed |
+| `CLI-COMPARISON.org` | Feature matrix vs other CLIs | Any feature shipped or gap closed |
+| `TIMING-PROTOCOL.org` | Benchmark methodology + locked-in numbers | Model defaults change or new provider |
+| `MCP-CONTRACT.org` | MCP protocol invariants (23) | MCP client behavior changes |
+| `EU-AI-ACT-GUARDRAILS.org` | LiteLLM guardrail spec | Guardrail config changes |
+| `ROADMAP.org` | Epics with shipped/open status | Epic completed or new one filed |
+| `RELEASE-0.6.0.org` | v0.6.0 changelog (frozen) | Never (it's a release snapshot) |
+| `TOOLS.org` / `TOOLS-GUIDE.org` | Tool reference | Any tool added/removed/changed |
+| `COMMANDS.org` | Slash command reference | Any /command added |
+
+**`docs/reports/`** — Point-in-time snapshots. YYYYMMDD-prefixed.
+Never updated after creation. Future agents read these for context
+but they are NOT the source of truth for current behavior.
+
+**`docs/adr/`** — Architecture Decision Records. Numbered, immutable
+after acceptance. Record WHY a decision was made.
 
 ## Test Suites
 
