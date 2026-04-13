@@ -1,0 +1,68 @@
+sequenceDiagram
+    participant U as User
+    participant R as REPL (repl.scm)
+    participant MT as model-tier.scm
+    participant O as Ollama (ollama.scm)
+    participant T as tools.scm
+    participant MCP as mcp.scm
+    participant SK as skills-hub (infra-host:8400)
+    participant TM as telemetry.scm
+    participant OC as OTel Collector (infra-host:4318)
+
+    U->>R: input text
+    R->>R: inc-counter! active.time(user)
+    R->>R: session-add-message("user", input)
+    R->>MT: resolve-model-for-tokens(current_tokens)
+    MT-->>R: tier (model name, tools? flag)
+
+    alt Streaming mode (default)
+        R->>O: ollama-chat-streaming(model, messages, tools)
+        O->>O: POST /api/chat (stream: true)
+        loop NDJSON chunks
+            O-->>R: SSE chunk (content delta + tool_calls on first chunk)
+            R->>R: status-stream-token (display)
+        end
+    else Non-streaming mode
+        R->>O: ollama-chat-with-tools(model, messages, tools)
+        O->>O: POST /api/chat (stream: false)
+        O-->>R: complete response
+    end
+
+    R->>R: ollama-parse-tool-call(message)
+    R->>R: inc-counter! token.usage(input + output)
+    R->>R: inc-counter! cost.usage(model, $0 for local)
+    R->>TM: telemetry-flush!
+    TM->>OC: POST /v1/metrics (OTLP JSON)
+
+    alt Tool call detected
+        R->>T: execute-tool(tool_name, args)
+        T->>T: check-permission(tool_name, args)
+        T->>TM: inc-counter! tool_decision(accept/reject)
+
+        alt Built-in tool
+            T->>T: (tool-fn args) — shell or pure Guile
+            T-->>R: result string
+        else MCP tool (namespaced or bare)
+            T->>MCP: mcp-call-tool(server, tool, args)
+            MCP->>MCP: inc-counter! mcp.tool_call
+            MCP->>SK: POST JSON-RPC tools/call
+            SK-->>MCP: 202 Accepted
+            MCP->>MCP: sse-wait-for-response(port, id)
+            SK-->>MCP: SSE message event (JSON-RPC result)
+            MCP-->>T: result text
+            T-->>R: result string
+        end
+
+        R->>R: session-add-message("assistant", content, tool-call: #t)
+        R->>R: session-add-message("user", "Tool result for ...")
+        R->>O: ollama-chat(model, context) — follow-up
+        O-->>R: follow-up response
+        R->>R: session-add-message("assistant", follow-up)
+        R->>U: display follow-up
+    else No tool call
+        R->>R: session-add-message("assistant", content)
+        R->>U: display content
+    end
+
+    R->>R: context-format-warnings (threshold check)
+    R->>R: inc-counter! active.time(cli)
