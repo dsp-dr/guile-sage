@@ -48,7 +48,7 @@ done
 echo
 # 3. repl.scm uses provider-* not ollama-* directly (except in provider dispatch)
 echo "--- repl.scm provider abstraction ---"
-direct_ollama=$(grep -c 'ollama-chat\|ollama-list\|ollama-model\|ollama-host' src/sage/repl.scm 2>/dev/null || echo 0)
+direct_ollama=$(grep -v '^ *;' src/sage/repl.scm | grep -c 'ollama-chat\|ollama-list\|ollama-model\|ollama-host' 2>/dev/null || true)
 if [ "$direct_ollama" -eq 0 ]; then
   pass "repl.scm has zero direct ollama-* calls"
 else
