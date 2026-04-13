@@ -31,7 +31,6 @@ RUN adduser -D -h /home/sage sage
 
 # Copy built artifacts
 COPY --from=builder /build/src /opt/sage/src
-COPY --from=builder /build/resources /opt/sage/resources
 
 # Set up environment
 ENV GUILE_LOAD_PATH=/opt/sage/src
