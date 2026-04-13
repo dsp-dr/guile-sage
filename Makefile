@@ -225,6 +225,11 @@ monitor:
 promote-images:
 	@scripts/promote-images.sh
 
+# Non-phony: rebuild images/README.md when the prompt catalog changes
+images/README.md: scripts/generate-showcase.scm
+	@echo "Rebuilding images/README.md from prompt catalog..."
+	@python3 scripts/gen-image-readme.py
+
 sage-commit:
 	@scripts/sage-commit.sh "$(MSG)"
 

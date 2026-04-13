@@ -2,22 +2,28 @@
 #+AUTHOR: dsp-dr
 #+OPTIONS: toc:2 num:nil
 
+[[file:images/banner.png]]
+
 [[https://www.gnu.org/software/guile/][file:https://img.shields.io/badge/Guile-3.0-blue.svg]]
 [[https://ollama.ai][file:https://img.shields.io/badge/Ollama-supported-green.svg]]
+[[https://img.shields.io/badge/Gemini-supported-blue.svg]]
+[[https://img.shields.io/badge/LiteLLM-supported-purple.svg]]
 [[https://github.com/dsp-dr/guile-sage/blob/main/LICENSE][file:https://img.shields.io/badge/license-MIT-blue.svg]]
-[[https://freebsd.org][file:https://img.shields.io/badge/FreeBSD-15.0-red.svg]]
 
-*AI REPL with tool calling for Guile Scheme*
+*Multi-provider AI REPL with tool calling for Guile Scheme*
 
 ** Overview
 
-guile-sage is an interactive AI assistant REPL written in Guile3 Scheme. It provides:
+guile-sage is an interactive AI agent REPL written in GNU Guile 3 Scheme. It provides:
 
-- Chat interface with Ollama-compatible LLMs
-- Tool calling system with safety permissions
-- Session management with persistence
-- Self-modification capabilities
-- Context compaction for long conversations
+- Multi-provider LLM support (Ollama, Gemini, LiteLLM/OpenAI-compat)
+- 22+ built-in tools with safe/unsafe permission model
+- Multi-step tool chain execution with degenerate loop detection
+- MCP client (SSE transport) for external tool servers
+- Session management with persistence and context compaction (5 strategies)
+- OTLP telemetry emission to Prometheus/Grafana
+- Image generation via Ollama flux models
+- LiteLLM guardrail integration (EU AI Act compliance)
 
 ** Features
 
@@ -214,7 +220,7 @@ guile3 -L src -c '(use-modules (sage repl)) (repl-start)'
 
 #+begin_example
 ╔════════════════════════════════════════════╗
-║             guile-sage v0.5.0              ║
+║             guile-sage v0.7.0              ║
 ║   Type /help for commands, /exit to quit   ║
 ╚════════════════════════════════════════════╝
 Model: glm-4.7:cloud
