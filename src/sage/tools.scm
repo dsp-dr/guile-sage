@@ -87,13 +87,15 @@
 
 ;;; safe-path?: Check if path is within workspace
 (define (safe-path? path)
-  (let ((ws (workspace))
-        (expanded (resolve-path path)))
-    ;; Allow /tmp for temporary files, otherwise check workspace containment
-    (or (string-prefix? "/tmp/" expanded)
-        (and (not (string-contains path ".."))
-             (string-prefix? ws (canonicalize-path-safe expanded))
-             (not (regexp-exec (make-regexp "(\\.env|\\.git/|\\.ssh|\\.gnupg)") path))))))
+  ;; Traversal check applies globally — no path with ".." is ever safe
+  (if (string-contains path "..")
+      #f
+      (let ((ws (workspace))
+            (expanded (resolve-path path)))
+        ;; Allow /tmp for temporary files, otherwise check workspace containment
+        (or (string-prefix? "/tmp/" expanded)
+            (and (string-prefix? ws (canonicalize-path-safe expanded))
+                 (not (regexp-exec (make-regexp "(\\.env|\\.git/|\\.ssh|\\.gnupg)") path)))))))
 
 ;;; coerce->int: Force a JSON-supplied value to a Scheme exact integer.
 ;;;

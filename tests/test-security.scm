@@ -59,6 +59,27 @@
                       "Should reject absolute paths outside workspace")))))
 
 ;;; ============================================================
+;;; /tmp/ PATH ALLOWANCE (ARCHITECTURE.org contract)
+;;; ============================================================
+
+(test-suite "/tmp/ Path Allowance"
+  (lambda ()
+    (test "allow /tmp/ absolute path"
+      (lambda ()
+        (assert-true (safe-path? "/tmp/sage-test.txt")
+                     "Should allow /tmp/ paths per ARCHITECTURE.org")))
+
+    (test "allow /tmp/ nested path"
+      (lambda ()
+        (assert-true (safe-path? "/tmp/sage/output/result.json")
+                     "Should allow nested /tmp/ paths")))
+
+    (test "reject /tmp/../etc escape"
+      (lambda ()
+        (assert-false (safe-path? "/tmp/../etc/passwd")
+                      "Should reject traversal out of /tmp/")))))
+
+;;; ============================================================
 ;;; SENSITIVE FILE PROTECTION
 ;;; ============================================================
 

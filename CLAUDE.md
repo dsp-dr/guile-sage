@@ -129,12 +129,7 @@ after acceptance. Record WHY a decision was made.
 | test-ollama.scm | Ollama client + JSON parser |
 | test-log-introspection.scm | Log search/stats tools |
 | test-image-gen.scm | Image generation (flux) |
-| test-model-tier.scm | 13 | Tier selection + defaults |
-| test-http-debug.scm | 8 | Wire-level debug logging |
-| test-mcp.scm | 17 | MCP SSE + JSON-RPC |
-| test-provider.scm | 25 | Multi-provider dispatch |
-| test-repl-chains.scm | 9 | Multi-step tool chain loop |
-| test-repl-guard.scm | 17 | Anti-hallucination guard |
+| test-harness.scm | SRFI-64 compat shim (shared by all tests) |
 
 ## Conventions
 
