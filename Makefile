@@ -26,7 +26,7 @@ GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench
+.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench presentation
 
 all: $(OBJECTS)
 
@@ -178,6 +178,12 @@ docs/%.html: docs/%.org
 		--eval "(find-file \"$<\")" \
 		--eval "(org-html-export-to-html)" \
 		2>/dev/null || echo "Note: Emacs not available for HTML export"
+
+# Presentation (Beamer PDF + standalone HTML)
+presentation: docs/PRESENTATION.pdf docs/PRESENTATION.html
+	@echo "Presentation built:"
+	@echo "  PDF:  docs/PRESENTATION.pdf"
+	@echo "  HTML: docs/PRESENTATION.html"
 
 # Publishing
 publish: docs
