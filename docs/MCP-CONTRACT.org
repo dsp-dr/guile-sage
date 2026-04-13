@@ -402,8 +402,11 @@ invariant has a short code (I##) so tests can reference it.
 
 ** Transport layer
 
-- *I01* — The client MUST open exactly one SSE connection per configured
-  MCP server and keep it open for the lifetime of the session.
+- *I01* — The client MUST open a fresh SSE connection per MCP tool call
+  (fresh-SSE-per-call pattern). Each call is self-contained: open FIFO,
+  spawn curl, initialize handshake, send request, read response, close.
+  This avoids stale-session bugs from long-lived connections.
+  /Changed from "one SSE per session" after stale-FIFO bugs in v0.6.0./
 - *I02* — The client MUST NOT issue any POST to =/messages/…= before
   receiving the =endpoint= event over SSE.
 - *I03* — The POST URL MUST be constructed as =origin + data-line-from-
