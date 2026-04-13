@@ -228,7 +228,8 @@
     "read_logs" "search_logs"
     "sage_task_create" "sage_task_complete"
     "sage_task_list" "sage_task_status"
-    "whoami" "irc_send" "generate_image"))
+    "whoami" "generate_image"))
+    ;; irc_send removed: only registered when IRC is connected (2a31387)
 
 (property "known tools always resolve via get-tool"
   (lambda () (rng-element *known-tool-names*))
@@ -1144,10 +1145,13 @@
         (and (string? result)
              (<= step (max n 1)))))))
 
-(property "max-iterations cap always fires at *max-tool-iterations* (never exceeds)"
+(property "tool chain terminates within max-iterations (never exceeds)"
   ;; Generator: random seed (ignored, we always test the cap)
   (lambda () (rng-int 0 100))
-  ;; Property: an infinite-tool-call mock terminates at exactly the cap
+  ;; Property: an infinite-tool-call mock terminates, and the call
+  ;; count never exceeds *max-tool-iterations*. With degenerate loop
+  ;; detection (same tool 3x in a row), it may terminate EARLIER than
+  ;; the cap — that's correct behavior, not a failure.
   (lambda (_seed)
     (session-create)
     (let* ((call-count 0)
@@ -1179,11 +1183,10 @@
                  (module-set! (resolve-module '(sage ollama))
                               'ollama-chat-with-tools real-ocwt)))))
         ;; Must have terminated (returned a string) and
-        ;; call-count must be exactly *max-tool-iterations*.
-        ;; Iterations 0..9 each process tool_calls and call the mock = 10 calls.
-        ;; Iteration 10 sees (>= 10 10) and returns without calling.
+        ;; call-count must not EXCEED *max-tool-iterations*.
+        ;; Degenerate detection may terminate earlier (at 3 repeats).
         (and (string? result)
-             (= call-count pbt-*max-tool-iterations*))))))
+             (<= call-count pbt-*max-tool-iterations*))))))
 
 ;;; ============================================================
 ;;; Summary
