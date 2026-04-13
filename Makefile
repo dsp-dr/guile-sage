@@ -102,9 +102,34 @@ uninstall:
 tags:
 	etags $(SOURCES)
 
-lint:
-	@echo "Checking for common issues..."
+lint: lint-code lint-org lint-docs
+	@echo "All lint checks passed."
+
+lint-code:
+	@echo "=== Code lint ==="
 	@grep -rn "make-vector" $(SRCDIR) && echo "Warning: make-vector conflicts with core" || true
+
+lint-org:
+	@echo "=== Org-mode lint ==="
+	@errors=0; \
+	for f in docs/*.org; do \
+		if ! grep -q '#+TITLE:' "$$f"; then \
+			echo "FAIL: $$f missing #+TITLE"; errors=$$((errors+1)); \
+		fi; \
+		title=$$(grep '#+TITLE:' "$$f" | head -1); \
+		if ! echo "$$title" | grep -q 'guile-sage'; then \
+			echo "WARN: $$f title doesn't start with guile-sage: $$title"; \
+		fi; \
+		if grep -qn '^## ' "$$f"; then \
+			echo "FAIL: $$f has markdown headers in org file"; errors=$$((errors+1)); \
+		fi; \
+	done; \
+	if [ "$$errors" -gt 0 ]; then echo "$$errors org lint errors"; exit 1; fi; \
+	echo "  All org files clean."
+
+lint-docs:
+	@echo "=== Documentation lint ==="
+	@scripts/doc-check.sh
 
 init:
 	@sh scripts/init.sh
