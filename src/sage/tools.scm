@@ -454,9 +454,19 @@
                          (workspace) pattern guile-bin))
             (tmp (format #f "/tmp/sage-test-~a" (getpid))))
        (system (string-append cmd " > " tmp " 2>&1"))
-       (let ((result (call-with-input-file tmp get-string-all)))
+       (let* ((raw (call-with-input-file tmp get-string-all))
+              ;; Strip ANSI escape codes (colors, cursor movement)
+              (stripped (regexp-substitute/global #f "\x1b\\[[0-9;]*[a-zA-Z]" raw 'pre 'post))
+              ;; Truncate to 4096 chars to avoid blowing up context window
+              (max-len 4096)
+              (truncated (if (> (string-length stripped) max-len)
+                             (string-append (substring stripped 0 max-len)
+                                            "\n... [truncated, "
+                                            (number->string (string-length stripped))
+                                            " chars total]")
+                             stripped)))
          (delete-file tmp)
-         result))))
+         truncated))))
 
   ;; git_commit - Make atomic commits
   (register-tool
