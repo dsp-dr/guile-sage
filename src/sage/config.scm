@@ -47,7 +47,10 @@
             sage-log-dir
             sage-log-level
             sage-log-max-size
-            sage-log-keep))
+            sage-log-keep
+            ;; Guardrail visibility
+            guardrail-proxy-url
+            guardrail-check-provider))
 
 ;;; Constants
 
@@ -344,3 +347,22 @@
     (if keep
         (string->number keep)
         5)))
+
+;;; ============================================================
+;;; Guardrail visibility (observability only — no filtering in sage)
+;;; ============================================================
+
+;;; guardrail-proxy-url: Returns SAGE_GUARDRAIL_PROXY if set, #f otherwise.
+(define (guardrail-proxy-url)
+  (config-get "GUARDRAIL_PROXY"))
+
+;;; guardrail-check-provider: Warn if provider isn't routed through proxy.
+;;; Returns a warning string or #f if guardrails are not configured or OK.
+(define (guardrail-check-provider provider-name provider-host)
+  (let ((proxy (guardrail-proxy-url)))
+    (if (not proxy)
+        #f  ; No guardrail proxy configured — nothing to check
+        (if (string-contains provider-host proxy)
+            #f  ; Provider is routed through the proxy — OK
+            (format #f "Provider ~a (~a) is NOT routed through guardrail proxy ~a"
+                    provider-name provider-host proxy)))))

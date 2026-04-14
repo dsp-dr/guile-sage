@@ -826,6 +826,11 @@
                 (status-stream-end completion-tokens elapsed)
                 (debug-tokens prompt-tokens completion-tokens)
 
+                ;; Show guardrails from streaming response (LiteLLM header)
+                (let ((guardrails (assoc-ref response "guardrails")))
+                  (when (and guardrails (string? guardrails) (not (string-null? guardrails)))
+                    (format #t "\x1b[33m🛡️ Guardrails: ~a\x1b[0m~%" guardrails)))
+
                 ;; Emit token + cost counters (Ollama is local => $0)
                 (inc-counter! "guile_sage.token.usage"
                               `(("model" . ,model) ("type" . "input"))
