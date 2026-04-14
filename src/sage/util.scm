@@ -540,9 +540,11 @@
       result)))
 
 ;;; http-post-streaming-curl: Curl fallback for HTTPS streaming
+;;; Also captures response headers via -D for guardrail visibility.
 (define* (http-post-streaming-curl url body on-chunk
                                    #:key (timeout 30) (headers '()))
   (let* ((tmp-file (make-temp-file "sage-stream"))
+         (header-file (format #f "/tmp/sage-stream-hdrs-~a" (getpid)))
          (dummy (call-with-output-file tmp-file
                   (lambda (port) (display body port))))
          (header-args (string-join
@@ -553,8 +555,8 @@
                                             (shell-escape (cdr h))))
                                   headers))
                        " "))
-         (cmd (format #f "curl -sN --connect-timeout ~a -X POST ~a -d '@~a' '~a'"
-                      timeout header-args tmp-file
+         (cmd (format #f "curl -sN --connect-timeout ~a -D '~a' -X POST ~a -d '@~a' '~a'"
+                      timeout header-file header-args tmp-file
                       (shell-escape url)))
          (pipe (open-input-pipe cmd))
          (final-chunk #f))
@@ -578,10 +580,27 @@
       (lambda (key . args)
         #f))
     (close-pipe pipe)
-    (catch #t
-      (lambda () (delete-file tmp-file))
-      (lambda args #f))
-    final-chunk))
+    ;; Extract guardrail header from response headers if present
+    (let ((guardrails
+           (catch #t
+             (lambda ()
+               (if (file-exists? header-file)
+                   (let ((hdrs (call-with-input-file header-file get-string-all)))
+                     (let ((match (string-contains hdrs "x-litellm-applied-guardrails:")))
+                       (if match
+                           (let* ((start (+ match (string-length "x-litellm-applied-guardrails:")))
+                                  (end (or (string-index hdrs #\newline start)
+                                           (string-length hdrs))))
+                             (string-trim-both (substring hdrs start end)))
+                           #f)))
+                   #f))
+             (lambda args #f))))
+      (catch #t (lambda () (delete-file tmp-file)) (lambda args #f))
+      (catch #t (lambda () (when (file-exists? header-file) (delete-file header-file))) (lambda args #f))
+      ;; Attach guardrails to final chunk if present
+      (if (and final-chunk guardrails)
+          (cons `("guardrails" . ,guardrails) final-chunk)
+          final-chunk))))
 
 ;;; http-post-streaming: POST with streaming NDJSON response
 ;;; Native Guile for HTTP, curl fallback for HTTPS.
