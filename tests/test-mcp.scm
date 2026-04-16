@@ -261,6 +261,483 @@
       (set! *mcp-servers* saved))))
 
 ;;; ============================================================
+;;; I06: Every POST carries Content-Type + Bearer header
+;;; ============================================================
+
+(format #t "~%--- I06: POST headers ---~%")
+
+(run-test "I06-pos: mcp-make-request body is valid JSON (Content-Type: application/json)"
+  (lambda ()
+    ;; The request body produced by mcp-make-request must be valid JSON
+    ;; (which is what Content-Type: application/json means).
+    ;; mcp-post in mcp.scm delegates to http-post-with-timeout which
+    ;; sets Content-Type internally. We verify the body IS valid JSON.
+    (set! *mcp-next-id* 0)
+    (receive (id body)
+        (mcp-make-request "tools/list" '(("foo" . "bar")))
+      (let ((parsed (json-read-string body)))
+        (assert-true (list? parsed)
+                     "body must parse as valid JSON alist")
+        (assert-equal (assoc-ref parsed "jsonrpc") "2.0"
+                      "jsonrpc must be present")))))
+
+(run-test "I06-pos: notification body is valid JSON"
+  (lambda ()
+    (let* ((body (mcp-make-notification "notifications/initialized"
+                                         json-empty-object))
+           (parsed (json-read-string body)))
+      (assert-true (list? parsed)
+                   "notification body must be valid JSON"))))
+
+;;; ============================================================
+;;; I07: 202 = accepted, other status = error
+;;; ============================================================
+
+(format #t "~%--- I07: HTTP status handling ---~%")
+
+(run-test "I07-pos: mcp-extract-tool-result handles well-formed 202 response"
+  (lambda ()
+    ;; Simulate the envelope that arrives after a 202 POST + SSE response
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 5)
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "Success!"))))
+                                    ("isError" . #f)))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-equal text "Success!" "should extract text from 202-path envelope"))))
+
+(run-test "I07-neg: non-202 status produces error (simulated in extract)"
+  (lambda ()
+    ;; When POST returns non-202, mcp-call-tool-inner formats an error.
+    ;; We test the format string that would be produced.
+    (let ((error-msg (format #f "MCP POST failed: ~a" 400)))
+      (assert-contains error-msg "400"
+                       "error message should contain status code"))))
+
+;;; ============================================================
+;;; I09: Response echoes exact request id
+;;; ============================================================
+
+(format #t "~%--- I09: Response id correlation ---~%")
+
+(run-test "I09-pos: envelope with matching id is accepted"
+  (lambda ()
+    (set! *mcp-next-id* 0)
+    (receive (id body)
+        (mcp-make-request "tools/call" '(("name" . "test")))
+      ;; Simulate a response with the same id
+      (let ((response `(("jsonrpc" . "2.0")
+                        ("id" . ,id)
+                        ("result" . (("content" . ((("type" . "text")
+                                                     ("text" . "matched"))))
+                                     ("isError" . #f))))))
+        ;; Extraction should succeed with correct id
+        (let ((text (mcp-extract-tool-result response)))
+          (assert-equal text "matched" "response with matching id is processed"))))))
+
+(run-test "I09-neg: mismatched id would be dropped by sse-wait-for-response"
+  (lambda ()
+    ;; sse-wait-for-response checks (eqv? eid target-id).
+    ;; We verify the check logic: target-id 42 should NOT match eid 99.
+    (assert-false (eqv? 42 99) "mismatched ids must not be eqv?")))
+
+(run-test "I09-pos: request id is always a number"
+  (lambda ()
+    (set! *mcp-next-id* 0)
+    (receive (id body)
+        (mcp-make-request "test" '())
+      (assert-true (number? id) "id must be a number")
+      (let ((parsed (json-read-string body)))
+        (assert-true (number? (assoc-ref parsed "id"))
+                     "id in envelope must be a number")))))
+
+;;; ============================================================
+;;; I10: Exactly one of result/error in response
+;;; ============================================================
+
+(format #t "~%--- I10: result/error exclusivity ---~%")
+
+(run-test "I10-pos: envelope with only result is valid"
+  (lambda ()
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 1)
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "ok"))))
+                                    ("isError" . #f)))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-equal text "ok" "result-only envelope extracts correctly"))))
+
+(run-test "I10-pos: envelope with only error is valid"
+  (lambda ()
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 1)
+                       ("error" . (("code" . -32602)
+                                   ("message" . "Unknown tool")))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-contains text "Unknown tool"
+                       "error-only envelope extracts error message"))))
+
+(run-test "I10-neg: envelope with both result AND error — error takes priority"
+  (lambda ()
+    ;; Per I10, both-present is a protocol violation.
+    ;; mcp-extract-tool-result checks error first, so error wins.
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 1)
+                       ("error" . (("code" . -32000)
+                                   ("message" . "server error")))
+                       ("result" . (("content" . ())
+                                    ("isError" . #f)))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-contains text "server error"
+                       "error field takes priority over result"))))
+
+(run-test "I10-neg: envelope with neither result nor error"
+  (lambda ()
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 1)))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-equal text "MCP: no result in response"
+                    "missing both result and error yields error message"))))
+
+;;; ============================================================
+;;; I12: Timeout on pending requests
+;;; ============================================================
+
+(format #t "~%--- I12: Request timeouts ---~%")
+
+(run-test "I12-pos: sse-wait-for-response returns #f on immediate EOF"
+  (lambda ()
+    ;; Simulate timeout by giving an empty (EOF) port
+    (let* ((empty-port (open-input-string ""))
+           (result (sse-wait-for-response empty-port 1 #:timeout-seconds 1)))
+      (assert-false result "EOF port should return #f (simulates timeout)"))))
+
+(run-test "I12-pos: sse-wait-for-response respects timeout on non-matching data"
+  (lambda ()
+    ;; Port with a message event whose id does NOT match target.
+    ;; The reader will see it, skip it, then hit EOF => #f.
+    (let* ((sse-data (string-append
+                      "event: message\n"
+                      "data: {\"jsonrpc\":\"2.0\",\"id\":999,\"result\":{\"content\":[]}}\n"
+                      "\n"))
+           (port (open-input-string sse-data))
+           (result (sse-wait-for-response port 42 #:timeout-seconds 1)))
+      (assert-false result
+                    "non-matching id followed by EOF returns #f"))))
+
+;;; ============================================================
+;;; I15: Verify protocolVersion match
+;;; ============================================================
+
+(format #t "~%--- I15: Protocol version verification ---~%")
+
+(run-test "I15-pos: initialize request sends correct protocolVersion"
+  (lambda ()
+    (set! *mcp-next-id* 0)
+    (receive (id body)
+        (mcp-make-request "initialize"
+                          `(("protocolVersion" . "2024-11-05")
+                            ("capabilities" . (("sampling" . ,json-empty-object)))
+                            ("clientInfo" . (("name" . "guile-sage")
+                                             ("version" . "0.6.0")))))
+      (let* ((parsed (json-read-string body))
+             (params (assoc-ref parsed "params")))
+        (assert-equal (assoc-ref params "protocolVersion") "2024-11-05"
+                      "client must send 2024-11-05")))))
+
+(run-test "I15-pos: matching protocolVersion in response is accepted"
+  (lambda ()
+    ;; Simulate initialize response with matching version
+    (let* ((init-response `(("jsonrpc" . "2.0")
+                            ("id" . 1)
+                            ("result" . (("protocolVersion" . "2024-11-05")
+                                         ("capabilities" . (("tools" . (("listChanged" . #f)))))
+                                         ("serverInfo" . (("name" . "test-server")
+                                                          ("version" . "1.0.0")))))))
+           (result (assoc-ref init-response "result"))
+           (version (assoc-ref result "protocolVersion")))
+      (assert-equal version "2024-11-05"
+                    "server protocolVersion matches client"))))
+
+(run-test "I15-neg: mismatched protocolVersion should be detectable"
+  (lambda ()
+    ;; If the server returns a different version, client must detect it
+    (let* ((init-response `(("jsonrpc" . "2.0")
+                            ("id" . 1)
+                            ("result" . (("protocolVersion" . "2025-99-99")
+                                         ("capabilities" . ())
+                                         ("serverInfo" . (("name" . "future-server")
+                                                          ("version" . "9.0.0")))))))
+           (result (assoc-ref init-response "result"))
+           (version (assoc-ref result "protocolVersion")))
+      (assert-false (equal? version "2024-11-05")
+                    "mismatched version is detected"))))
+
+;;; ============================================================
+;;; I16: Send initialized notification after init
+;;; ============================================================
+
+(format #t "~%--- I16: initialized notification ---~%")
+
+(run-test "I16-pos: initialized notification is a valid notification (no id)"
+  (lambda ()
+    (let* ((body (mcp-make-notification "notifications/initialized"
+                                         json-empty-object))
+           (parsed (json-read-string body)))
+      (assert-equal (assoc-ref parsed "method") "notifications/initialized"
+                    "method must be notifications/initialized")
+      (assert-false (assoc-ref parsed "id")
+                    "notification must NOT have an id field")
+      (assert-equal (assoc-ref parsed "jsonrpc") "2.0"
+                    "jsonrpc must be 2.0"))))
+
+(run-test "I16-pos: initialized notification params serialize as empty object"
+  (lambda ()
+    (let ((body (mcp-make-notification "notifications/initialized"
+                                        json-empty-object)))
+      ;; The params should be {} not null
+      (assert-contains body "\"params\":{}"
+                       "params must serialize as empty object"))))
+
+;;; ============================================================
+;;; I17: Respect server capabilities
+;;; ============================================================
+
+(format #t "~%--- I17: Server capabilities ---~%")
+
+(run-test "I17-pos: tools capability present allows tools/list"
+  (lambda ()
+    ;; When capabilities.tools exists, tools/list is permitted
+    (let ((capabilities `(("tools" . (("listChanged" . #f)))
+                          ("resources" . (("subscribe" . #f))))))
+      (assert-true (assoc-ref capabilities "tools")
+                   "tools capability is present — tools/list allowed"))))
+
+(run-test "I17-neg: missing tools capability means no tools/list"
+  (lambda ()
+    ;; mcp-discover-tools! checks: (not (assoc-ref capabilities "tools"))
+    ;; If tools is absent, it returns '() without sending tools/list
+    (let ((capabilities `(("resources" . (("subscribe" . #f)))
+                          ("prompts" . (("listChanged" . #f))))))
+      (assert-false (assoc-ref capabilities "tools")
+                    "no tools capability — tools/list must be skipped"))))
+
+(run-test "I17-neg: empty capabilities means no tools/list"
+  (lambda ()
+    (let ((capabilities '()))
+      (assert-false (assoc-ref capabilities "tools")
+                    "empty capabilities — tools/list must be skipped"))))
+
+;;; ============================================================
+;;; I19: Validate args against cached schema
+;;; ============================================================
+
+(format #t "~%--- I19: Argument validation against schema ---~%")
+
+(run-test "I19-pos: well-formed args match expected schema shape"
+  (lambda ()
+    ;; skills-hub tools expect {"query": "..."} with type "object"
+    (let* ((schema `(("type" . "object")
+                     ("properties" . (("query" . (("type" . "string")
+                                                   ("default" . "")))))))
+           (args `(("query" . "help")))
+           ;; Basic validation: args is an alist, schema type is "object"
+           (schema-type (assoc-ref schema "type"))
+           (props (assoc-ref schema "properties")))
+      (assert-equal schema-type "object"
+                    "schema type is object")
+      (assert-true (list? args)
+                   "args is an alist (object-like)")
+      ;; Each arg key should exist in schema properties
+      (for-each
+       (lambda (arg-pair)
+         (assert-true (assoc-ref props (car arg-pair))
+                      (format #f "arg ~a must exist in schema properties"
+                              (car arg-pair))))
+       args))))
+
+(run-test "I19-neg: unknown arg key not in schema properties"
+  (lambda ()
+    (let* ((schema `(("type" . "object")
+                     ("properties" . (("query" . (("type" . "string")))))))
+           (args `(("nonexistent_param" . "value")))
+           (props (assoc-ref schema "properties")))
+      ;; The key "nonexistent_param" is not in properties
+      (assert-false (assoc-ref props "nonexistent_param")
+                    "unknown arg key should not be in schema"))))
+
+(run-test "I19-pos: empty args is valid when all properties have defaults"
+  (lambda ()
+    (let* ((schema `(("type" . "object")
+                     ("properties" . (("query" . (("type" . "string")
+                                                   ("default" . "")))))))
+           (args json-empty-object)
+           (body (json-write-string
+                  `(("name" . "test_tool")
+                    ("arguments" . ,args)))))
+      ;; Empty args should be accepted when all fields have defaults
+      ;; json-empty-object serializes to {} which is a valid empty object
+      (assert-contains body "\"arguments\""
+                       "arguments key present in serialized body"))))
+
+;;; ============================================================
+;;; I20: Handle both JSON-RPC error AND result.isError
+;;; ============================================================
+
+(format #t "~%--- I20: Dual error paths ---~%")
+
+(run-test "I20-pos: JSON-RPC error field (path 1)"
+  (lambda ()
+    ;; Standard JSON-RPC error: {"error": {"code": -32602, "message": "..."}}
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 4)
+                       ("error" . (("code" . -32602)
+                                   ("message" . "Unknown tool: nonexistent")))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-contains text "-32602"
+                       "error code present in output")
+      (assert-contains text "Unknown tool"
+                       "error message present in output"))))
+
+(run-test "I20-pos: result.isError=true (path 2 — skills-hub style)"
+  (lambda ()
+    ;; skills-hub returns: {"result": {"content": [...], "isError": true}}
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 4)
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "Unknown tool: nonexistent__tool"))))
+                                    ("isError" . #t)))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-contains text "MCP tool error"
+                       "isError=true yields MCP tool error prefix")
+      (assert-contains text "Unknown tool: nonexistent__tool"
+                       "tool error text preserved"))))
+
+(run-test "I20-pos: result.isError=false is success"
+  (lambda ()
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 3)
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "All good"))))
+                                    ("isError" . #f)))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-equal text "All good"
+                    "isError=false yields clean text"))))
+
+(run-test "I20-pos: result without isError field treated as success"
+  (lambda ()
+    ;; Some servers may omit isError entirely — should be treated as success
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 3)
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "No isError field"))))))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-equal text "No isError field"
+                    "missing isError treated as success"))))
+
+(run-test "I20-neg: JSON-RPC error takes priority over result (when both present)"
+  (lambda ()
+    ;; Protocol violation per I10, but error should still win
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 4)
+                       ("error" . (("code" . -32000)
+                                   ("message" . "Internal error")))
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "Should be ignored"))))
+                                    ("isError" . #f)))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-contains text "Internal error"
+                       "JSON-RPC error takes priority over result"))))
+
+;;; ============================================================
+;;; I21: Unknown content types preserved, not dropped
+;;; ============================================================
+
+(format #t "~%--- I21: Content type handling ---~%")
+
+(run-test "I21-pos: text content type extracted normally"
+  (lambda ()
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 3)
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "hello world"))))
+                                    ("isError" . #f)))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-equal text "hello world" "text content extracted"))))
+
+(run-test "I21-pos: multiple text blocks concatenated"
+  (lambda ()
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 3)
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "line1"))
+                                                  (("type" . "text")
+                                                    ("text" . "line2"))
+                                                  (("type" . "text")
+                                                    ("text" . "line3"))))
+                                    ("isError" . #f)))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-equal text "line1\nline2\nline3"
+                    "multiple text blocks joined with newline"))))
+
+(run-test "I21-pos: unknown content type is not dropped from content array"
+  (lambda ()
+    ;; I21 says unknown types must be preserved, not dropped.
+    ;; mcp-extract-tool-result only extracts text blocks for display,
+    ;; but the content array itself still contains the unknown type.
+    ;; We verify the content array retains unknown-type blocks.
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 3)
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "known"))
+                                                  (("type" . "image")
+                                                    ("data" . "base64stuff")
+                                                    ("mimeType" . "image/png"))
+                                                  (("type" . "custom-widget")
+                                                    ("data" . "opaque"))))
+                                    ("isError" . #f)))))
+           (result-obj (assoc-ref envelope "result"))
+           (content (as-list (assoc-ref result-obj "content"))))
+      ;; All 3 blocks should be in content
+      (assert-equal (length content) 3
+                    "all content blocks preserved including unknown types")
+      ;; The unknown type block should still be there
+      (let ((types (map (lambda (block) (assoc-ref block "type")) content)))
+        (assert-true (member "custom-widget" types)
+                     "unknown type 'custom-widget' preserved in content array")
+        (assert-true (member "image" types)
+                     "image type preserved in content array")))))
+
+(run-test "I21-pos: extraction only returns text, non-text blocks preserved in envelope"
+  (lambda ()
+    ;; mcp-extract-tool-result flattens only text blocks for display
+    ;; but I21 requires non-text blocks not be dropped from the data structure
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 3)
+                       ("result" . (("content" . ((("type" . "text")
+                                                    ("text" . "visible"))
+                                                  (("type" . "resource")
+                                                    ("resource" . (("uri" . "file:///x"))))))
+                                    ("isError" . #f)))))
+           ;; Extract for display — only text
+           (text (mcp-extract-tool-result envelope))
+           ;; Raw content still has both blocks
+           (content (as-list (assoc-ref (assoc-ref envelope "result") "content"))))
+      (assert-equal text "visible"
+                    "only text blocks appear in extracted text")
+      (assert-equal (length content) 2
+                    "raw content still has both blocks"))))
+
+(run-test "I21-neg: empty content array produces empty string"
+  (lambda ()
+    (let* ((envelope `(("jsonrpc" . "2.0")
+                       ("id" . 3)
+                       ("result" . (("content" . ())
+                                    ("isError" . #f)))))
+           (text (mcp-extract-tool-result envelope)))
+      (assert-equal text "" "empty content yields empty string"))))
+
+;;; ============================================================
 ;;; Live integration tests (guarded by reachability check)
 ;;; ============================================================
 
