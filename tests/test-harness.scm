@@ -137,7 +137,10 @@
 ;;; ============================================================
 
 (define (test-summary)
-  "Print test summary using SRFI-64 runner stats."
+  "Print test summary using SRFI-64 runner stats.
+Exits with non-zero status if any tests failed so that the Makefile's
+`gmake check` target surfaces failures instead of reporting green
+(guile-sage-9zu)."
   (sync-counters!)
   (format #t "~%=== Test Summary ===~%")
   (format #t "Total: ~a~%" *tests-run*)
@@ -147,7 +150,10 @@
           (if (> *tests-run* 0)
               (inexact->exact (round (* 100 (/ *tests-passed* *tests-run*))))
               0))
-  (format #t "~%Tests: ~a/~a passed~%" *tests-passed* *tests-run*))
+  (format #t "~%Tests: ~a/~a passed~%" *tests-passed* *tests-run*)
+  ;; Propagate failure via exit status. test-summary is always the last
+  ;; thing a test file does, so exiting here is safe: nothing after it.
+  (exit (if (> *tests-failed* 0) 1 0)))
 
 ;;; ============================================================
 ;;; Initialize tools
