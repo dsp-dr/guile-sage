@@ -667,6 +667,74 @@ For provider-aware compaction, consider:
 - OpenAI: tiktoken library (not available in Guile; approximation is fine)
 - Gemini: similar 4 chars/token approximation
 
+* Historical Context
+
+Context compaction for conversational agents is a recent framing of problems
+with deep roots in computer science and cognitive psychology. Several bodies
+of prior work are directly relevant:
+
+- *Memory management and page replacement.* Context compaction is structurally
+  analogous to virtual memory management. Fotheringham (1961) introduced demand
+  paging on the Atlas computer, establishing the three-level hierarchy
+  (registers / RAM / backing store) that MemGPT's core/recall/archival tiers
+  reimplement. Denning's working set model (1968) describes the set of pages
+  referenced in a window [t-tau, t] --- the conceptual ancestor of sliding-window
+  truncation with a fixed ~#:keep N~ parameter. Belady (1966) proved that the
+  optimal offline replacement algorithm evicts the page used furthest in the
+  future, establishing a theoretical upper bound no online strategy can match.
+  Sleator and Tarjan (1985) showed LRU's competitive ratio is bounded by cache
+  size k --- a framework for analyzing regret that compaction strategies could
+  adopt.
+
+- *Garbage collection.* McCarthy's Lisp (1960) introduced reclamation of
+  unreachable objects, and Appel's generational garbage collection (1989)
+  formalized the "most objects die young" hypothesis. sage's ~compact-auto~
+  selection (truncate for small ratios, importance + summarize for larger)
+  can be read as an informal two-generation collector: ephemeral messages
+  collected cheaply, surviving messages collected with more expensive analysis.
+
+- *Automatic summarization.* Luhn (1958) scored sentences by significant-word
+  frequency and extracted the highest-scoring ones --- the direct ancestor of
+  sage's ~extract-topics~ keyword-frequency approach. Erkan and Radev's LexRank
+  (2004) introduced graph-based centrality for sentence salience, and Maynez
+  et al. (2020) documented hallucination and faithfulness problems in
+  abstractive summarization that any LLM-based ~compact-summarize~ would
+  inherit.
+
+- *Information theory.* Shannon (1948) established rate-distortion as the
+  mathematical framing for lossy compression: below the source entropy no
+  lossless encoding exists, and above it the distortion-rate function bounds
+  quality. sage's ~evaluate-compaction~ currently blends compression ratio with
+  quality in a single weighted score; rate-distortion theory argues the two
+  axes should be reported independently.
+
+- *Cognitive models of memory.* Miller's "Magical Number Seven" (1956) placed
+  human working memory capacity at roughly 7 chunks, and Baddeley and Hitch
+  (1974) decomposed working memory into a central executive, phonological loop,
+  and visuospatial sketchpad. Ericsson and Kintsch's long-term working memory
+  (1995) described how experts maintain retrieval cues that point to elaborated
+  long-term structures --- the pattern MemGPT's archival search implements.
+  Sweller's cognitive load theory (1988) distinguishes intrinsic, extraneous,
+  and germane load, providing a principled ordering for what to compress first
+  (strip extraneous formatting before touching reasoning chains).
+
+- *Knowledge representation.* Minsky's frames (MIT AI Memo 306, 1974) and
+  Schank and Abelson's scripts (1977) describe how stereotyped knowledge
+  structures enable inference from incomplete input. sage's importance scoring
+  (role-based base + keyword bonuses) and ~compact-intent~ strategy
+  (keyword-driven intent classification) are flat approximations of these
+  richer frameworks.
+
+- *Adaptive caching.* Megiddo and Modha's ARC (2003) dynamically balances
+  recency and frequency using ghost entries for evicted items --- a pattern
+  that could inform adaptive strategy selection without the overhead of full
+  trajectory analysis.
+
+These lineages do not diminish the contributions of the 2024-2026 systems
+surveyed above, but they do supply a longer record of formal results
+(competitive ratios, entropy bounds, optimal offline algorithms) against
+which LLM-era compaction strategies can be measured.
+
 * Appendix C: Sources
 
 - [[https://arxiv.org/abs/2310.08560][MemGPT: Towards LLMs as Operating Systems (arxiv:2310.08560)]]
@@ -688,3 +756,23 @@ For provider-aware compaction, consider:
 - [[https://factory.ai/news/evaluating-compression][Evaluating Context Compression for AI Agents (Factory.ai)]]
 - [[https://addyosmani.com/blog/comprehension-debt/][Comprehension Debt (Osmani, 2026)]]
 - [[https://atlan.com/know/best-ai-agent-memory-frameworks-2026/][Best AI Agent Memory Frameworks 2026 (Atlan)]]
+
+** Historical References
+
+- Appel, A.W. (1989). "Simple Generational Garbage Collection and Fast Allocation." /Software: Practice and Experience/ 19(2): 171-183.
+- Baddeley, A.D. & Hitch, G. (1974). "Working Memory." In G.A. Bower (ed.), /Recent Advances in Learning and Motivation/, Vol. 8, pp. 47-89. Academic Press.
+- Belady, L.A. (1966). "A Study of Replacement Algorithms for a Virtual-Storage Computer." /IBM Systems Journal/ 5(2): 78-101.
+- Denning, P.J. (1968). "The Working Set Model for Program Behavior." /Communications of the ACM/ 11(5): 323-333.
+- Ericsson, K.A. & Kintsch, W. (1995). "Long-Term Working Memory." /Psychological Review/ 102(2): 211-245.
+- Erkan, G. & Radev, D.R. (2004). "LexRank: Graph-based Lexical Centrality as Salience in Text Summarization." /Journal of Artificial Intelligence Research/ 22: 457-479.
+- Fotheringham, J. (1961). "Dynamic Storage Allocation in the Atlas Computer, Including an Automatic Use of a Backing Store." /Communications of the ACM/ 4(10): 435-436.
+- Luhn, H.P. (1958). "The Automatic Creation of Literature Abstracts." /IBM Journal of Research and Development/ 2(2): 159-165.
+- Maynez, J., Narayan, S., Bohnet, B. & McDonald, R. (2020). "On Faithfulness and Factuality in Abstractive Summarization." /Proceedings of ACL 2020/: 1906-1919.
+- McCarthy, J. (1960). "Recursive Functions of Symbolic Expressions and Their Computation by Machine, Part I." /Communications of the ACM/ 3(4): 184-195.
+- Megiddo, N. & Modha, D.S. (2003). "ARC: A Self-Tuning, Low Overhead Replacement Cache." /2nd USENIX Conference on File and Storage Technologies (FAST '03)/.
+- Miller, G.A. (1956). "The Magical Number Seven, Plus or Minus Two: Some Limits on Our Capacity for Processing Information." /Psychological Review/ 63(2): 81-97.
+- Minsky, M. (1974). "A Framework for Representing Knowledge." MIT AI Laboratory Memo 306.
+- Schank, R.C. & Abelson, R.P. (1977). /Scripts, Plans, Goals, and Understanding: An Inquiry Into Human Knowledge Structures/. Lawrence Erlbaum Associates.
+- Shannon, C.E. (1948). "A Mathematical Theory of Communication." /Bell System Technical Journal/ 27: 379-423, 623-656.
+- Sleator, D.D. & Tarjan, R.E. (1985). "Amortized Efficiency of List Update and Paging Rules." /Communications of the ACM/ 28(2): 202-208.
+- Sweller, J. (1988). "Cognitive Load During Problem Solving: Effects on Learning." /Cognitive Science/ 12(2): 257-285.

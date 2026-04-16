@@ -21,7 +21,10 @@ time. The gap between layers 1 and 2 remains the primary failure mode.
 Formal academic work (Agent Behavioral Contracts, AgentSpec) now
 provides theoretical grounding for what practitioners have been
 building ad hoc. The missing primitive is not negative contracts per
-se, but *tested* negative contracts with runtime enforcement.
+se, but *tested* negative contracts with runtime enforcement --- the
+stochastic-agent analogue of Design by Contract (Meyer 1992), with
+Hoare-triple-style pre/postconditions and class invariants generalized
+to probabilistic satisfaction.
 
 * Framework Survey
 
@@ -449,7 +452,9 @@ are building:
 
 ** Agent Behavioral Contracts (ABC) --- arXiv 2602.22302 (2026)
 
-Formalizes the contract as a tuple C = (P, I, G, R):
+Formalizes the contract as a tuple C = (P, I, G, R), extending Design
+by Contract (Meyer 1992) and Hoare-style triples (Hoare 1969) to
+stochastic agents:
 - *Preconditions (P)*: Initial state requirements
 - *Invariants (I)*: Must-hold properties (hard = zero-tolerance; soft = recoverable)
 - *Governance constraints (G)*: Action restrictions (hard/soft split)

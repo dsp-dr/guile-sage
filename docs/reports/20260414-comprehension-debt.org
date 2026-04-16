@@ -7,7 +7,10 @@
 * Executive Summary
 
 Comprehension debt is the growing gap between how much code exists in a
-system and how much of it any human genuinely understands.  Unlike
+system and how much of it any human genuinely understands --- a
+restatement, in AI-assisted terms, of Naur's "Programming as Theory
+Building" (1985) thesis that the program is the theory in the
+programmer's mind, not the artifact in the repository.  Unlike
 technical debt, which announces itself through friction, comprehension
 debt breeds false confidence: the codebase looks clean, tests are green,
 velocity metrics hold steady --- and the reckoning arrives quietly.
@@ -630,7 +633,11 @@ of 70%+).
 The Anthropic study (17% comprehension drop), the epistemic debt study
 (69.3 points debt in unrestricted AI conditions), and the 5-7x
 velocity-comprehension gap all point to the same phenomenon:
-AI-generated code accumulates faster than human understanding.
+AI-generated code accumulates faster than human understanding.  This
+is Brooks' essential/accidental distinction ("No Silver Bullet", 1986)
+playing out with new tooling: AI removes accidental complexity
+(typing) without touching the essential complexity of understanding
+what the code means.
 
 ** Finding 2: guile-sage has significant comprehension debt
 

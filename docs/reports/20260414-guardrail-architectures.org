@@ -16,7 +16,12 @@ now offering chunked-streaming validation.
 Recommendation for guile-sage v1: adopt a layered architecture with LiteLLM
 proxy guardrails for input/output content filtering (already deployed) plus
 lightweight agent-side validators for tool output screening and streaming
-chunk validation.
+chunk validation. The proxy sits as a reference monitor in the sense of
+Anderson (1972) --- a mediation layer through which LLM traffic must
+pass --- and the agent-side layer exists because tool outputs bypass that
+boundary, which is a classic confused-deputy pattern (Hardy 1988) when
+untrusted tool results carry the agent's ambient authority back into the
+prompt.
 
 * Surveyed Systems
 
@@ -421,6 +426,10 @@ tool-calling agent like sage, the critical gap is:
    instructions in data returned by tools (e.g., a web page containing
    "Ignore previous instructions and...").  The proxy cannot detect this
    because the injection arrives via tool execution, not via the user prompt.
+   This is the confused deputy (Hardy 1988) in modern dress: the agent
+   carries ambient authority on behalf of the user, and attacker-controlled
+   data in a tool result tricks the agent into exercising that authority
+   against the user's interest.
 
 The recommended architecture for sage v1:
 

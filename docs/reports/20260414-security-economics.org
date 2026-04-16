@@ -333,6 +333,13 @@ exceed this by a meaningful margin. The goal is not parity but
 /deterrence through depth/ --- ensuring that obvious vulnerabilities
 are found before attackers look.
 
+This "outspend" heuristic is a crude proxy; the principled version is
+the Gordon-Loeb model (2002), which bounds optimal security investment
+at roughly 37% (1/e) of expected loss from a breach. For sage --- a
+local development tool with no production deployment --- expected loss
+is low, and the budget below should be read as a ceiling rather than a
+floor.
+
 ** Budget Proposal
 
 *** Per-Release Hardening (v0.7.x, v0.8.0)
