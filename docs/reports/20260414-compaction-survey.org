@@ -1,0 +1,690 @@
+#+TITLE: Context Compaction and Memory Management in LLM Agents: A Survey
+#+AUTHOR: dsp-dr (Aidan Pace)
+#+DATE: 2026-04-14
+#+PROPERTY: header-args :eval never
+
+* Executive Summary
+
+This report surveys context compaction and memory management strategies
+across eight systems and compares them to guile-sage's 5-strategy
+compaction module. The key finding is that sage's approach is
+structurally sound and covers the main compaction families, but lacks
+two capabilities now considered table-stakes in 2026: provider-aware
+compaction thresholds and probe-based evaluation of compaction quality.
+
+Recommendations:
+1. Make compaction provider-aware (Gemini 1M vs Ollama 8K need different strategies).
+2. Adopt probe-based evaluation (Factory.ai methodology) rather than keyword overlap.
+3. Add observation masking (JetBrains/NeurIPS 2025 finding: simple masking matches LLM summarization).
+4. Consider prevention over compression (FlashCompact thesis: reduce context inflow, not just outflow).
+
+* Methodology
+
+Surveyed eight systems/papers using web search (April 2026), cross-referenced
+with primary documentation and arxiv papers. Each system is evaluated on:
+- Compaction strategy (truncate, summarize, importance scoring, etc.)
+- Model-awareness (per-model strategy selection)
+- Token overhead of compaction itself
+- Impact on comprehension (per Osmani's comprehension debt thesis)
+
+* System Survey
+
+** 1. MemGPT / Letta (Virtual Context Management)
+
+*** Architecture
+MemGPT (arxiv:2310.08560, Berkeley 2023) treats LLM context like OS
+virtual memory with three tiers:
+- *Core memory* -- always in-context (like RAM), editable by the agent
+- *Recall memory* -- searchable conversation history (like swap)
+- *Archival memory* -- long-term vector store (like disk)
+
+The agent explicitly calls memory management functions (~core_memory_append~,
+~archival_memory_search~, etc.) to page data between tiers, analogous
+to OS page fault handling.
+
+*** Compaction Strategy
+- FIFO eviction from the message buffer at 70%/100% prompt occupancy
+- Recursive summarization of evicted messages before archival
+- Self-editing: the agent modifies its own core memory scratchpad
+- No passive truncation; all memory operations are agent-initiated
+
+*** Model Awareness
+Not model-aware in the original paper. Letta (the productionized
+version) supports multiple backends but uses the same paging policy
+regardless of model context window size.
+
+*** Token Overhead
+High. Every memory operation is a function call that consumes prompt
+tokens for the function schema, the call itself, and the response.
+The trade-off is that total session token consumption drops 30-60%
+because redundant context is eliminated. The per-turn overhead for
+memory management is estimated at 200-500 tokens per memory operation.
+
+*** Comprehension Impact
+Strong intent preservation because the agent explicitly reasons about
+what to remember. Weak on passive recall -- information must be
+deliberately retrieved, so "forgotten" facts are truly inaccessible
+until the agent decides to search.
+
+*** Relevance to sage
+sage's ~compact-importance~ and ~compact-intent~ strategies approximate
+MemGPT's importance-aware eviction but without explicit agent-driven
+memory operations. Adding a ~memory_search~ tool to sage's tool
+registry could bridge this gap.
+
+** 2. LangGraph (Checkpointing and State Persistence)
+
+*** Architecture
+LangGraph uses explicit, reducer-driven state schemas with checkpoint
+snapshots at every graph super-step boundary. State is organized into
+threads (each with a unique ~thread_id~) with independent checkpoint
+histories.
+
+*** Compaction Strategy
+LangGraph does not perform context compaction in the traditional sense.
+Instead, it relies on:
+- *Checkpointing*: full state snapshots at each step, enabling time-travel
+- *Selective state loading*: only loading relevant state slices for a step
+- *External memory via tools*: delegating long-term storage to Redis,
+  PostgreSQL, or Couchbase backends
+
+The philosophy is persistence over compression -- keep everything, load
+selectively.
+
+*** Model Awareness
+Not model-aware for checkpointing (backend-agnostic). Model context
+limits are handled at the individual agent/node level, not the graph level.
+
+*** Token Overhead
+Minimal at inference time because checkpointing operates on graph state,
+not LLM context. Storage overhead can be significant (every step
+produces a full snapshot).
+
+*** Comprehension Impact
+No lossy compression means zero comprehension debt from the framework
+itself. However, individual nodes may still face context window limits
+and must implement their own truncation.
+
+*** Relevance to sage
+sage's ~session-save~ / ~session-load~ is analogous to LangGraph's
+checkpointing. The gap is that sage does not snapshot intermediate
+states within a multi-step tool chain, only final session state.
+
+** 3. CrewAI (Multi-Type Memory)
+
+*** Architecture
+CrewAI implements four memory types via a unified Memory API:
+- *Short-term memory*: RAG-based (ChromaDB), recent interactions for current task
+- *Long-term memory*: task execution outcomes for approach optimization
+- *Entity memory*: structured records of people, places, concepts with relationships
+- *User memory*: cross-session preferences and context (via Mem0 integration)
+
+An LLM analyzes content when saving to infer scope, categories, and
+importance. Recall uses composite scoring blending semantic similarity,
+recency, and importance.
+
+*** Compaction Strategy
+Not traditional compaction. CrewAI avoids compaction by externalizing
+memory to vector stores. The LLM context receives only retrieved
+relevant fragments, never the full history. This is retrieval-augmented
+context rather than compressed context.
+
+*** Model Awareness
+Partially model-aware: the amount of retrieved context can be tuned per
+model, but the memory architecture itself is model-agnostic.
+
+*** Token Overhead
+Low per-turn overhead for memory retrieval (~50-200 tokens for
+retrieved fragments). High upfront cost for embedding and storing
+every interaction.
+
+*** Comprehension Impact
+Good for entity relationships (entity memory preserves structure).
+Weak for temporal reasoning -- "what happened in what order" is hard
+to reconstruct from vector similarity search alone.
+
+*** Relevance to sage
+sage lacks entity memory and cross-session memory retrieval. The
+~extract-topics~ function in compaction.scm is a rudimentary form
+of entity extraction but does not persist across sessions.
+
+** 4. AutoGen (Transform Messages)
+
+*** Architecture
+AutoGen (Microsoft) uses a composable ~TransformMessages~ pipeline
+with three built-in transformers:
+- *MessageHistoryLimiter*: cap message count (e.g., keep last 10)
+- *MessageTokenLimiter*: cap total tokens with per-message and global limits
+- *TextMessageCompressor*: LLM-based summarization with ~min_tokens~ threshold
+
+Transforms are applied in order, allowing chained strategies.
+
+*** Compaction Strategy
+Pipeline-based: history limit -> token limit -> optional summarization.
+The ~TextMessageCompressor~ only fires when tokens exceed ~min_tokens~,
+avoiding unnecessary LLM calls. Users can also implement custom
+transforms.
+
+*** Model Awareness
+Not model-aware by default. Users must manually configure limits per
+model. There is no automatic adjustment based on model capabilities.
+
+*** Token Overhead
+~MessageHistoryLimiter~ and ~MessageTokenLimiter~ are zero-overhead
+(pure filtering). ~TextMessageCompressor~ adds one LLM call per
+compaction event, typically 200-1000 tokens of overhead.
+
+*** Comprehension Impact
+Dependent on which transforms are applied. Pure truncation (history +
+token limits) loses oldest context entirely. Summarization preserves
+intent but loses detail. The composable pipeline allows users to
+tune the trade-off.
+
+*** Relevance to sage
+sage's ~compact-auto~ function is structurally similar to AutoGen's
+chained transforms: it selects truncation for light pressure,
+importance scoring for medium, and summarization for heavy. The key
+difference is that AutoGen makes the pipeline explicitly composable
+while sage uses a fixed decision tree.
+
+** 5. OpenAI Assistants API / Responses API
+
+*** Architecture (Assistants API -- deprecated Aug 2026)
+Threads with automatic truncation. Two strategies:
+- ~auto~: drop middle messages to fit context, keeping system + recent
+- ~last_messages~: keep N most recent messages
+
+*** Architecture (Responses API -- current)
+Server-side compaction via ~context_management~ with ~compact_threshold~.
+When context crosses the threshold during streaming, the server triggers
+a compaction pass, emits a compaction output item, and prunes context.
+The compacted representation is an encrypted, token-efficient encoding
+that preserves key prior state.
+
+A standalone ~/compact~ endpoint also exists for explicit compaction.
+
+*** Compaction Strategy
+The Responses API compaction is opaque -- the model produces an
+encrypted compaction item that carries forward key state. This is
+fundamentally different from all other approaches because the
+compacted representation is not human-readable and cannot be inspected
+or modified.
+
+*** Model Awareness
+Fully model-aware: the server knows the model's context window and
+trains the compaction behavior specifically for each model family.
+
+*** Token Overhead
+The compaction pass itself consumes tokens (one additional LLM call).
+OpenAI reports that the encrypted representation is significantly
+more token-efficient than natural-language summaries.
+
+*** Comprehension Impact
+Factory.ai's probe-based evaluation (2025-2026) scored OpenAI's
+compaction 3.35/5 on information retention, lower than structured
+summarization (3.70/5) and Factory's own approach (Factory scored
+0.35 points higher overall). The encrypted format means lost
+information cannot be diagnosed or recovered.
+
+*** Relevance to sage
+sage cannot use server-side compaction with Ollama (local inference).
+However, when using the OpenAI provider path (LiteLLM), sage could
+theoretically delegate compaction to the upstream API. The current
+implementation always performs client-side compaction regardless of
+provider.
+
+** 6. Claude / Anthropic (Context Window Management)
+
+*** Architecture
+Claude supports 200K tokens (standard) and 1M tokens (Opus 4.6 via
+Claude Code). Server-side compaction is available via the
+~compact_20260112~ strategy in the Messages API.
+
+*** Compaction Strategy
+- *Server-side compaction*: triggers at ~83.5% context usage (recently
+  lowered from 90%+ to build in a "completion buffer")
+- *Context editing*: tool result clearing and thinking block clearing
+  for surgical context reduction
+- *Extended thinking*: thinking blocks are generated but not carried
+  forward as input tokens for subsequent turns
+
+*** Model Awareness
+Fully model-aware. Compaction thresholds and strategies are tuned per
+model. Claude Opus 4.6 scores 76% on MRCR v2 (8 needles across 1M
+tokens), representing what Anthropic calls "a qualitative shift" in
+usable context.
+
+*** Token Overhead
+Server-side compaction overhead is opaque. Context editing (clearing
+tool results) is zero-overhead. The ~compact~ endpoint produces a
+high-fidelity summary.
+
+*** Comprehension Impact
+NVIDIA's RULER benchmark puts effective context at 50-65% of
+advertised capacity for most models. Claude Opus 4.6 is a notable
+exception at 76%. Compaction is described as "lossy -- critical
+details like exact reasoning steps or full text of search results are
+discarded in favor of status and outcomes."
+
+*** Relevance to sage
+sage's context threshold warnings (75%, 90%, 95% in context.scm) are
+more conservative than Claude Code's 83.5% auto-compact trigger.
+sage's auto-compact fires at 80% and targets 50% -- a reasonable
+middle ground. The key gap is that sage does not vary these thresholds
+by provider or model.
+
+** 7. Zep (Temporal Knowledge Graph)
+
+*** Architecture
+Zep uses Graphiti, a temporally-aware knowledge graph engine that:
+- Extracts entities, relationships, and facts from conversations
+- Builds a temporal knowledge graph that tracks how facts change over time
+- Invalidates old facts when new ones replace them
+- Integrates structured business data with conversational history
+
+*** Compaction Strategy
+Zep does not compact conversation text. Instead, it continuously
+extracts structured knowledge into the graph and retrieves relevant
+subgraphs at query time. This is knowledge extraction rather than
+context compression.
+
+*** Model Awareness
+Not model-aware for extraction. The retrieved subgraph is formatted
+for token efficiency, but the extraction pipeline is model-agnostic.
+
+*** Token Overhead
+Extraction overhead: one LLM call per conversation turn for entity/
+relationship extraction. Retrieval overhead: graph traversal + LLM
+formatting, typically 100-300 tokens of context per retrieved subgraph.
+
+*** Comprehension Impact
+Strong for temporal reasoning ("Alice was lead until January, then
+Bob took over"). Zep scores 94.8% on Deep Memory Retrieval benchmark
+vs MemGPT's 93.4%, and 15 points higher than baseline on LongMemEval
+for temporal reasoning.
+
+*** Relevance to sage
+sage has no knowledge graph or temporal fact tracking. The
+~extract-topics~ function is a bag-of-words approximation. A Zep-like
+approach would require persistent external storage, which conflicts
+with sage's current file-based session model.
+
+** 8. Academic Research
+
+*** "Lost in the Middle" (Liu et al., Stanford, TACL 2024)
+
+*Key Finding*: U-shaped performance curve -- LLMs perform best when
+relevant information is at the beginning (primacy bias) or end (recency
+bias) of context, with significant degradation for middle-positioned
+information.
+
+*Mechanism*: Transformer attention with causal masks inherently biases
+toward sequence boundaries. The "Found in the Middle" follow-up
+(2024) proposes calibration of positional attention bias.
+
+*Implication for compaction*: When compacting, information that
+survives should be placed at the beginning (system messages, intent
+markers) or end (recent messages) of the compacted context. sage's
+~compact-truncate~ and ~compact-intent~ already follow this pattern
+by preserving system messages at the start and recent messages at the
+end.
+
+*** "Needle in a Haystack" (Kamradt, 2023; extended 2024-2025)
+
+*Methodology*: Insert a specific fact at varying positions within
+context of varying lengths. Measure retrieval accuracy as a function
+of both position and total context length.
+
+*Extensions*:
+- Multi-Needle Retrieval (M-RT): retrieve multiple facts
+- Multi-Needle Reasoning (M-RS): integrate multiple facts for reasoning
+- Ancestral Trace Challenge (ATC): multi-layer logical chains
+- MMNeedle: multimodal variant for images
+
+*Implication for compaction evaluation*: sage's ~evaluate-compaction~
+function measures keyword retention and intent preservation but does
+not test positional placement or multi-fact reasoning. A probe-based
+evaluation (injecting known facts at known positions) would be more
+rigorous.
+
+*** Context Rot (Chroma Research, 2025)
+
+*Key Finding*: Every frontier model tested (18 models including GPT-4.1,
+Claude Opus 4, Gemini 2.5) exhibits performance degradation as input
+length increases, well before hitting the maximum token limit. A model
+with 200K context window can degrade significantly at 50K tokens.
+
+*Mechanism*: Transformer attention is quadratic (~O(n^2)~), so 100K tokens
+means 10 billion pairwise relationships. Semantically similar but
+irrelevant content actively misleads the model.
+
+*Implication for compaction*: Compaction is not just about fitting within
+limits -- it improves quality even when you have headroom. sage should
+consider compacting proactively for quality, not just reactively for space.
+
+*** ACON: Agent Context Optimization (Kang et al., Oct 2025)
+
+*Key Finding*: Treats compression as an optimization problem using
+paired trajectory analysis. Achieves 26-54% reduction in peak token
+usage while preserving 95%+ accuracy.
+
+*Method*: Given trajectories where full context succeeds but compressed
+context fails, an LLM analyzes failure causes and updates compression
+guidelines iteratively. Moderate thresholds (4096 for history, 1024
+for observations) yield the best accuracy/cost trade-off.
+
+*Implication for sage*: sage's fixed ~compact-auto~ thresholds
+(1.5x -> truncate, 2.0x -> importance, else -> intent+summarize)
+could be replaced with learned thresholds from trajectory analysis.
+
+*** JetBrains "Complexity Trap" (NeurIPS DL4Code Workshop, Dec 2025)
+
+*Key Finding*: Simple observation masking (hiding tool outputs while
+preserving action/reasoning history) matches LLM summarization for
+downstream task performance, at ~50% cost reduction with zero
+summarization overhead.
+
+*Method*: Compared observation masking, LLM summarization, and a hybrid.
+The hybrid achieves 7-11% additional cost reduction over either alone.
+
+*Implication for sage*: sage does not have an observation masking strategy.
+Tool results (which can be very large -- the ~run_tests~ output
+problem noted in CLAUDE.md) could be masked after the agent has
+processed them, keeping only the action history.
+
+* Comparative Analysis
+
+** Strategy Coverage Matrix
+
+| Strategy              | sage | MemGPT | LangGraph | CrewAI | AutoGen | OpenAI | Claude | Zep |
+|-----------------------+------+--------+-----------+--------+---------+--------+--------+-----|
+| Simple truncation     | Y    | Y      | --        | --     | Y       | Y      | --     | --  |
+| Token-budget limit    | Y    | Y      | --        | --     | Y       | Y      | Y      | --  |
+| Importance scoring    | Y    | Y      | --        | Y*     | --      | --     | --     | --  |
+| LLM summarization     | Y    | Y      | --        | --     | Y       | Y      | Y      | --  |
+| Intent preservation   | Y    | --     | --        | --     | --      | --     | --     | --  |
+| Observation masking   | --   | --     | --        | --     | --      | --     | Y      | --  |
+| Knowledge graph       | --   | --     | --        | Y*     | --      | --     | --     | Y   |
+| Agent-driven paging   | --   | Y      | --        | --     | --      | --     | --     | --  |
+| Server-side opaque    | --   | --     | --        | --     | --      | Y      | Y      | --  |
+| Checkpoint/snapshot   | --   | --     | Y         | --     | --      | --     | --     | --  |
+| Prevention (minimize) | --   | --     | --        | --     | --      | --     | --     | --  |
+
+Y* = via external integration (Mem0, Qdrant)
+
+sage covers 5 of 10 strategy families. The major gaps are observation
+masking (low-hanging fruit), knowledge extraction (high complexity),
+and server-side delegation (provider-dependent).
+
+** Model Awareness
+
+| System   | Provider-aware compaction | Per-model thresholds | Auto-adjust strategy |
+|----------+--------------------------+----------------------+----------------------|
+| sage     | No (8K default)          | No                   | No                   |
+| MemGPT   | No                       | No                   | No                   |
+| LangGraph | N/A                     | N/A                  | N/A                  |
+| CrewAI   | Partial                  | No                   | No                   |
+| AutoGen  | No (user-configured)     | No                   | No                   |
+| OpenAI   | Yes                      | Yes                  | Yes                  |
+| Claude   | Yes                      | Yes                  | Yes                  |
+| Zep      | No                       | No                   | No                   |
+
+Only the first-party APIs (OpenAI Responses, Claude) have full
+model-aware compaction. This is a structural advantage of server-side
+compaction. For client-side systems like sage, model awareness must be
+explicitly implemented.
+
+** Compaction Evaluation Approaches
+
+| System           | Evaluation Method              | Metrics                        |
+|------------------+--------------------------------+--------------------------------|
+| sage             | Keyword retention + intent     | key_info_retention (0-1),      |
+|                  | match + compression ratio      | intent_preservation (0/0.5/1), |
+|                  |                                | overall_score (0-100)          |
+| Factory.ai       | Probe-based (recall, artifact, | 6-dimension rubric scored 0-5  |
+|                  | continuation, decision probes) | by LLM judge                   |
+| ACON             | Paired trajectory analysis     | Task completion rate +         |
+|                  |                                | peak token reduction %         |
+| Chroma           | Context rot benchmarking       | Accuracy vs context length     |
+| NIAH             | Positional retrieval           | Retrieval accuracy by position |
+|                  |                                | and context length             |
+
+sage's evaluation (~evaluate-compaction~ in compaction.scm) uses
+keyword overlap and intent string matching. This is fast and
+deterministic but does not measure functional quality -- whether the
+agent can actually continue working after compaction.
+
+* Answers to Key Questions
+
+** Q1: How does sage's 5-strategy approach compare to state-of-art?
+
+sage's strategy set is *above average* for open-source agent frameworks.
+Most frameworks offer 1-2 strategies (AutoGen: 3, CrewAI: 0 native,
+LangGraph: 0). sage's 5 strategies cover the main compaction families:
+truncation, budget-based, importance-weighted, summarization, and
+intent-preserving.
+
+*Gaps relative to state-of-art (2026)*:
+1. No observation masking (JetBrains showed this matches summarization
+   at zero overhead).
+2. No prevention strategy (FlashCompact thesis: minimize context inflow
+   rather than compress outflow).
+3. No server-side delegation for cloud providers.
+4. The ~compact-auto~ selection is a fixed heuristic, not learned from
+   trajectory data (cf. ACON).
+5. ~compact-summarize~ uses a simple template, not an LLM call, so the
+   "summary" is really metadata (message count, topic list), not a true
+   narrative compression.
+
+** Q2: Should compaction be provider-aware?
+
+*Yes, emphatically.* The current implementation uses a fixed 8K default
+for all providers (~get-token-limit~ in config.scm falls back to
+~("local" . 8000)~). This means:
+
+- *Ollama with llama3.2 (8K context)*: The 80% threshold fires at 6.4K
+  tokens, targeting 4K. This is appropriate.
+- *Gemini (1M+ context)*: The threshold would fire at 800K tokens. But
+  context rot research shows degradation begins well before the limit.
+  Compaction should fire earlier for quality reasons, even with headroom.
+- *OpenAI gpt-4o (128K context)*: sage should potentially delegate to
+  OpenAI's server-side compaction rather than performing client-side
+  summarization.
+
+Recommended provider-aware policy:
+
+| Provider | Context  | Compact trigger | Target  | Strategy preference      |
+|----------+----------+-----------------+---------+--------------------------|
+| ollama   | 8K       | 80%             | 50%     | truncate/importance      |
+| ollama   | 128K+    | 60%             | 40%     | importance/intent        |
+| openai   | 128K     | 70%             | 50%     | delegate to server-side  |
+| gemini   | 1M       | 50%             | 30%     | intent/summarize         |
+| claude   | 200K     | 65%             | 40%     | delegate to server-side  |
+
+The lower triggers for larger models reflect the context rot finding
+that quality degrades proportionally to filled context, not just at
+the boundary.
+
+** Q3: What is the comprehension cost of aggressive compaction?
+
+Evidence from multiple sources:
+
+- *Factory.ai (2025)*: Opaque compression scores 3.35/5 on information
+  retention; structured summarization scores 3.70/5. The delta is
+  ~10% of total score.
+- *JetBrains (NeurIPS 2025)*: Context management methods reduce cost
+  ~50% without significantly degrading downstream task performance.
+  "Significantly" here means <5% accuracy drop on SWE-bench.
+- *ACON (2025)*: 26-54% token reduction with 95%+ accuracy preservation,
+  but only with moderate thresholds. Aggressive thresholds (small
+  token budgets) cause accuracy to degrade sharply.
+- *Context rot (Chroma 2025)*: Ironically, moderate compaction can
+  *improve* quality because removing irrelevant context reduces the
+  noise that causes context rot. There is a U-shaped curve: no
+  compaction degrades from noise, aggressive compaction degrades from
+  information loss, moderate compaction is optimal.
+- *Osmani (2026)*: Comprehension debt accumulates when humans cannot
+  inspect the reasoning chain. For compacted context, this means
+  summaries should be human-readable and auditable, not opaque.
+  sage's template-based summaries satisfy this requirement better
+  than OpenAI's encrypted compaction items.
+
+*Key insight*: The comprehension cost of compaction is not linear.
+Moderate compaction (50-60% reduction) often *improves* task
+performance by reducing noise, while aggressive compaction (>80%
+reduction) causes sharp accuracy drops.
+
+** Q4: Is there a "compaction eval" standard?
+
+No universal standard exists, but three evaluation methodologies have
+emerged:
+
+*** 1. Probe-Based Evaluation (Factory.ai, 2025)
+- Inject known facts into conversation history
+- Compact the history using the strategy under test
+- Ask the agent questions requiring those facts
+- Score with an LLM judge across 6 dimensions
+- Best available methodology for functional quality
+
+*** 2. Paired Trajectory Analysis (ACON, 2025)
+- Run tasks with full context (baseline)
+- Run same tasks with compressed context
+- Compare task completion rates
+- Iterate on compression guidelines based on failures
+- Best methodology for optimizing thresholds
+
+*** 3. Positional Retrieval (Needle in a Haystack + variants)
+- Insert facts at known positions in context
+- Vary context length and fact position
+- Measure retrieval accuracy as a function of both
+- Best methodology for testing position-awareness of compaction
+
+sage's ~evaluate-compaction~ function implements a rudimentary version
+of keyword-retention testing but should be extended with probe-based
+evaluation for functional quality assessment.
+
+* Recommendations for sage
+
+** R1: Make ~compact-auto~ provider-aware [P1]
+
+Modify ~compact-auto~ to accept the provider and model as parameters
+and adjust thresholds accordingly. The ~get-token-limit~ function
+already has model-specific limits in ~*token-limits*~; ~compact-auto~
+should use these to scale its ratio thresholds.
+
+#+begin_example
+;; Current (fixed thresholds)
+(cond
+ ((<= ratio 1.0) messages)
+ ((< ratio 1.5) (compact-truncate messages #:keep 15))
+ ((< ratio 2.0) (compact-importance messages #:keep 10))
+ (else (compact-intent ...)))
+
+;; Proposed (provider-scaled)
+;; For large-context models, compact earlier and more aggressively
+;; because context rot begins before the limit
+#+end_example
+
+** R2: Add observation masking strategy [P1]
+
+Add a ~compact-mask-observations~ strategy that replaces tool outputs
+with a brief status line while preserving the action/reasoning chain.
+This is the JetBrains "Complexity Trap" finding: simple masking
+matches LLM summarization at zero LLM overhead.
+
+This directly addresses the known issue: "/run_tests output can blow
+up context (needs truncation + ANSI stripping)."
+
+** R3: Upgrade evaluation to probe-based [P2]
+
+Extend ~evaluate-compaction~ with probe-based testing:
+1. Define a set of probe questions for each test fixture
+2. Compact the fixture using each strategy
+3. Check if probes can be answered from compacted context
+4. Score using structured rubrics, not keyword matching
+
+** R4: Add proactive compaction for quality [P2]
+
+Compact proactively when context exceeds 50% of the model's
+effective context (RULER benchmark: ~50-65% of advertised capacity),
+not just when approaching the hard limit.
+
+** R5: Consider prevention over compression [P3]
+
+For tool results, truncate outputs at the source (already partially
+done with ~run_tests~ ANSI stripping). For ~read_file~, return only
+relevant sections. This reduces context inflow so compaction is
+needed less frequently.
+
+** R6: Explore server-side delegation [P3]
+
+When using the OpenAI provider path (LiteLLM), check if the upstream
+supports the Responses API ~/compact~ endpoint and delegate when
+available, falling back to client-side compaction for Ollama.
+
+* Appendix A: sage's Current Compaction Module
+
+sage implements five strategies in ~src/sage/compaction.scm~:
+
+| Strategy          | Function            | Mechanism                            | Overhead  |
+|-------------------+---------------------+--------------------------------------+-----------|
+| truncate          | compact-truncate    | Keep N most recent + system messages | Zero      |
+| token-limit       | compact-token-limit | Fill budget from most recent         | Zero      |
+| importance        | compact-importance  | Score by role + keywords + recency   | Zero      |
+| summarize         | compact-summarize   | Generate template summary + keep N   | ~20 tok   |
+| intent            | compact-intent      | Extract intent + filter by relevance | ~20 tok   |
+
+Auto-selection (~compact-auto~):
+- ratio <= 1.0: no compaction
+- ratio < 1.5: truncate (keep 15)
+- ratio < 2.0: importance (keep 10)
+- ratio >= 2.0: intent + summarize
+
+Session integration (~session-maybe-compact!~ in session.scm):
+- Trigger: 80% of context limit
+- Target: 50% of context limit
+- Limit source: ~get-token-limit~ in config.scm (defaults to 8K for local)
+
+Evaluation (~evaluate-compaction~):
+- key_info_retention: keyword overlap between original and compacted
+- intent_preservation: binary intent string match
+- compression_ratio: compacted_tokens / original_tokens
+- overall_score: weighted combination (40% info, 40% intent, 20% compression)
+
+Test coverage: 42+ tests across test-compaction.scm, test-compaction-deep.scm,
+test-compaction-security.scm, and test-auto-compact.scm. The deep tests
+verify 6 invariants across 5 strategies and 3 provider fixtures.
+
+* Appendix B: Token Estimation
+
+sage estimates tokens at ~4 characters per token (~estimate-tokens~).
+This is a common approximation (OpenAI's tiktoken averages 3.5-4.5
+chars/token for English). The approximation is adequate for threshold
+decisions but not for precise budget management.
+
+For provider-aware compaction, consider:
+- Ollama: model-specific tokenizer available via ~/api/show~
+- OpenAI: tiktoken library (not available in Guile; approximation is fine)
+- Gemini: similar 4 chars/token approximation
+
+* Appendix C: Sources
+
+- [[https://arxiv.org/abs/2310.08560][MemGPT: Towards LLMs as Operating Systems (arxiv:2310.08560)]]
+- [[https://docs.letta.com/concepts/memgpt/][Letta: Virtual Context Management]]
+- [[https://docs.langchain.com/oss/python/langgraph/persistence][LangGraph Persistence Documentation]]
+- [[https://docs.crewai.com/en/concepts/memory][CrewAI Memory Concepts]]
+- [[https://microsoft.github.io/autogen/0.2/docs/topics/handling_long_contexts/intro_to_transform_messages/][AutoGen: Transform Messages]]
+- [[https://developers.openai.com/api/docs/guides/compaction][OpenAI Responses API: Compaction]]
+- [[https://platform.claude.com/docs/en/build-with-claude/compaction][Claude API: Compaction]]
+- [[https://platform.claude.com/docs/en/build-with-claude/context-editing][Claude API: Context Editing]]
+- [[https://arxiv.org/abs/2501.13956][Zep: A Temporal Knowledge Graph Architecture for Agent Memory]]
+- [[https://arxiv.org/abs/2307.03172][Lost in the Middle: How Language Models Use Long Contexts (TACL 2024)]]
+- [[https://arxiv.org/abs/2406.16008][Found in the Middle: Calibrating Positional Attention Bias (2024)]]
+- [[https://research.trychroma.com/context-rot][Context Rot: How Increasing Input Tokens Impacts LLM Performance (Chroma, 2025)]]
+- [[https://arxiv.org/abs/2510.00615][ACON: Optimizing Context Compression for Long-horizon LLM Agents (2025)]]
+- [[https://github.com/JetBrains-Research/the-complexity-trap][The Complexity Trap (JetBrains, NeurIPS DL4Code 2025)]]
+- [[https://blog.jetbrains.com/research/2025/12/efficient-context-management/][Cutting Through the Noise: Smarter Context Management (JetBrains, 2025)]]
+- [[https://www.morphllm.com/flashcompact][FlashCompact: Every Context Compaction Method Compared (Morph)]]
+- [[https://factory.ai/news/evaluating-compression][Evaluating Context Compression for AI Agents (Factory.ai)]]
+- [[https://addyosmani.com/blog/comprehension-debt/][Comprehension Debt (Osmani, 2026)]]
+- [[https://atlan.com/know/best-ai-agent-memory-frameworks-2026/][Best AI Agent Memory Frameworks 2026 (Atlan)]]

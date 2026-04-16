@@ -1,0 +1,754 @@
+#+TITLE: Survey of Evaluation Frameworks for Tool-Calling LLM Agents
+#+DATE: 2026-04-14
+#+AUTHOR: guile-sage
+#+OPTIONS: toc:3 num:t
+
+* Executive Summary
+
+This report surveys 10 evaluation frameworks for tool-calling LLM agents
+and maps their capabilities against guile-sage's current eval harness
+(=scripts/eval-sage.sh= with =tests/eval/traffic-cases.json=). The goal
+is to answer whether our PASS/NEUTRAL/FAIL scoring is sufficient, how
+to handle non-determinism, and what eval format to adopt going forward.
+
+Key finding: the industry is converging on a layered approach---binary
+pass/fail for regression gates, continuous scoring for capability
+exploration, and comparative (Elo-like) scoring for model selection.
+guile-sage's three-valued system is a reasonable middle ground but needs
+augmentation with trial-based repetition, outcome-vs-trajectory
+separation, and structured error analysis.
+
+* Framework Survey
+
+** 1. Berkeley Function Calling Leaderboard (BFCL)
+
+| Attribute          | Value                                           |
+|--------------------+-------------------------------------------------|
+| Focus              | Function/tool calling accuracy                  |
+| Scoring            | Accuracy % (unweighted avg of sub-categories)   |
+| Non-determinism    | Deterministic AST matching; no repeated trials   |
+| Comprehension test | No (checks correctness, not reasoning)           |
+| License            | Open source (Apache 2.0)                        |
+
+*** Evaluation Dimensions
+
+- *Single-turn*: AST evaluation, executable function evaluation,
+  relevance detection (does the model correctly decline irrelevant
+  requests?)
+- *Multi-turn (V3)*: State-based evaluation (verifies final system
+  state after execution) and response-based evaluation (compares
+  execution path against minimal viable paths)
+- *Agentic (V4)*: Web search tasks, model memory, holistic agent
+  scoring
+
+*** Scoring Formula (V4)
+
+#+BEGIN_EXAMPLE
+Overall = Agentic x 40% + Multi-Turn x 30% + Live x 10%
+        + Non-Live x 10% + Hallucination x 10%
+#+END_EXAMPLE
+
+*** Key Innovation: AST Sub-String Matching
+
+BFCL uses Abstract Syntax Tree matching as a proxy for function
+execution, avoiding the need to actually run API calls. This enables
+scalable evaluation across thousands of functions without side effects.
+
+*** Relevance to guile-sage
+
+BFCL's state-based eval (V3) is directly analogous to our approach of
+checking tool output patterns. Their hallucination detection category
+maps to our =expect_guardrail= cases. The AST matching approach could
+inspire a more structured tool-call verification than regex pattern
+matching.
+
+** 2. ToolBench / ToolLLM
+
+| Attribute          | Value                                               |
+|--------------------+-----------------------------------------------------|
+| Focus              | Real-world API tool use (16,000+ APIs)              |
+| Scoring            | Pass Rate (binary) + Win Rate (comparative)         |
+| Non-determinism    | DFSDT explores multiple reasoning paths             |
+| Comprehension test | Implicit via solution path quality                   |
+| License            | Open source (Apache 2.0)                            |
+
+*** ToolEval Metrics
+
+1. *Pass Rate*: proportion of instructions completed within a budget
+   of API calls. Binary per-task, aggregated as a percentage.
+2. *Win Rate (Preference)*: pairwise comparison of two solution
+   paths by ChatGPT evaluator. The evaluator shows 87.1% agreement
+   with human annotators on pass rate, 80.3% on win rate.
+
+*** DFSDT (Depth-First Search Decision Tree)
+
+Unlike ReACT's linear chain, DFSDT allows the model to:
+- Evaluate multiple reasoning paths at each step
+- Backtrack from dead ends ("Finish by Giving Up" node)
+- Expand alternative nodes with explicit diversity encouragement
+
+This is relevant to guile-sage's multi-step chains (TC05-TC08) where
+the model may take different valid paths to the same answer.
+
+*** Relevance to guile-sage
+
+ToolEval's two-metric approach (pass rate + preference) maps well to
+extending our system: PASS/FAIL for pass rate, plus a separate
+comparative eval for model selection (Ollama vs Gemini).
+
+** 3. AgentBench
+
+| Attribute          | Value                                                |
+|--------------------+------------------------------------------------------|
+| Focus              | Multi-environment agent reasoning and action          |
+| Scoring            | Weighted average across 8 environments                |
+| Non-determinism    | Multiple task instances; environment resets            |
+| Comprehension test | Implicit (lateral thinking puzzles require reasoning) |
+| License            | Open source (MIT)                                     |
+
+*** Eight Evaluation Environments
+
+| Category | Environment           | Metric         |
+|----------+-----------------------+----------------|
+| Code     | Operating System      | Success Rate   |
+| Code     | Database              | Success Rate   |
+| Code     | Knowledge Graph       | F1 Score       |
+| Game     | Digital Card Game     | Reward         |
+| Game     | Lateral Thinking      | Success Rate   |
+| Game     | House-Holding         | Success Rate   |
+| Web      | Web Shopping          | Reward         |
+| Web      | Web Browsing          | Success Rate   |
+
+*** Weighted Scoring
+
+The overall score uses inverse-average weighting: the reciprocal of
+the average score across all tested models per task becomes that
+task's weight. This automatically emphasizes harder tasks.
+
+*** Fine-Grained Error Tracking
+
+AgentBench explicitly tracks intermediate failure conditions:
+- Invalid Format (malformed action)
+- Invalid Action (action not in vocabulary)
+- Context Limit Exceeded
+- Task Limit Exceeded (too many steps)
+
+*** Relevance to guile-sage
+
+The error taxonomy is directly useful. Our eval should separately
+track "model produced invalid tool call" vs "model chose wrong tool"
+vs "model exceeded context/step budget". AgentBench's multi-
+environment approach validates our category-based test organization.
+
+** 4. SWE-bench
+
+| Attribute          | Value                                          |
+|--------------------+------------------------------------------------|
+| Focus              | End-to-end software engineering tasks           |
+| Scoring            | Binary (fail-to-pass test transition)           |
+| Non-determinism    | Deterministic by design (Docker isolation)      |
+| Comprehension test | Implicit (must understand issue to fix it)      |
+| License            | Open source (MIT)                               |
+
+*** Fail-to-Pass Methodology
+
+Each instance contains:
+1. A GitHub issue description (natural language)
+2. The full codebase
+3. Unit tests that FAIL before the fix and PASS after
+4. Additional PASS-to-PASS tests (regression checks)
+
+The model must: understand the bug from description, locate relevant
+code in a large codebase, and produce a working patch.
+
+*** Determinism Enforcement
+
+SWE-bench enforces reproducibility through:
+- Docker containerization per instance
+- Pinned dependency versions
+- Neuro-Symbolic Dockerization (SWE-Bench Atlas)
+- Automated quality assurance for environmental determinism
+
+*** Relevance to guile-sage
+
+SWE-bench's fail-to-pass pattern is relevant for our =run_tests= tool
+evaluation (TC14). More broadly, the principle of testing outcomes
+rather than intermediate steps is well-aligned with Anthropic's
+guidance to "grade what the agent produced, not the path it took."
+
+** 5. HumanEval+
+
+| Attribute          | Value                                        |
+|--------------------+----------------------------------------------|
+| Focus              | Code generation correctness                   |
+| Scoring            | pass@k (probabilistic, continuous)            |
+| Non-determinism    | Explicitly modeled via k samples              |
+| Comprehension test | No (tests output correctness only)            |
+| License            | Open source (MIT)                             |
+
+*** pass@k Metric
+
+The model generates k code samples per problem (typically k=1, 10,
+or 100). Credit is given if at least one sample passes all test
+cases. The metric computes:
+
+#+BEGIN_EXAMPLE
+pass@k = 1 - C(n-c, k) / C(n, k)
+#+END_EXAMPLE
+
+where n = total samples, c = correct samples. This explicitly
+models non-determinism as a first-class concern.
+
+*** HumanEval+ Improvements
+
+HumanEval+ significantly expands test coverage beyond the original
+164 problems, adding corner cases and stricter correctness criteria
+to reduce false positives from insufficient testing.
+
+*** Relevance to guile-sage
+
+The pass@k framework directly addresses our non-determinism concern.
+Running each eval case k times (e.g., k=3 or k=5) and reporting
+pass@1 would give us a confidence-adjusted score. This is more
+informative than our current single-run PASS/NEUTRAL/FAIL.
+
+** 6. LMSYS Chatbot Arena
+
+| Attribute          | Value                                        |
+|--------------------+----------------------------------------------|
+| Focus              | Overall LLM quality via human preference      |
+| Scoring            | Elo / Bradley-Terry (comparative)             |
+| Non-determinism    | Absorbed by large sample size (6M+ votes)     |
+| Comprehension test | Implicit (humans judge quality holistically)   |
+| License            | Open platform (data partially open)           |
+
+*** Methodology
+
+- Anonymous, randomized pairwise battles
+- Users see two model responses side-by-side, choose preferred
+- Elo ratings computed via Bradley-Terry model with bootstrapping
+  (1000 permutations for confidence intervals)
+- Separate arenas for text, vision, text-to-video
+
+*** Elo Score Properties
+
+- Initial score: 1000
+- Winner gains points, loser loses points
+- After sufficient matches, ratings stabilize
+- Confidence intervals reported directly on leaderboard
+
+*** Relevance to guile-sage
+
+For model selection (Ollama qwen3 vs Gemini 2.5 Flash), a local
+pairwise comparison framework would be valuable. We could run the
+same traffic cases against multiple providers and compute local
+Elo-like preference scores. This directly answers the question of
+whether to run evals against multiple models simultaneously.
+
+** 7. Braintrust
+
+| Attribute          | Value                                          |
+|--------------------+------------------------------------------------|
+| Focus              | Production eval + observability                 |
+| Scoring            | Flexible (binary, continuous, LLM-as-judge)     |
+| Non-determinism    | Multiple runs; production trace replay           |
+| Comprehension test | Via custom LLM-as-judge scorers                  |
+| License            | Commercial (open-source autoevals library)       |
+
+*** Scorer Types
+
+1. *Code-based*: deterministic checks (format, schema, length).
+   Fast, free, reproducible.
+2. *LLM-as-judge*: subjective quality (tone, helpfulness, intent
+   alignment). Braintrust provides 25+ built-in scorers.
+3. *Custom*: generated from natural language descriptions via Loop
+   (their AI assistant).
+
+*** CI/CD Integration
+
+- Native GitHub Action posts score deltas as PR comments
+- Regression gates block releases below quality thresholds
+- Same scorers run in development and production
+- Production failures converted to permanent test cases
+
+*** Agent Evaluation
+
+Multi-step workflows are traced end-to-end. Both intermediate steps
+and final outputs are scored. Inter-agent messages, tool calls, and
+state changes are recorded and individually scorable.
+
+*** Relevance to guile-sage
+
+Braintrust's approach of converting production failures into test
+cases is directly applicable. Our eval harness already captures tmux
+pane output; we should formalize a "failure -> new test case"
+pipeline. The three scorer types (code, LLM, human) map to our
+current regex patterns (code-based), potential LLM-as-judge
+extension, and manual review.
+
+** 8. Qualitative Error Analysis (Open Coding / Axial Coding)
+
+| Attribute          | Value                                            |
+|--------------------+--------------------------------------------------|
+| Focus              | Systematic failure mode discovery                 |
+| Scoring            | Categorical (taxonomy, not numeric)               |
+| Non-determinism    | N/A (post-hoc analysis)                           |
+| Comprehension test | Core focus (understanding WHY failures occur)     |
+| License            | Methodology (not software)                        |
+
+*** Grounded Theory Applied to LLM Evals
+
+Recent research (2025) applies qualitative coding methods to LLM
+agent failure analysis:
+
+1. *Open coding*: Read execution traces, write descriptive notes
+   about anything wrong, unexpected, or problematic. No pre-defined
+   categories.
+
+2. *Axial coding*: Group open codes into categories and
+   relationships. Identify recurring patterns (e.g., "tool selection
+   errors cluster when prompt is ambiguous").
+
+3. *Selective coding*: Identify core category that explains most
+   failure modes. Build theory of failure.
+
+*** MAST Taxonomy (Multi-Agent System Failures)
+
+A 2025 study analyzed 150 execution traces across 5 domains using
+Grounded Theory, identifying 14 fine-grained failure modes mapped to
+execution stages. This provides a reusable taxonomy for categorizing
+agent failures beyond simple pass/fail.
+
+*** Relevance to guile-sage
+
+This methodology is the missing piece for understanding NEUTRAL
+results. When a test case gets NEUTRAL (partial match), open coding
+the transcript would reveal whether it was:
+- Correct reasoning, different tool path
+- Partially correct with hallucinated details
+- Correct tool, wrong parameters
+- Right answer, wrong format
+
+** 9. Anthropic's Eval Methodology
+
+| Attribute          | Value                                          |
+|--------------------+------------------------------------------------|
+| Focus              | Agent capability + regression evaluation        |
+| Scoring            | Binary, weighted, or hybrid per-task            |
+| Non-determinism    | Multiple trials per task (first-class concept)  |
+| Comprehension test | Via model-based graders with rubrics             |
+| License            | Methodology (Bloom framework is open source)    |
+
+*** Core Concepts
+
+| Term       | Definition                                      |
+|------------+-------------------------------------------------|
+| Task       | Single test with defined inputs + success criteria |
+| Trial      | One attempt at completing a task                  |
+| Grader     | Logic that scores an aspect of performance        |
+| Transcript | Complete record of a trial                        |
+| Outcome    | Final state of environment after trial            |
+
+*** Three Grader Types
+
+1. *Code-based*: fast, cheap, reproducible. Unit tests, state
+   verification, tool call validation.
+2. *Model-based*: handles nuance and open-ended tasks. Requires
+   clear rubrics, isolated judges per dimension, regular calibration
+   against human experts.
+3. *Human*: gold standard but doesn't scale. Reserved for
+   calibrating model-based graders.
+
+*** Two Evaluation Categories
+
+- *Capability evals*: "What can this agent do well?" Should start
+  at low pass rate, targeting tasks the agent struggles with.
+- *Regression evals*: "Does the agent still handle tasks it used
+  to?" Should have nearly 100% pass rate.
+
+*** Practical Guidance
+
+- Start with 20-50 simple tasks drawn from real failures
+- Early changes have large effect sizes; small samples suffice
+- Run multiple trials per task to handle non-determinism
+- Grade outcomes, not trajectories (avoid brittle step-matching)
+- Read transcripts regularly to calibrate graders
+
+*** Bloom Framework
+
+Anthropic's open-source Bloom framework generates behavioral
+evaluations automatically: takes a researcher-specified behavior,
+generates scenarios, and quantifies frequency and severity.
+
+*** Relevance to guile-sage
+
+This is the most directly applicable framework. Our eval harness
+already has tasks (traffic cases), a grading function (evaluate_case),
+and transcripts (tmux pane capture). We need to add:
+- Trial repetition (run each case N times)
+- Separation of capability vs regression evals
+- Model-based graders for planning/synthesis categories
+
+** 10. LangSmith Evaluators
+
+| Attribute          | Value                                           |
+|--------------------+-------------------------------------------------|
+| Focus              | Agent trajectory evaluation + observability       |
+| Scoring            | Binary or continuous (0.0-1.0), configurable      |
+| Non-determinism    | Dataset-driven reruns; trajectory flexibility      |
+| Comprehension test | Via LLM-as-judge trajectory evaluator              |
+| License            | Commercial (openevals/agentevals are open source) |
+
+*** Evaluator Types
+
+1. *Human evaluation*: annotation queues
+2. *Heuristic checks*: format validation, code compilation
+3. *LLM-as-judge*: score against defined criteria
+4. *Pairwise comparisons*: side-by-side model comparison
+
+*** Agent Trajectory Evaluation
+
+=agentevals= package provides:
+- =create_trajectory_match_evaluator=: compare agent trajectory
+  against reference (strict or flexible mode)
+- =create_trajectory_llm_as_judge=: LLM scores the trajectory
+- Trajectories formatted as OpenAI-style message lists
+
+*** Flexible Matching
+
+Strict mode requires identical messages in same order with same tool
+calls. Flexible mode allows minor variations (e.g., "San Francisco"
+vs "SF" in tool arguments, formatting differences). This is a
+practical solution to the non-determinism problem for tool selection.
+
+*** CI/CD Integration
+
+Integrates with pytest, Vitest, and GitHub workflows. Evals can run
+on every PR or nightly builds.
+
+*** Relevance to guile-sage
+
+The trajectory format (OpenAI-style message lists) could serve as a
+standard interchange format for our evals. The flexible matching
+approach directly addresses our NEUTRAL scoring---instead of binary
+exact-match, allow semantically equivalent tool calls.
+
+* Comparative Analysis
+
+** Scoring Methods Across Frameworks
+
+| Framework     | Primary Score     | Scale         | Handles Non-det |
+|---------------+-------------------+---------------+-----------------|
+| BFCL          | Accuracy %        | 0-100%        | No (AST match)  |
+| ToolBench     | Pass Rate + Win   | Binary + Comp | DFSDT paths     |
+| AgentBench    | Weighted avg      | 0-100%        | Task instances   |
+| SWE-bench     | Resolved %        | Binary        | Docker isolation |
+| HumanEval+    | pass@k            | Probabilistic | k samples        |
+| Chatbot Arena | Elo               | Comparative   | Large N votes    |
+| Braintrust    | Flexible          | Any           | Multiple runs    |
+| Qual. Coding  | Taxonomy          | Categorical   | N/A (post-hoc)  |
+| Anthropic     | Binary/weighted   | Per-task      | Multiple trials  |
+| LangSmith     | Binary/continuous | 0-1 or bool   | Flexible match   |
+
+** Dimension Coverage
+
+| Framework     | Tool Select | Chain Quality | Reasoning | Safety |
+|---------------+-------------+---------------+-----------+--------|
+| BFCL          | Primary     | V3+           | No        | V4     |
+| ToolBench     | Primary     | DFSDT         | Implicit  | No     |
+| AgentBench    | Environment | Multi-step    | Games     | No     |
+| SWE-bench     | No          | End-to-end    | Implicit  | No     |
+| HumanEval+    | No          | No            | No        | No     |
+| Chatbot Arena | No          | No            | Holistic  | No     |
+| Braintrust    | Traceable   | Scored steps  | LLM-judge | Custom |
+| Qual. Coding  | Post-hoc    | Post-hoc      | Primary   | No     |
+| Anthropic     | Code grader | Outcome-based | Model     | Bloom  |
+| LangSmith     | Trajectory  | Trajectory    | LLM-judge | Custom |
+
+* Recommendations for guile-sage
+
+** Q1: Is PASS/NEUTRAL/FAIL sufficient?
+
+*No, but it's a reasonable starting point that needs augmentation.*
+
+The three-valued system captures an important distinction that pure
+binary misses: "not wrong, but not what we expected" (NEUTRAL). This
+aligns with BFCL V3's state-based evaluation where multiple paths
+reach the same correct state.
+
+However, the industry consensus is clear:
+
+- *For regression gates*: use binary PASS/FAIL. Anthropic explicitly
+  recommends this: "ranges push the judgment burden onto a human."
+- *For capability exploration*: use continuous scoring (0.0-1.0) to
+  track improvement over time.
+- *For model selection*: use comparative (pairwise preference) scoring.
+
+*Recommendation*: Keep PASS/NEUTRAL/FAIL for human-readable output but
+add a numeric score (0.0, 0.5, 1.0 mapping) for aggregation and trend
+tracking. Add a =--compare= mode that runs cases against two providers
+and computes preference.
+
+** Q2: How to handle non-deterministic tool selection?
+
+The dominant approaches, in order of adoption:
+
+1. *Multiple trials* (Anthropic, Braintrust): Run each task N times
+   (N=3-5 for development, N=10+ for benchmarking). Report pass@1
+   (any single run passes) and pass-rate (proportion of passing
+   trials). This is the most practical approach.
+
+2. *Outcome-based grading* (SWE-bench, Anthropic, BFCL V3): Grade
+   the final state, not the tool sequence. "Did the agent answer
+   correctly?" not "Did it use list_files vs glob_files?"
+
+3. *Flexible trajectory matching* (LangSmith agentevals): Allow
+   semantically equivalent tool calls. "San Francisco" = "SF" in
+   tool arguments.
+
+4. *DFSDT exploration* (ToolBench): Let the model explore multiple
+   paths; credit if any valid path is found. Too heavy for our use
+   case.
+
+*Recommendation*: Implement trial-based repetition (approach 1) with
+outcome-based grading (approach 2). Modify =eval-sage.sh= to accept
+=--trials=N= flag. Report pass@1 and mean pass rate.
+
+#+BEGIN_SRC bash
+# Proposed interface
+scripts/eval-sage.sh --trials=5 --session=sage-test
+# Output:
+#   TC01  pass@1=PASS  rate=5/5  [list_files, 1 step]
+#   TC09  pass@1=PASS  rate=3/5  [no tools]
+#+END_SRC
+
+** Q3: What assertion types matter beyond tool detection and pattern matching?
+
+Based on the survey, these assertion types are underrepresented in
+our current harness:
+
+*** Currently Supported
+- Tool presence (=expect_tools=)
+- Output pattern match (=expect_pattern=)
+- Chain length bounds (=expect_chain_length=)
+- Error detection (=expect_error=)
+- Guardrail activation (=expect_guardrail=)
+
+*** Should Add (Priority Order)
+
+1. *State verification* (from BFCL V3): After tool execution, verify
+   the environment state is correct. E.g., after =write_file=, verify
+   the file exists and has expected content.
+
+2. *Negative tool assertions*: Verify the model did NOT call unsafe
+   tools. E.g., for a planning question (TC09-TC12), assert no tool
+   calls occurred or only safe ones.
+
+3. *Output quality scoring* (from Braintrust/Anthropic): LLM-as-judge
+   for synthesis tasks (TC13-TC16). "Did the summary accurately
+   reflect the git history?" Cannot be checked by regex.
+
+4. *Latency/cost bounds*: BFCL tracks cost and latency alongside
+   accuracy. Add =max_tokens= and =max_duration= assertions.
+
+5. *Format validation*: Did the response follow expected structure?
+   (e.g., tool output is valid JSON, not truncated, no ANSI codes)
+
+6. *Intermediate failure classification* (from AgentBench):
+   Distinguish invalid format, invalid action, context exceeded,
+   and step limit exceeded as separate failure modes.
+
+** Q4: Should evals run against multiple models simultaneously?
+
+*Yes, for model selection. No, for regression testing.*
+
+The survey shows two distinct use cases:
+
+- *Regression*: Run against the currently deployed model. Binary
+  pass/fail. Fast. Run on every change. This is our current approach
+  with a single tmux session.
+
+- *Comparative*: Run identical cases against N providers. Compute
+  preference scores or local Elo. Run periodically (weekly or on
+  model update). LMSYS Chatbot Arena and ToolBench Win Rate both
+  validate this approach.
+
+*Recommendation*: Add a =--compare= mode to eval-sage.sh:
+
+#+BEGIN_SRC bash
+# Run same cases against two sessions
+scripts/eval-sage.sh --compare sage-ollama sage-gemini
+# Output:
+#   TC01  Ollama=PASS  Gemini=PASS   tie
+#   TC09  Ollama=PASS  Gemini=PASS   Gemini preferred (more detailed)
+#   ...
+#   Preference: Ollama 8 / Gemini 10 / Tie 2
+#+END_SRC
+
+** Q5: Is there a standard eval format we should adopt?
+
+There is no single dominant standard, but two formats are emerging:
+
+*** OpenAI Evals Format
+
+- YAML configuration + JSONL test data
+- Completion Function Protocol for agents
+- Traces as JSONL event streams
+- Used by OpenAI platform evals, some LangSmith integrations
+
+*** OpenAI Message Format for Trajectories
+
+- LangSmith =agentevals= uses OpenAI-style message lists
+- Braintrust logs in similar format
+- Becoming a de facto interchange format for agent traces
+
+*Recommendation*: Keep =traffic-cases.json= as our primary format
+(it's well-suited to our tmux-based execution model) but add an
+export step that converts results to JSONL for integration with
+external tools:
+
+#+BEGIN_SRC json
+{"id": "TC01", "trial": 1, "result": "PASS", "score": 1.0,
+ "tools": ["list_files"], "chain_length": 1,
+ "latency_ms": 2400, "model": "qwen3:8b",
+ "timestamp": "2026-04-14T10:30:00Z"}
+#+END_SRC
+
+** Q6: How do we distinguish "correct tool call" from "understood the problem"?
+
+This is the hardest question and the least solved across frameworks.
+
+*** Current approaches in the field:
+
+| Method                    | Measures Understanding? | Practical? |
+|---------------------------+-------------------------+------------|
+| AST match (BFCL)         | No                      | Yes        |
+| Pass rate (ToolBench)     | No                      | Yes        |
+| LLM-as-judge (Braintrust) | Partially               | Yes        |
+| Lateral thinking (AgentBench) | Yes (game format)  | Limited    |
+| Grounded Theory (Qual.)  | Yes                     | No (manual)|
+| Transcript review (Anthropic) | Yes                | No (manual)|
+
+*** Recommended Approach for guile-sage
+
+Separate eval cases into two tiers:
+
+*Tier 1 --- Behavioral (automated, high frequency)*:
+Did the agent produce the correct output? Use tool presence, pattern
+matching, state verification. This is our current system.
+
+*Tier 2 --- Comprehension (semi-automated, lower frequency)*:
+Did the agent demonstrate understanding? Use LLM-as-judge with a
+rubric like:
+
+#+BEGIN_EXAMPLE
+Given the user prompt and the agent's response (including tool
+calls and reasoning), score on a 1-5 scale:
+1. Tool Selection Rationale: Did the agent explain WHY it chose
+   the tools it used? (Not required for simple lookups)
+2. Problem Decomposition: For multi-step tasks, did the agent
+   break the problem into logical sub-steps?
+3. Synthesis Quality: Does the final answer accurately integrate
+   tool outputs with contextual knowledge?
+#+END_EXAMPLE
+
+This maps to Anthropic's model-based graders and Braintrust's
+LLM-as-judge scorers. It would be most useful for our synthesis
+(TC13-TC16) and planning (TC09-TC12) categories.
+
+* Proposed Eval Architecture
+
+#+BEGIN_EXAMPLE
+traffic-cases.json          # Test definitions (current)
+  |
+  v
+eval-sage.sh                # Test runner (current, extended)
+  |--trials=N               # NEW: repeat each case
+  |--compare A B            # NEW: multi-model
+  |--export results.jsonl   # NEW: machine-readable output
+  |
+  +-> evaluate_case()       # Tier 1: behavioral grading (current)
+  |     |-- tool presence
+  |     |-- pattern match
+  |     |-- chain length
+  |     |-- state verification    # NEW
+  |     |-- negative assertions   # NEW
+  |     |-- failure classification # NEW
+  |
+  +-> llm_judge()           # Tier 2: comprehension grading (NEW)
+  |     |-- tool rationale
+  |     |-- problem decomposition
+  |     |-- synthesis quality
+  |
+  +-> results.jsonl         # Machine-readable output (NEW)
+        |
+        +-> trend tracking  # Score over time
+        +-> regression gate # CI/CD blocking
+        +-> error analysis  # Open/axial coding on failures
+#+END_EXAMPLE
+
+* Implementation Priorities
+
+| Priority | Change                        | Effort | Impact |
+|----------+-------------------------------+--------+--------|
+| P1       | Add =--trials=N= to eval-sage | Low    | High   |
+| P1       | JSONL result export           | Low    | Medium |
+| P1       | Negative tool assertions      | Low    | High   |
+| P2       | State verification assertions | Medium | High   |
+| P2       | Failure classification        | Medium | Medium |
+| P2       | =--compare= mode (multi-model)| Medium | High   |
+| P3       | LLM-as-judge for Tier 2       | High   | Medium |
+| P3       | Trend tracking dashboard      | Medium | Medium |
+| P3       | Open coding failure analysis  | Low    | High   |
+
+* Appendix: Source References
+
+** Academic / Benchmark Papers
+
+- BFCL: https://gorilla.cs.berkeley.edu/leaderboard.html
+  (V3 blog: https://gorilla.cs.berkeley.edu/blogs/13_bfcl_v3_multi_turn.html)
+  (V4 blog: https://gorilla.cs.berkeley.edu/blogs/15_bfcl_v4_web_search.html)
+- ToolLLM: https://arxiv.org/abs/2307.16789
+- AgentBench: https://arxiv.org/abs/2308.03688
+  (GitHub: https://github.com/THUDM/AgentBench)
+- SWE-bench: https://epoch.ai/benchmarks/swe-bench-verified
+  (Methodology: https://atoms.dev/insights/swe-bench-a-comprehensive-review-of-its-fundamentals-methodology-impact-and-future-directions/)
+- HumanEval+: https://deepeval.com/docs/benchmarks-human-eval
+  (DataCamp overview: https://www.datacamp.com/tutorial/humaneval-benchmark-for-evaluating-llm-code-generation-capabilities)
+- LMSYS Chatbot Arena: https://www.lmsys.org/blog/2023-05-03-arena/
+  (Elo methodology: https://arxiv.org/html/2403.04132v1)
+
+** Industry Frameworks and Guides
+
+- Anthropic "Demystifying evals for AI agents":
+  https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents
+- Anthropic Bloom: https://alignment.anthropic.com/2025/bloom-auto-evals/
+- Anthropic "Statistical approach to model evaluations":
+  https://www.anthropic.com/research/statistical-approach-to-model-evals
+- Braintrust: https://www.braintrust.dev
+  (autoevals: https://github.com/braintrustdata/autoevals)
+- LangSmith evaluation: https://docs.langchain.com/langsmith/evaluation
+  (agentevals: https://github.com/langchain-ai/agentevals)
+  (openevals: https://github.com/langchain-ai/openevals)
+- OpenAI Evals: https://github.com/openai/evals
+  (Agent evals guide: https://developers.openai.com/blog/eval-skills)
+
+** Qualitative Methods
+
+- Open/Axial/Selective Coding: https://delvetool.com/blog/openaxialselective
+- MAST (Multi-Agent System Failure Taxonomy, 2025):
+  https://arxiv.org/pdf/2512.07497
+- LLM Evals Error Analysis: https://thingsithinkithink.blog/posts/2025/06-21-llm-evals-lesson-2-error-analysis/
+
+** Surveys and Comparisons
+
+- "Evaluation and Benchmarking of LLM Agents: A Survey":
+  https://arxiv.org/html/2507.21504v1
+- "A Survey of Agent Evaluation Frameworks" (Maxim):
+  https://www.getmaxim.ai/blog/llm-agent-evaluation-framework-comparison/
+- "10 AI Agent Benchmarks" (Evidently AI):
+  https://www.evidentlyai.com/blog/ai-agent-benchmarks
+- "Agent Evaluation Framework 2026" (Galileo):
+  https://galileo.ai/blog/agent-evaluation-framework-metrics-rubrics-benchmarks
+- "LLM Agent Evaluation" (Confident AI):
+  https://www.confident-ai.com/blog/llm-agent-evaluation-complete-guide
