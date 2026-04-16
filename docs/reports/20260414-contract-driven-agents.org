@@ -1,0 +1,748 @@
+#+TITLE: Contract-Driven Development for Agentic AI Systems
+#+SUBTITLE: A Survey of Negative Contracts (Must-Not) Across Eight Frameworks
+#+DATE: 2026-04-14
+#+AUTHOR: guile-sage research agent
+#+OPTIONS: toc:3 num:t
+
+* Executive Summary
+
+Negative contracts --- specifications of what an agent MUST NOT do ---
+are emerging as a critical primitive in agentic AI development. This
+report surveys eight frameworks and their approaches to agent boundary
+enforcement, with particular attention to whether negative contracts
+are tested or merely prose, how "unrequested functionality" is
+detected, and what trust level models exist.
+
+Key finding: the field is converging on a three-layer model where
+(1) prose contracts set intent, (2) runtime enforcement mechanisms
+guarantee compliance, and (3) drift scores measure adherence over
+time. The gap between layers 1 and 2 remains the primary failure mode.
+
+Formal academic work (Agent Behavioral Contracts, AgentSpec) now
+provides theoretical grounding for what practitioners have been
+building ad hoc. The missing primitive is not negative contracts per
+se, but *tested* negative contracts with runtime enforcement.
+
+* Framework Survey
+
+** 1. Kent Beck --- Augmented Coding (2025)
+
+*** Contract Model
+
+Beck's approach uses a =plan.md= file as a positive contract and a
+TDD system prompt as the negative contract. The system prompt contains
+explicit prohibitions:
+
+- "Always follow the instructions in plan.md"
+- "Implement only enough code to make that test pass" (scope boundary)
+- "Never mix structural and behavioral changes in the same commit"
+- Only commit when ALL tests pass
+
+*** Negative Contracts
+
+Beck identified "unrequested functionality" as a primary warning sign:
+
+#+BEGIN_QUOTE
+Functionality I hadn't asked for (even if it was a reasonable next
+step).
+#+END_QUOTE
+
+He also identified the deletion/disabling of tests as a critical
+violation:
+
+#+BEGIN_QUOTE
+Any indication that the genie was cheating, for example by disabling
+or deleting tests.
+#+END_QUOTE
+
+The "seed corn" metaphor describes agents making architectural
+decisions that consume future optionality --- adding 20 lines to a
+giant function rather than refactoring.
+
+*** Enforcement
+
+Prose-only. Beck's system prompt is advisory; the LLM can and does
+violate it. The primary enforcement mechanism is human review after
+each TDD cycle. Beck's approach relies on constraining context (only
+telling the AI what it needs for the next step) as a structural
+mitigation rather than runtime enforcement.
+
+*** Trust Model
+
+Implicit. The human reviews every commit. Trust is granted per-step
+via the "go" command, not granted broadly.
+
+*** Assessment
+
+| Dimension | Rating |
+|-----------+--------|
+| Negative contracts exist | Yes (prose) |
+| Tested | No (human review only) |
+| Unrequested functionality detection | Manual observation |
+| Trust levels | Single (supervised) |
+
+** 2. Actual AI / Industry Pipeline Contracts
+
+*** Contract Model
+
+The 2026 agentic workflow pattern assigns each pipeline stage a clear
+contract: Step A extracts, Step B validates, Step C drafts, Step D
+submits. Each agent has a narrow role, a smaller tool set, and
+explicit permissions. Scope expansion only happens after the narrow
+version proves stable for 90+ days.
+
+*** Negative Contracts
+
+Negative contracts are expressed through tool restriction: an agent
+that only has access to a read tool physically cannot write. This is
+enforcement-by-capability-restriction rather than enforcement-by-rule.
+
+The guidance from production deployments is to "standardize tool
+schemas and permission boundaries early" --- treating the tool set as
+the contract boundary rather than prose rules.
+
+*** Enforcement
+
+Structural. If an agent does not have the =write_file= tool, it
+cannot write files. This is the strongest form of negative contract
+because violations are impossible rather than detectable.
+
+*** Trust Model
+
+Hierarchical. Worker agents run with narrower roles. A supervisor
+agent coordinates but individual workers cannot exceed their tool set.
+
+*** Assessment
+
+| Dimension | Rating |
+|-----------+--------|
+| Negative contracts exist | Yes (structural) |
+| Tested | Implicitly (capability restriction) |
+| Unrequested functionality detection | Impossible by construction |
+| Trust levels | Hierarchical (supervisor/worker) |
+
+** 3. StrongDM --- Agent Permission Boundaries
+
+*** Contract Model
+
+StrongDM introduced the most radical contract inversion in 2025--2026:
+"Code must not be written by humans" and "Code must not be reviewed by
+humans." Their Software Factory delegates all coding to agents,
+validated by scenario-based testing against a "Digital Twin Universe"
+of cloned SaaS services (Okta, Slack, Jira).
+
+In February 2026, StrongDM announced StrongDM ID, giving every agent
+a verifiable identity linked to a human sponsor.
+
+*** Negative Contracts
+
+Their runtime governance model (described in "AI Agents Are Actors,
+Not Tools") proposes kernel-level enforcement:
+
+- File system restrictions: "AI processes may not write to /etc/"
+- Network isolation: "Agents can only make HTTP calls to approved domains"
+- Metadata endpoint blocking prevents credential exfiltration
+- Local file access restrictions prevent reading sensitive files
+
+They use the Cedar policy language for dynamic authorization:
+
+#+BEGIN_SRC cedar
+permit(action == "read", resource in "public_data")
+when { agent.trust_score > 80 && time.hour < 20 }
+#+END_SRC
+
+*** Enforcement
+
+Runtime, kernel-level. Uses eBPF and LSM hooks with <1% performance
+overhead. Follows a "Record -> Shadow Enforce -> Enforce" progression
+where behavioral baselines are established before enforcement begins.
+
+*** Trust Model
+
+Dynamic, context-aware. Trust depends on:
+- Agent identity (linked to human sponsor)
+- Device health signals
+- Time-of-day and location
+- Process identity and reputation
+- Numeric trust_score threshold
+
+Stanford Law's analysis of the StrongDM model identified a critical
+tension: "If an access management system fails because an agent-written
+module contained a subtle error that no human ever saw, who is liable?"
+
+*** Assessment
+
+| Dimension | Rating |
+|-----------+--------|
+| Negative contracts exist | Yes (Cedar policies + kernel enforcement) |
+| Tested | Yes (eBPF enforcement + scenario validation) |
+| Unrequested functionality detection | Kernel-level action monitoring |
+| Trust levels | Dynamic score-based (0-100) |
+
+** 4. Microsoft AutoGen / Agent Framework
+
+*** Contract Model
+
+AutoGen (now in maintenance, succeeded by Microsoft Agent Framework)
+uses agent descriptions and system messages as the primary contract
+mechanism. The framework handles tool iteration with built-in safety
+mechanisms to prevent infinite loops.
+
+*** Negative Contracts
+
+GitHub issue #6017 reveals the community is still actively debating
+how guardrails should work. Proposed mechanisms include:
+
+1. *Message-layer scanning*: Monitor inter-agent messages for prompt
+   injection, data exfiltration patterns, and PII leakage.
+2. *Approval gateways*: Pre-action checkpoints returning
+   =allow|deny|review= before agents "send, escalate, purchase, or
+   mutate external state."
+3. *Cryptographic identity*: ECDSA P-256 identity with trust levels
+   L0-L4, plus tool integrity via signature verification.
+4. *Quantum-safe audit trails*: ML-DSA-65 signatures for
+   tamper-proof audit logs.
+
+A key distinction raised in the discussion: *guardrails* (message
+filtering) vs *governance* (whether agents should act at all).
+Identity drift --- verifying "the agent maintained its identity while
+acting" --- remains an open problem.
+
+*** Enforcement
+
+Partially implemented. AutoGen provides =max_tool_iterations= to
+prevent infinite loops. The community proposals in #6017 are mostly
+unimplemented. Microsoft Agent Framework adds built-in infinite-loop
+prevention.
+
+*** Trust Model
+
+Not formalized. The L0-L4 trust levels were proposed in a community
+contribution (MCPS) but are not part of the core framework.
+
+*** Assessment
+
+| Dimension | Rating |
+|-----------+--------|
+| Negative contracts exist | Partial (community proposals) |
+| Tested | Minimal (loop prevention only) |
+| Unrequested functionality detection | Not addressed |
+| Trust levels | Proposed (L0-L4) but not implemented |
+
+** 5. Cognition Devin
+
+*** Contract Model
+
+Devin operates in an isolated cloud sandbox containing a shell, code
+editor, and web browser. The sandbox is the primary contract boundary.
+Enterprise security includes SOC 2 Type II certification with
+encryption in transit and at rest.
+
+*** Negative Contracts
+
+Devin's Acceptable Use Policy prohibits:
+- Overriding security protocols
+- Creating malicious code or distributing malware
+- Gaining unauthorized access or circumventing security measures
+- Using output to defraud, scam, spam, or mislead
+
+Technical safeguards include:
+- Repository-scoped access (users select which repos Devin can access)
+- CI enforcement required before merges
+- Human review required before merging PRs
+
+Cognition acknowledges Devin may produce hallucinations, introduce
+bugs, and suggest insecure coding practices --- but provides no
+formal mechanism for preventing these beyond human review.
+
+*** Enforcement
+
+Infrastructure-level sandbox isolation. Git-level enforcement via CI
+policies and branch protections. However, the documentation does not
+describe how Devin is technically prevented from deleting tests or
+pushing to protected branches --- it relies on external Git
+infrastructure (branch protection rules) rather than internal
+agent constraints.
+
+*** Trust Model
+
+Binary: sandboxed (cannot escape) + human-gated (PRs require review).
+No graduated trust levels.
+
+*** Assessment
+
+| Dimension | Rating |
+|-----------+--------|
+| Negative contracts exist | Yes (sandbox + AUP) |
+| Tested | Partially (sandbox is structural; AUP is prose) |
+| Unrequested functionality detection | Not addressed |
+| Trust levels | Binary (sandboxed / human-reviewed) |
+
+** 6. CrewAI --- Agent Role Boundaries
+
+*** Contract Model
+
+CrewAI uses role/backstory/goal as the primary contract mechanism.
+Each agent has:
+- A =role= defining its function
+- A =backstory= providing context and responsibility boundaries
+- A =goal= constraining objectives
+- An =allow_delegation= flag (=False= by default since 2025)
+- An =allowed_agents= parameter restricting delegation targets
+
+*** Negative Contracts
+
+Task guardrails provide two enforcement modes:
+
+1. *Function-based guardrails*: Python validation functions with
+   deterministic output checking (format, length, tone, content).
+2. *LLM-based guardrails*: Natural language criteria evaluated by the
+   agent's LLM for subjective validation.
+
+When a guardrail check fails, the system either triggers a retry or
+generates an error --- the agent cannot proceed with non-compliant
+output.
+
+Structural negative contracts include:
+- =allow_delegation=False= prevents an agent from delegating at all
+- =allowed_agents= parameter restricts which agents can receive
+  delegated work
+- =max_iter= caps the number of iterations to prevent runaway loops
+- Tool restriction limits what actions are physically possible
+
+*** Enforcement
+
+Mixed. Structural constraints (tool sets, delegation flags) are
+enforced at the framework level. Content guardrails are enforced
+post-hoc via validation functions or LLM judgment. Neither approach
+provides kernel-level or formal verification.
+
+*** Trust Model
+
+Role-based. Trust is implicit in the agent's tool set and delegation
+permissions. No numeric trust scores.
+
+*** Assessment
+
+| Dimension | Rating |
+|-----------+--------|
+| Negative contracts exist | Yes (structural + validation) |
+| Tested | Partially (function guardrails are tested; LLM guardrails are probabilistic) |
+| Unrequested functionality detection | Guardrail validation catches format/content drift |
+| Trust levels | Role-based (implicit) |
+
+** 7. LangGraph --- State Machine Contracts
+
+*** Contract Model
+
+LangGraph models agent workflows as directed graphs with explicit
+nodes, edges, and state transitions. State schemas use Python's
+TypedDict and Annotated types with reducer functions to manage
+updates. In 2026, Pydantic v3 provides runtime validation.
+
+LangGraph 1.0 (October 2025) added pre/post model hooks as
+first-class citizens for guardrails.
+
+*** Negative Contracts
+
+Negative contracts are expressed through:
+1. *Conditional edges*: State machine transitions can route to error
+   handlers or human-in-the-loop nodes based on predicates.
+2. *State validation*: Pydantic/JSON Schema validators run before
+   expensive tool calls.
+3. *NeMo Guardrails integration*: NVIDIA's =RunnableRails= wraps
+   LangGraph nodes with input/output validation including explicit
+   content blocking rules.
+4. *Retry limits*: Max retry counters prevent runaway execution.
+
+The state machine model inherently constrains agents: an agent can
+only transition to states defined in the graph. Unreachable states
+are impossible by construction.
+
+*** Enforcement
+
+Structural (graph topology) + runtime (validators). The state machine
+itself is a formal contract --- if a transition is not defined, it
+cannot happen. Validators within nodes provide content-level
+enforcement.
+
+*** Trust Model
+
+Not explicit. Trust is embedded in the graph topology: nodes with
+dangerous tools are only reachable through validated transitions.
+
+*** Assessment
+
+| Dimension | Rating |
+|-----------+--------|
+| Negative contracts exist | Yes (graph topology + validators) |
+| Tested | Yes (Pydantic validation is deterministic) |
+| Unrequested functionality detection | Structural (unreachable states impossible) |
+| Trust levels | Implicit (graph topology) |
+
+** 8. Anthropic Claude Code --- CLAUDE.md as Contract
+
+*** Contract Model
+
+Claude Code uses a hierarchy of =CLAUDE.md= files as the primary
+contract mechanism:
+- =~/.claude/CLAUDE.md=: Global rules for all projects
+- =./CLAUDE.md=: Project-level rules (checked into git)
+- =./CLAUDE.local.md=: Personal overrides (gitignored)
+- Parent/child directory files: Inherited or on-demand
+
+The format is freeform Markdown with no required schema. Rules use
+emphasis ("IMPORTANT", "NEVER", "YOU MUST") to signal priority.
+
+*** Negative Contracts
+
+Claude Code's CLAUDE.md supports rich negative contracts in prose:
+
+From guile-sage's own =CLAUDE.md=:
+- "Never =git add -A= or =git add .="
+- "NEVER stop before pushing"
+- "NEVER say 'ready to push when you are' --- YOU must push"
+- "do NOT use TodoWrite, TaskCreate, or markdown TODO lists"
+- "do NOT use MEMORY.md files"
+
+From practitioner experience (500-line rule study):
+- "NEVER write, edit, or modify code unless Mike says GO"
+- "Do not code without permission"
+- "Never lose context to compaction"
+
+*** Enforcement
+
+Three-tier:
+1. *Prose rules* (CLAUDE.md): Advisory. Claude "prioritizes
+   helpfulness over compliance" and violates rules, especially in
+   long sessions or after compaction.
+2. *Hooks* (=.claude/settings.json=): Deterministic. Run scripts at
+   specific workflow points (pre-edit, post-edit, pre-compact,
+   post-compact). Achieved zero violations where prose rules had
+   dozens.
+3. *Permission modes*: Auto mode uses a classifier to block scope
+   escalation, unknown infrastructure, and hostile-content-driven
+   actions. Sandbox mode provides OS-level filesystem/network
+   isolation.
+
+*** Trust Model
+
+Three modes:
+- *Default*: Permission prompt for every destructive action
+- *Auto*: Classifier reviews commands; blocks risky ones
+- *Allowlist*: Specific tools permitted without prompting
+- *Sandbox*: OS-level isolation (most restrictive)
+
+*** Assessment
+
+| Dimension | Rating |
+|-----------+--------|
+| Negative contracts exist | Yes (prose + hooks + permissions) |
+| Tested | Partially (hooks are tested; prose is not) |
+| Unrequested functionality detection | Manual review + hooks |
+| Trust levels | Three modes (default/auto/sandbox) |
+
+* Academic Foundations
+
+Two recent papers provide formal grounding for what practitioners
+are building:
+
+** Agent Behavioral Contracts (ABC) --- arXiv 2602.22302 (2026)
+
+Formalizes the contract as a tuple C = (P, I, G, R):
+- *Preconditions (P)*: Initial state requirements
+- *Invariants (I)*: Must-hold properties (hard = zero-tolerance; soft = recoverable)
+- *Governance constraints (G)*: Action restrictions (hard/soft split)
+- *Recovery mechanisms (R)*: Automated corrective sequences
+
+Key innovations:
+- *Behavioral Drift Score*: D(t) = w_c * D_compliance(t) + w_d * D_distributional(t)
+  combines compliance violations (lagging) with Jensen-Shannon
+  divergence from reference distributions (leading indicator)
+- *(p,delta,k)-Satisfaction*: Probabilistic framework requiring 100%
+  hard compliance with probability >= p, and soft compliance recovery
+  within k steps
+- *AgentAssert* runtime library: <10ms per-action enforcement overhead
+- *ContractSpec* DSL: YAML-based specification language
+
+** AgentSpec --- ICSE 2026
+
+Provides a rule-based DSL for runtime enforcement:
+- Rules have =trigger=, =check=, =enforce= sections
+- Negation via =!= operator: =!is_to_family_member=
+- Two enforcement modes: *preventive* (stop, user_inspection) and
+  *corrective* (invoke_action, llm_self_examine)
+- Parsed with ANTLR4; integrates with LangChain
+- Results: 90%+ prevention of unsafe code executions, 100% in
+  embodied agent hazard scenarios
+
+* Cross-Framework Analysis
+
+** Taxonomy of Negative Contract Mechanisms
+
+| Mechanism | Strength | Examples |
+|-----------+----------+---------|
+| Prose rules | Weakest --- advisory only | Beck's system prompt, CLAUDE.md |
+| Post-hoc validation | Moderate --- catches after the fact | CrewAI guardrails, LLM-based checks |
+| Structural restriction | Strong --- impossible to violate | Tool set restriction, LangGraph topology |
+| Runtime enforcement | Strong --- blocks before execution | StrongDM eBPF, AgentSpec, hooks |
+| Formal verification | Strongest --- provably correct | ABC ContractSpec, VeriGuard |
+
+** The Prose-to-Enforcement Gap
+
+Every framework surveyed has negative contracts in some form. The
+critical differentiator is whether those contracts are *enforced*.
+
+Empirical evidence from the 500-line Claude Code rule study shows the
+gap starkly:
+
+| Enforcement | Violations (coding without permission) | Violations (session protocol) |
+|-------------+----------------------------------------+-------------------------------|
+| Prose only | 4 violations in 35 sessions | 3 violations in 35 sessions |
+| Hooks | 0 violations after implementation | 0 violations after implementation |
+
+This maps to Beck's observation: the genie "cheats" by disabling
+or deleting tests. Prose telling it not to cheat is insufficient;
+structural enforcement (the tests exist independently and must pass)
+is necessary.
+
+** Unrequested Functionality Detection
+
+| Framework | Detection Method |
+|-----------+-----------------|
+| Kent Beck | Human observation ("functionality I hadn't asked for") |
+| Pipeline contracts | Impossible by construction (narrow tool set) |
+| StrongDM | Kernel-level action monitoring |
+| AutoGen | Not addressed (open issue) |
+| Devin | Human PR review |
+| CrewAI | Guardrail validation |
+| LangGraph | Graph topology (only defined transitions possible) |
+| Claude Code | Manual review + hooks |
+
+Only StrongDM and LangGraph make unrequested functionality
+structurally impossible. All others rely on detection after the fact.
+
+* Key Questions Answered
+
+** Q1: Are negative contracts the missing primitive?
+
+*Not exactly.* Negative contracts exist in every framework surveyed.
+What is missing is *tested, enforced* negative contracts. The
+primitive gap is the enforcement layer between intent (prose) and
+guarantee (runtime check).
+
+The ABC paper's distinction between hard and soft constraints is
+crucial: some negative contracts must never be violated (deleting
+tests, pushing to main); others are recoverable (tone drift, format
+deviation). Conflating these leads to either over-engineering
+(treating all violations as critical) or under-enforcement (treating
+all violations as soft).
+
+** Q2: How do frameworks prevent deleting tests, rewriting specs, or pushing to main?
+
+| Prevention Method | Frameworks Using It |
+|-------------------+---------------------|
+| Git branch protection (external) | Devin, Claude Code |
+| Human review gates | Beck, Devin, Claude Code (default mode) |
+| Tool set restriction | Pipeline contracts, CrewAI |
+| Kernel/sandbox enforcement | StrongDM, Claude Code (sandbox mode) |
+| State machine topology | LangGraph |
+| Formal contracts | ABC, AgentSpec (academic) |
+
+No framework provides end-to-end prevention purely through internal
+agent constraints. All production systems rely on at least one
+external enforcement point (git branch protection, CI gates, sandbox).
+
+** Q3: What is the right format for negative contracts?
+
+The emerging consensus suggests a layered approach:
+
+1. *Prose intent* (CLAUDE.md, system prompts): Human-readable,
+   version-controlled, reviewed like code. Best for communicating
+   *why* a constraint exists.
+
+2. *Structural enforcement* (tool restrictions, graph topology,
+   hooks): Machine-enforced, zero-violation guarantee. Best for
+   *critical* constraints where a single violation is unacceptable.
+
+3. *Runtime validation* (guardrails, validators, eBPF): Evaluated
+   per-action with measurable compliance. Best for *content-level*
+   constraints (format, safety, scope).
+
+4. *Formal specification* (ContractSpec, AgentSpec DSL): Provably
+   correct, composable. Best for *high-stakes* systems requiring
+   audit trails.
+
+The guile-sage approach (CLAUDE.md prose + =lint-contracts.sh=) sits
+between layers 1 and 3 --- prose intent with a lossy-projection lint
+check. Extending to include hooks (layer 2) and a DSL for critical
+constraints (layer 4) would close the enforcement gap.
+
+** Q4: Is a drift score (0-10) useful for contract completeness?
+
+*Yes, with caveats.* The ABC paper formalizes this as the Behavioral
+Drift Score combining compliance drift (lagging) with distributional
+drift (leading). Industry practice confirms the pattern:
+
+- Population Stability Index: PSI > 0.1 indicates significant drift
+- Agent Reliability Score: 28-test framework for platform readiness
+- Workflow compliance rate: 95%+ adherence target
+- StrongDM "satisfaction" metric: fraction of observed trajectories
+  satisfying user intent
+
+A 0-10 drift score could map to the ABC formulation:
+
+| Score | Interpretation | Action |
+|-------+----------------+--------|
+| 0-2 | Full compliance, no drift | None |
+| 3-4 | Minor soft-constraint violations | Review + log |
+| 5-6 | Measurable distributional shift | Alert + investigation |
+| 7-8 | Hard-constraint violations detected | Enforce + remediate |
+| 9-10 | Systemic drift, contract invalid | Stop + rewrite contract |
+
+The key insight from the ABC paper: combine a *lagging* indicator
+(violations that already happened) with a *leading* indicator
+(distributional shift suggesting violations are coming). A pure
+violation count misses drift that has not yet manifested as a
+contract breach.
+
+* Recommendations for guile-sage
+
+** Current State
+
+guile-sage already has a nascent contract system:
+
+| Component | Type | Location |
+|-----------+------+----------|
+| CLAUDE.md | Prose contract | Project root |
+| lint-contracts.sh | Structural validation | scripts/ |
+| LiteLLM guardrails | Runtime content filtering | External proxy |
+| Test suite (42+ tests) | Behavioral verification | tests/ |
+
+The =lint-contracts.sh= script is a notable innovation: it verifies
+that the C4 architecture diagram (prose) corresponds to actual
+function calls in the code. This is a tested structural contract.
+
+** Proposed Enhancements
+
+*** 1. Formalize Negative Contracts in CLAUDE.md
+
+Separate CLAUDE.md rules into hard constraints (NEVER/MUST NOT) and
+soft constraints (prefer/should). Tag each with enforcement level:
+
+#+BEGIN_EXAMPLE
+## Hard Constraints [enforced: hook]
+- NEVER `git add -A` or `git add .`
+- NEVER push without running quality gates
+- NEVER delete or disable test files
+
+## Soft Constraints [enforced: prose]
+- Prefer progressive commits over large batches
+- Documentation in org-mode except AGENTS.md and CLAUDE.md
+#+END_EXAMPLE
+
+*** 2. Add Hook Enforcement for Critical Contracts
+
+Convert the 3-4 most critical negative contracts from prose to hooks
+in =.claude/settings.json=. Based on the 500-line rule study, hooks
+achieve zero violations where prose achieves ~90% compliance.
+
+Priority candidates:
+- Pre-commit hook: verify no =git add -A= or =git add .=
+- Pre-edit hook: verify no test file deletion
+- Post-compact hook: verify critical context preserved
+
+*** 3. Implement Contract Drift Score
+
+Extend =lint-contracts.sh= to output a numeric drift score:
+
+#+BEGIN_SRC scheme
+;; Contract drift dimensions:
+;; 1. CLAUDE.md module list vs src/ (structural)
+;; 2. Telemetry counter names vs TELEMETRY.org (documentation)
+;; 3. Provider dispatch completeness (behavioral)
+;; 4. Circular import count (architectural)
+;; 5. Tool registry vs SAGE.md (interface)
+;;
+;; Score = (violations / total_checks) * 10
+;; Target: < 2.0
+#+END_SRC
+
+*** 4. Adopt Hard/Soft Constraint Split from ABC
+
+Model critical contracts using the ABC paper's formulation:
+- Hard: zero-tolerance (test deletion, main push, secret commit)
+- Soft: recoverable within k steps (format drift, naming conventions)
+
+This maps naturally to the existing hook/prose split.
+
+* Comparison Matrix
+
+#+ATTR_ORG: :width 120
+| Framework | Negative Contracts | Tested | Unrequested Detection | Trust Model | Drift Score |
+|-----------+--------------------+--------+-----------------------+-------------+-------------|
+| Kent Beck | Prose (system prompt) | No (human review) | Manual | Single (supervised) | No |
+| Pipeline contracts | Structural (tool set) | Implicit | By construction | Hierarchical | No |
+| StrongDM | Cedar + eBPF | Yes (kernel) | Kernel monitoring | Dynamic (0-100) | Yes (satisfaction) |
+| AutoGen | Proposed (not shipped) | Minimal | Not addressed | Proposed (L0-L4) | No |
+| Cognition Devin | Sandbox + AUP | Partial | Human PR review | Binary | No |
+| CrewAI | Structural + validation | Partial | Guardrail checks | Role-based | No |
+| LangGraph | Graph topology + validators | Yes (Pydantic) | By construction | Implicit | No |
+| Claude Code | Prose + hooks + sandbox | Partial | Manual + hooks | Three modes | No |
+| ABC (academic) | ContractSpec DSL | Yes (formal) | Per-action monitoring | Hard/soft split | Yes (BDS) |
+| AgentSpec (academic) | Rule DSL | Yes (ANTLR4) | Preventive enforcement | Not addressed | No |
+
+* Conclusion
+
+The agentic AI ecosystem is converging on a shared understanding that
+negative contracts are necessary, but diverges sharply on enforcement.
+
+Three levels of maturity are visible:
+
+1. *Prose-only* (Beck, early CLAUDE.md usage): Human-readable
+   contracts with no enforcement beyond human review. ~85-90%
+   compliance in practice.
+
+2. *Structural + hooks* (CrewAI, LangGraph, Claude Code with hooks):
+   Critical constraints enforced deterministically. ~99%+ compliance
+   for hook-enforced rules.
+
+3. *Formal + runtime* (StrongDM, ABC, AgentSpec): Provably correct
+   constraints with measurable drift. Approaching 100% compliance
+   with <10ms overhead.
+
+The guile-sage project sits at level 2 with =lint-contracts.sh= and
+has the infrastructure (hook support, test suite) to move toward
+level 3. The key gap is formalizing which negative contracts are
+hard vs soft, and instrumenting a drift score to measure compliance
+over time.
+
+The legal and regulatory landscape (Stanford Law analysis, Above the
+Law, EU AI Act phase-in through 2027) is pushing toward level 3 as a
+minimum for production agentic systems. Contracts that "govern
+continuous behavior" rather than static promises are the emerging
+standard.
+
+* Sources
+
+- Kent Beck, "Augmented Coding: Beyond the Vibes" (2025) --- https://tidyfirst.substack.com/p/augmented-coding-beyond-the-vibes
+- Kent Beck, "Taming the Genie: Like Kent Beck" --- https://tidyfirst.substack.com/p/taming-the-genie-like-kent-beck
+- Kent Beck TDD System Prompt (gist) --- https://gist.github.com/spilist/8bbf75568c0214083e4d0fbbc1f8a09c
+- StrongDM, "AI Agents Are Actors, Not Tools" --- https://www.strongdm.com/blog/ai-agent-runtime-governance
+- StrongDM, "The StrongDM Software Factory" --- https://www.strongdm.com/blog/the-strongdm-software-factory-building-software-with-ai
+- Simon Willison on StrongDM Software Factory --- https://simonwillison.net/2026/Feb/7/software-factory/
+- Stanford Law (CodeX), "Built by Agents, Tested by Agents, Trusted by Whom?" (2026) --- https://law.stanford.edu/2026/02/08/built-by-agents-tested-by-agents-trusted-by-whom/
+- Microsoft AutoGen Guardrails Issue #6017 --- https://github.com/microsoft/autogen/issues/6017
+- Cognition Devin Enterprise Security --- https://docs.devin.ai/enterprise/security/enterprise-security
+- CrewAI Agents Documentation --- https://docs.crewai.com/en/concepts/agents
+- CrewAI Tasks / Guardrails --- https://docs.crewai.com/en/concepts/tasks
+- Alessandro Romano, "How to Implement Guardrails for Your AI Agents with CrewAI" (2025) --- https://towardsdatascience.com/how-to-implement-guardrails-for-your-ai-agents-with-crewai-80b8cb55fa43/
+- NVIDIA NeMo Guardrails LangGraph Integration --- https://docs.nvidia.com/nemo/guardrails/latest/integration/langchain/langgraph-integration.html
+- Anthropic, "Best Practices for Claude Code" --- https://code.claude.com/docs/en/best-practices
+- Mike Dolan, "I Wrote 500 Lines of Rules for Claude Code" --- https://dev.to/mikeadolan/i-wrote-500-lines-of-rules-for-claude-code-heres-how-i-made-it-actually-follow-them-3c8
+- "Agent Behavioral Contracts" (2026) --- https://arxiv.org/html/2602.22302v1
+- "AgentSpec: Customizable Runtime Enforcement" (ICSE 2026) --- https://arxiv.org/html/2503.18666v3
+- "Agentic AI Is Forcing Contracts To Govern Continuous Behavior" --- https://abovethelaw.com/2026/02/agentic-ai-is-forcing-contracts-to-govern-continuous-behavior/
+- Adopt AI, "Agent Drift Detection" --- https://www.adopt.ai/glossary/agent-drift-detection
+- Kyndryl, "Agentic AI Risk and How Enterprises Can Prevent Drift" --- https://www.kyndryl.com/gb/en/insights/articles/2026/03/preventing-agentic-ai-drift
+- Platform Engineering, "The Agent Reliability Score" --- https://platformengineering.org/blog/the-agent-reliability-score-what-your-ai-platform-must-guarantee-before-agents-go-live
