@@ -51,7 +51,9 @@
             sse-parse-lines
             mcp-read-claude-json
             mcp-extract-sse-servers
-            mcp-register-tools-from-list))
+            mcp-register-tools-from-list
+            mcp-extract-tool-result
+            sse-wait-for-response))
 
 ;;; ============================================================
 ;;; State

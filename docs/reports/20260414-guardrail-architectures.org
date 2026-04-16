@@ -1,0 +1,666 @@
+#+TITLE: Guardrail Architectures for Tool-Calling LLM Agents
+#+DATE: 2026-04-14
+#+AUTHOR: dsp-dr (sage-assisted)
+#+OPTIONS: toc:3 num:nil
+
+* Executive Summary
+
+This report surveys eight guardrail systems for LLM agents, comparing their
+architectures, tool-output filtering, streaming support, token overhead, and
+EU AI Act compliance readiness.  The key finding is that proxy-only guardrails
+(LiteLLM) are necessary but insufficient for tool-calling agents.  Agent-side
+guardrails are required for tool output validation, and the streaming guardrail
+gap remains an active area of development with NeMo, AWS Bedrock, and Azure
+now offering chunked-streaming validation.
+
+Recommendation for guile-sage v1: adopt a layered architecture with LiteLLM
+proxy guardrails for input/output content filtering (already deployed) plus
+lightweight agent-side validators for tool output screening and streaming
+chunk validation.
+
+* Surveyed Systems
+
+** 1. LiteLLM Guardrails (BerriAI)
+
+*** Architecture: Proxy-based (AI Gateway)
+
+LiteLLM is a proxy server / AI gateway that sits between clients and 100+
+LLM providers, providing a unified OpenAI-compatible interface.  Guardrails
+are configured centrally on the proxy and apply to all traffic regardless
+of client.
+
+*** Execution Hooks
+
+| Hook | Phase | Behaviour |
+|------+-------+-----------|
+| =pre_call= | Before LLM call | Validate/mask input, reject bad prompts |
+| =during_call= | Streaming chunks | Real-time monitoring (parallel to LLM call) |
+| =post_call= | After LLM response | Validate/mask output, audit logging |
+
+Custom guardrails implement Python callbacks:
+- =async_pre_call_hook= -- modify input or reject
+- =async_moderation_hook= -- runs in parallel with the LLM call
+- =async_post_call_success_hook= -- inspect input/output after call
+- =async_post_call_streaming_iterator_hook= -- inspect full assembled stream
+
+*** Tool Output Filtering
+
+LiteLLM v1.81+ includes a *Tool Permission Guardrail* that controls which
+tool calls a model may invoke, using configurable allow/deny rules.  It can
+block or rewrite tool invocations based on tool name or argument patterns.
+However, this validates tool /call requests/ (the LLM's proposed tool use),
+not /tool execution results/ (data returned by the tool).
+
+*** Streaming Support
+
+=during_call= guardrails can inspect streaming chunks in real time.
+=post_call= on streaming assembles the full response and runs moderation
+after delivery -- effectively audit-only for streamed content.
+
+*** Token Cost Overhead
+
+Built-in guardrails (regex, keyword) add <0.1ms latency and zero token
+overhead.  LLM-based guardrails (e.g., OpenAI Moderation) add one API call
+per request (~100-500 tokens, ~50-200ms).
+
+*** Licensing
+
+Open source (MIT).  Enterprise features available via BerriAI hosted.
+
+*** Current sage Integration
+
+guile-sage 0.7.0 routes through LiteLLM proxy on =dev-host:4000= with 10
+EU AI Act Article 5 guardrails (=pre_call=) and PII redaction (regex).
+The =x-litellm-applied-guardrails= response header is captured and displayed
+in the REPL as a shield emoji.
+
+** 2. NVIDIA NeMo Guardrails
+
+*** Architecture: Embedded library (Python) + Microservice
+
+NeMo Guardrails is an open-source toolkit for adding programmable guardrails
+to LLM-based conversational systems.  It operates as an embedded Python
+library or a standalone microservice, integrating with LangChain, LangGraph,
+and LlamaIndex.
+
+*** Core Concepts
+
+- *Dialogue Rails*: Colang-based flow control that constrains conversation paths
+- *Topical Rails*: Restrict the LLM to approved topics
+- *Input Rails*: Validate user input before the LLM sees it
+- *Output Rails*: Validate LLM output before the user sees it
+- *Tool Call Validation*: Validate tool inputs and outputs before/after invocation
+
+*** Tool Output Filtering
+
+NeMo provides *agentic security* rails specifically for tool-calling agents:
+tool call validation executes rails to validate tool inputs AND outputs
+before and after invocation.  This is the most mature tool-output guardrail
+among the surveyed systems for embedded use.
+
+*** Streaming Support
+
+NeMo supports chunked streaming validation with configurable parameters:
+- =chunk_size=: number of tokens per validation batch
+- =context_size=: sliding window buffer (default 50 tokens) for context-aware checks
+- =stream_first=: send initial tokens immediately for low TTFT
+- Violations spanning multiple chunks are detected via the sliding window
+
+This is the most sophisticated streaming guardrail implementation surveyed.
+
+*** Token Cost Overhead
+
+Typical configurations add 100-300ms latency.  On NVIDIA infrastructure
+(H100/H200 with Triton), this drops to 50-150ms.  The Colang runtime adds
+1 extra LLM inference per prompt for the pre-filtering step.  Programmable
+rails using chain-of-thought prompting add additional token cost (~500-2000
+tokens per rail evaluation).
+
+*** Licensing
+
+Open source (Apache 2.0).  NemoClaw (enterprise agent platform, 2026) is
+commercial.
+
+** 3. Guardrails AI
+
+*** Architecture: Embedded library (Python)
+
+Guardrails AI is a Python framework for validating and structuring LLM
+outputs using composable validator pipelines.  The core abstraction is
+the *Guard* -- a pipeline of validators that intercept LLM responses.
+
+*** Validator Hub
+
+60+ pre-built validators on the Guardrails Hub, including:
+- Hallucination detection
+- PII filtering
+- Toxic content detection
+- JSON/XML schema enforcement
+- Custom regex validators
+- Competitor mention detection
+
+*** Tool Output Filtering
+
+Guardrails AI focuses on LLM output validation, not tool execution results.
+However, validators can be applied to any text, so tool outputs can be
+validated by wrapping tool execution in a Guard pipeline.  This requires
+explicit wiring by the developer.
+
+*** Streaming Support
+
+Guardrails AI supports real-time streaming validation -- it claims to be
+the only library that can /fix/ LLM responses in real-time during streaming.
+Validators run on partial output as tokens arrive.
+
+*** Token Cost Overhead
+
+Each validation retry adds the full validation error message to context
+(1K-3K tokens per retry).  Recommended: max_retries=2-3 with fallback
+responses.  Base validation overhead is minimal for rule-based validators;
+LLM-based validators add one inference per validation.
+
+*** Licensing
+
+Open source (Apache 2.0).  Guardrails Pro (managed infrastructure) is
+commercial.
+
+** 4. Lakera Guard
+
+*** Architecture: API-based (SaaS) or self-hosted container
+
+Lakera Guard provides a single =/v2/guard= API endpoint that screens content
+using a combination of ML models, language models, and rule-based filters.
+It can be deployed as a SaaS service or a self-hosted container.
+
+*** Capabilities
+
+- Prompt injection detection (direct and indirect)
+- Jailbreak detection
+- Content moderation
+- PII detection and masking
+- Custom policies
+- Multilingual threat detection
+
+*** Tool Output Filtering
+
+For tool-using agents, Lakera recommends calling Guard at /each step/ of
+the agent loop, screening both tool use requests and tool responses.  This
+is an advisory pattern, not an automatic integration -- the developer must
+wire the screening calls.
+
+*** Streaming Support
+
+Not explicitly documented.  The API processes complete text payloads,
+suggesting that streaming content must be buffered before screening.
+
+*** Token Cost Overhead
+
+Latency: <200ms per call (varies with content length and active detectors).
+Pricing: free tier = 10,000 requests/month (up to 8K tokens per prompt).
+Enterprise pricing is custom/contact-sales.
+
+*** Licensing
+
+Commercial (SaaS + self-hosted enterprise).
+
+** 5. Rebuff (Protect AI)
+
+*** Architecture: Embedded library (Python)
+
+Rebuff was a self-hardening prompt injection detection framework using
+four layered defenses.  *Archived May 2025 -- no longer maintained.*
+
+*** Detection Layers
+
+1. Heuristic analysis (regex-based pattern matching)
+2. LLM-based detection (dedicated classifier LLM)
+3. Vector similarity (embeddings of known attacks in VectorDB)
+4. Canary tokens (detect prompt leakage)
+
+*** Tool Output Filtering
+
+No tool output filtering.  Rebuff focused exclusively on prompt injection
+detection for input screening.
+
+*** Streaming Support
+
+No streaming support.
+
+*** Token Cost Overhead
+
+One LLM inference + one embedding lookup per prompt.  The vector similarity
+check adds ~50-100ms depending on the vector database backend.
+
+*** Licensing
+
+Open source (Apache 2.0).  *Archived.*  Recommended alternatives: LLM Guard
+(open source), Lakera Guard (commercial), NeMo Guardrails (NVIDIA).
+
+** 6. Azure AI Content Safety
+
+*** Architecture: Cloud API + Gateway policy
+
+Azure AI Content Safety provides cloud-hosted content moderation APIs
+integrated into the Azure AI Foundry platform.  Guardrails can be applied
+at the API gateway level via =llm-content-safety= policy elements (GA since
+April 2025).
+
+*** Capabilities
+
+- Text and image content moderation (4 severity levels)
+- Prompt shield (jailbreak + indirect injection detection)
+- Groundedness detection (hallucination)
+- Protected material detection (copyright)
+- Spotlighting (preview): tags trusted vs untrusted input segments
+- Custom categories via few-shot learning
+
+*** Tool Output Filtering
+
+Azure AI Foundry defines guardrails at multiple intervention points:
+- Input (user prompt)
+- Output (model response)
+- *Tool call* (preview): validates proposed tool actions and arguments
+- *Tool output*: validates data returned from tools
+
+This is one of the few systems that explicitly supports tool /output/
+guardrails as a first-class concept.
+
+*** Streaming Support
+
+Two modes for streaming:
+1. *Buffer-then-release*: waits for all guardrails to pass before releasing
+   content (safe default, adds latency)
+2. *Progressive with retraction*: tokens flow immediately; retraction events
+   emitted if a violation is detected mid-stream
+
+Additionally, asynchronous mode runs filters in parallel with LLM streaming,
+recommended for production.  This is the most practical streaming guardrail
+approach for user-facing applications.
+
+*** Token Cost Overhead
+
+Azure AI Content Safety pricing is per-1000-text-records.  Typical latency
+50-200ms per moderation call.  The spotlighting feature adds token overhead
+for input tagging (~10-20% input token increase).
+
+*** Licensing
+
+Commercial (Azure consumption-based pricing).
+
+** 7. AWS Bedrock Guardrails
+
+*** Architecture: Cloud-native (managed service)
+
+AWS Bedrock Guardrails is a fully managed service integrated into Amazon
+Bedrock.  Guardrails are defined as versioned policies and applied to
+model invocations or independently via the =ApplyGuardrail= API.
+
+*** Capabilities
+
+- Content filters (hate, violence, sexual, misconduct -- 4 severity levels)
+- Denied topics (custom topic blockers)
+- Word/phrase filters
+- PII detection and masking (30+ entity types)
+- Contextual grounding checks (hallucination)
+- Code-aware guardrails (sensitive data in generated code)
+- Image content moderation
+
+*** Tool Output Filtering
+
+The =ApplyGuardrail= API is model-independent and can be called on any
+text at any point in the pipeline, including tool outputs.  This enables
+developers to apply guardrail policies to tool execution results explicitly.
+
+*** Streaming Support
+
+For streaming scenarios, guardrails are applied when enough tokens have
+accumulated rather than on every individual chunk.  This batched approach
+reduces overhead while maintaining coverage.
+
+*** Token Cost Overhead
+
+Pricing is per-1000-text-units (1 text unit = 1000 characters).
+Guardrail evaluation adds ~100-300ms latency.  No additional token cost
+to the LLM -- guardrails run on separate infrastructure.
+
+*** Licensing
+
+Commercial (AWS consumption-based pricing).  In 2026, AWS enabled
+centralized guardrail enforcement across AWS Organizations.
+
+** 8. Anthropic Constitutional AI / Claude
+
+*** Architecture: Model-intrinsic (training-time + inference-time)
+
+Anthropic's approach is fundamentally different: safety constraints are
+baked into the model during training via Constitutional AI (CAI) and
+reinforced at inference time via constitutional classifiers.
+
+*** Constitutional AI Framework
+
+Claude's constitution (published January 2026) establishes a 4-tier
+priority hierarchy:
+1. Safety (highest)
+2. Ethics
+3. Compliance
+4. Helpfulness (lowest)
+
+This is reason-based alignment: the model is trained to understand /why/
+certain behaviours are harmful, not just pattern-match against blocklists.
+
+*** Constitutional Classifiers
+
+A two-stage architecture:
+1. A lightweight probe examines Claude's internal activations on all traffic
+2. Suspicious exchanges are escalated to a more powerful classifier
+   that screens both sides of the conversation
+
+In red-team testing, no universal jailbreak was found against the next-generation
+constitutional classifiers.
+
+*** Tool Output Filtering
+
+Claude's safety training includes awareness of tool use risks, but the
+model itself does not filter tool execution results -- it relies on the
+calling application to implement tool output guardrails.  The OpenAI Agents
+SDK-compatible guardrail pattern (input/output/tool guardrails) is available
+via the Anthropic SDK.
+
+*** Streaming Support
+
+Constitutional AI operates at the token generation level, so safety is
+inherently streaming-compatible -- every generated token passes through the
+model's safety training.  There is no streaming guardrail gap for model-
+generated content.  However, this does NOT apply to tool outputs that are
+injected into the context.
+
+*** Token Cost Overhead
+
+Zero additional token cost -- safety is part of the base model inference.
+However, the safety training may slightly increase generation latency
+(estimated 1-5% throughput reduction) and can result in over-refusal
+on borderline queries.
+
+*** Licensing
+
+Proprietary (API-based).  No open-source safety layer.
+
+* Comparison Table
+
+| System | Architecture | Tool Output Guard | Streaming | Token Overhead | EU AI Act | License |
+|--------+--------------+-------------------+-----------+----------------+-----------+---------|
+| LiteLLM | Proxy/gateway | Tool call only (not results) | =during_call= + audit =post_call= | 0 (regex) to ~500 tok (LLM) | Yes (Art 5 templates) | MIT |
+| NeMo Guardrails | Embedded/microservice | Input + output validation | Chunked sliding window | 100-300ms, ~500-2000 tok/rail | Partial (custom rails) | Apache 2.0 |
+| Guardrails AI | Embedded library | Manual wiring required | Real-time fix-up | 1-3K tok/retry | No built-in | Apache 2.0 |
+| Lakera Guard | API (SaaS/container) | Advisory (call per step) | Not documented | <200ms/call | No built-in | Commercial |
+| Rebuff | Embedded library | None | None | ~1 LLM call + embedding | No | Apache 2.0 (archived) |
+| Azure Content Safety | Cloud API + gateway | First-class tool output | Buffer-then-release OR progressive+retraction | 50-200ms/call | Via custom categories | Commercial |
+| AWS Bedrock | Managed service | Via ApplyGuardrail API | Batched chunk validation | 100-300ms/eval | Via denied topics | Commercial |
+| Anthropic CAI | Model-intrinsic | Model-generated only | Inherent (training-time) | 0 (built into model) | Training-level | Proprietary |
+
+* Key Questions Answered
+
+** Q1: Is proxy-only (LiteLLM) sufficient for tool-calling agents?
+
+*No.*  Proxy-only guardrails are necessary but insufficient.
+
+LiteLLM guardrails operate at the API gateway level: they screen the
+/prompt/ sent to the LLM and the /response/ returned by the LLM.  For a
+tool-calling agent like sage, the critical gap is:
+
+1. *Tool execution results are never seen by the proxy.*  When sage calls
+   =read_file= and the file contains PII, that data enters the context
+   window without passing through LiteLLM guardrails.  The proxy only
+   sees the /next/ prompt that includes the tool result.
+
+2. *Tool argument validation is one-directional.*  LiteLLM's Tool
+   Permission Guardrail validates which tools the LLM proposes to call,
+   but cannot validate the /results/ those tools return.
+
+3. *Indirect prompt injection via tool outputs.*  An adversary can embed
+   instructions in data returned by tools (e.g., a web page containing
+   "Ignore previous instructions and...").  The proxy cannot detect this
+   because the injection arrives via tool execution, not via the user prompt.
+
+The recommended architecture for sage v1:
+
+#+begin_example
+User Input
+  |
+  v
+[LiteLLM proxy: pre_call guardrails]  <-- input screening
+  |
+  v
+[LLM generates response / tool calls]
+  |
+  v
+[LiteLLM proxy: post_call guardrails] <-- output screening
+  |
+  v
+[sage agent: tool execution]
+  |
+  v
+[sage agent: tool output guardrails]   <-- NEW: agent-side screening
+  |
+  v
+[sage agent: inject result into context]
+  |
+  v
+[Next LLM call via proxy...]
+#+end_example
+
+** Q2: What is the token cost of guardrail enforcement per request?
+
+Token costs vary dramatically by approach:
+
+| Approach | Additional Tokens | Additional Latency | Cost per 1M requests |
+|----------+-------------------+--------------------+----------------------|
+| Regex/keyword (LiteLLM built-in) | 0 | <0.1ms | $0 |
+| LLM-based moderation (OpenAI mod) | 100-500 | 50-200ms | ~$0.15-$0.75 |
+| NeMo Colang rail (1 rail) | 500-2000 | 100-300ms | ~$0.75-$3.00 |
+| Guardrails AI (1 validator + retry) | 1000-4000 | 200-500ms | ~$1.50-$6.00 |
+| Lakera Guard (API call) | 0 (external) | <200ms | Free/enterprise |
+| Azure Content Safety | 0 (external) | 50-200ms | ~$1.00/1K records |
+| AWS Bedrock Guardrails | 0 (external) | 100-300ms | ~$0.75/1K text-units |
+| Constitutional AI (Anthropic) | 0 (built-in) | ~0 | $0 (included in model cost) |
+
+For sage's use case (local Ollama inference, low request volume), the
+cost-optimal stack is:
+- LiteLLM regex guardrails for PII redaction (zero cost)
+- Agent-side regex/pattern validation for tool outputs (zero cost)
+- LiteLLM keyword guardrails for EU AI Act Article 5 (zero cost)
+- Optional: LLM-based moderation for high-risk tool outputs only
+
+** Q3: Do any frameworks handle the streaming guardrail gap?
+
+Yes, three systems now address streaming guardrails with different strategies:
+
+*** NVIDIA NeMo Guardrails (most sophisticated)
+
+Chunked sliding-window validation with configurable =chunk_size= and
+=context_size= parameters.  Violations spanning multiple chunks are
+detected.  =stream_first= mode preserves low TTFT.  Open source.
+
+*** Azure AI Content Safety (most practical for production)
+
+Two modes: buffer-then-release (safe default) and progressive-with-retraction
+(tokens flow immediately, retraction events on violation).  Async mode runs
+filters in parallel with streaming.  Commercial.
+
+*** AWS Bedrock Guardrails (batched approach)
+
+Guardrails apply when sufficient tokens accumulate, not per-chunk.
+Simpler but less granular than NeMo or Azure.  Commercial.
+
+*** LiteLLM (partial)
+
+=during_call= hook can inspect chunks in parallel.  =post_call= on streaming
+is audit-only (assembles full response after delivery).  Open source.
+
+*** sage's streaming gap (known issue)
+
+sage currently disables streaming for the OpenAI provider (SSE format
+mismatch).  When streaming IS used (Ollama provider), guardrail header
+capture works only for non-streaming responses.  For sage v1, the
+recommended approach is:
+
+1. Fix SSE parsing for OpenAI provider streaming
+2. Implement agent-side chunk buffering for tool output validation
+3. Use LiteLLM =during_call= for proxy-level streaming moderation
+4. Consider NeMo sliding-window pattern for agent-side implementation
+
+** Q4: What is the state of the art for EU AI Act compliance in guardrail tooling?
+
+*** Enforcement Timeline
+
+- February 2025: Article 5 (prohibited practices) became applicable
+- August 2025: Article 5 became enforceable by Member State authorities
+- Penalties: up to 35M EUR or 7% of global annual turnover
+
+*** Purpose-built Article 5 Guardrails
+
+Two commercial offerings have dedicated EU AI Act guardrail packages:
+
+1. *CalypsoAI / F5*: EU AI Act Guardrail package with real-time enforcement
+   of all Article 5 prohibited behaviours, structured incident logging
+   for audit readiness.
+
+2. *DynamoAI (DynamoGuard)*: Foundation Guardrails for Article 5 with
+   pre-built, validated input/output guardrails covering manipulation,
+   social scoring, criminal risk assessment, biometric categorization,
+   and emotion recognition.
+
+*** LiteLLM's Approach (what sage uses)
+
+LiteLLM provides EU AI Act Article 5 policy templates via the admin UI
+(10 guardrails: 5 English + 5 French).  These are keyword-based
+=litellm_content_filter= rules operating in =pre_call= mode.
+
+*Limitation discovered in testing (see 20260412-guardrails-testing.org):*
+keyword patterns do not reliably match natural-language prompts.  The
+keywords are topic-level ("social scoring") but prompts are phrased as
+requests ("build a citizen trustworthiness scoring system").  Either
+expanded keyword lists or NLP-based filters are needed.
+
+*** State of the Art
+
+The state of the art for EU AI Act compliance is a /layered/ approach:
+
+1. *Model-intrinsic safety* (Anthropic CAI, OpenAI system cards): training-time
+   alignment against prohibited practices
+2. *Proxy-level keyword/regex filters* (LiteLLM): catch obvious violations cheaply
+3. *NLP-based classifiers* (CalypsoAI, DynamoGuard, custom NeMo rails): detect
+   natural-language variants of prohibited requests
+4. *Audit logging*: structured incident logs for regulatory review
+
+No single tool provides complete Article 5 coverage.  The keyword-based
+approach (what sage currently uses) catches only literal matches and is
+insufficient for compliance.
+
+* Recommendation for guile-sage v1
+
+** Architecture: Layered Guardrails
+
+#+begin_example
+Layer 1: LiteLLM Proxy (already deployed)
+  - pre_call: EU AI Act keyword filters, PII regex redaction
+  - during_call: streaming chunk moderation (when enabled)
+  - post_call: audit logging of full responses
+
+Layer 2: Agent-Side Input Validation (new for v1)
+  - Tool argument screening: path traversal, injection patterns
+  - Tool permission checking: safe/unsafe tool classification (existing)
+
+Layer 3: Agent-Side Output Validation (new for v1)
+  - Tool result screening: PII regex on tool outputs before context injection
+  - Indirect injection detection: pattern-match for "ignore instructions" in tool results
+  - Size limits: truncate large tool outputs to prevent context blowout (existing)
+
+Layer 4: Model-Intrinsic Safety (provider-dependent)
+  - Anthropic CAI: strongest inherent safety
+  - Gemini: strong safety filters (sometimes over-refuses)
+  - Ollama/local: no intrinsic safety -- layers 1-3 are critical
+#+end_example
+
+** Implementation Priority
+
+| Priority | Feature | Effort | Impact |
+|----------+---------+--------+--------|
+| P0 | Tool output PII screening (regex, agent-side) | 1 day | Blocks PII leakage via =read_file=, =run_tests= |
+| P0 | Indirect injection detection in tool results | 1 day | Blocks prompt injection via tool outputs |
+| P1 | Fix streaming for OpenAI provider (SSE parsing) | 2 days | Enables =during_call= proxy guardrails on streams |
+| P1 | Upgrade EU AI Act guardrails to NLP classifier | 3 days | Compliance: catches natural-language variants |
+| P2 | NeMo-style chunk buffering for agent-side streaming | 3 days | Granular streaming validation |
+| P2 | Guardrail metrics in telemetry (block count, type) | 1 day | Observability: Prometheus counters |
+| P3 | Configurable guardrail pipeline (=config.scm= driven) | 2 days | User can enable/disable guardrails per use case |
+
+** What NOT to Build
+
+- *Do not embed NeMo Guardrails directly*: it is Python-only and would require
+  a subprocess or sidecar.  Use its /patterns/ (sliding window, Colang-style
+  flow control) but implement in Scheme.
+- *Do not pay for Lakera/Azure/Bedrock at this stage*: sage's request volume
+  does not justify commercial API costs.  Regex + LiteLLM keyword filters +
+  agent-side screening cover the 90% case.
+- *Do not build an LLM-based guardrail classifier*: the token cost per request
+  is prohibitive for a local-first tool.  Revisit when sage supports paid
+  API-only mode.
+
+** Minimal v1 Agent-Side Guardrail (Scheme sketch)
+
+#+begin_src scheme
+;;; guardrail.scm — Agent-side tool output screening
+
+;; PII patterns (mirrors LiteLLM proxy patterns for defense-in-depth)
+(define *pii-patterns*
+  '(("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}" . "email")
+    ("\\bAKIA[0-9A-Z]{16}\\b" . "aws-key")
+    ("\\bsk-[a-zA-Z0-9]{20,}\\b" . "api-key")
+    ("\\b\\d{3}-\\d{2}-\\d{4}\\b" . "ssn")
+    ("\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b" . "credit-card")))
+
+;; Indirect injection patterns
+(define *injection-patterns*
+  '("ignore.*(?:previous|above|prior).*instructions"
+    "disregard.*(?:system|initial).*prompt"
+    "you are now"
+    "new instructions:"))
+
+(define (screen-tool-output text)
+  "Screen tool output for PII and injection. Returns (clean? . warnings)."
+  (let ((pii-hits (filter-map
+                   (lambda (pat)
+                     (and (string-match (car pat) text) (cdr pat)))
+                   *pii-patterns*))
+        (injection-hits (filter
+                        (lambda (pat) (string-match pat text))
+                        *injection-patterns*)))
+    (cons (and (null? pii-hits) (null? injection-hits))
+          (append (map (lambda (h) (format #f "PII detected: ~a" h)) pii-hits)
+                  (map (lambda (_) "Possible indirect prompt injection") injection-hits)))))
+#+end_src
+
+* Sources
+
+- [[https://docs.litellm.ai/docs/proxy/guardrails/quick_start][LiteLLM Guardrails Quick Start]]
+- [[https://docs.litellm.ai/docs/proxy/guardrails/tool_permission][LiteLLM Tool Permission Guardrail]]
+- [[https://docs.litellm.ai/docs/proxy/guardrails/custom_guardrail][LiteLLM Custom Guardrail (Hooks)]]
+- [[https://docs.nvidia.com/nemo/guardrails/latest/about/overview.html][NeMo Guardrails Overview]]
+- [[https://developer.nvidia.com/blog/stream-smarter-and-safer-learn-how-nvidia-nemo-guardrails-enhance-llm-output-streaming/][NeMo Guardrails Streaming Output (NVIDIA Blog)]]
+- [[https://github.com/NVIDIA-NeMo/Guardrails][NeMo Guardrails GitHub]]
+- [[https://guardrailsai.com/docs][Guardrails AI Documentation]]
+- [[https://github.com/guardrails-ai/guardrails][Guardrails AI GitHub]]
+- [[https://docs.lakera.ai/guard][Lakera Guard Documentation]]
+- [[https://www.lakera.ai/lakera-guard][Lakera Guard Product Page]]
+- [[https://github.com/protectai/rebuff][Rebuff GitHub (Archived)]]
+- [[https://learn.microsoft.com/en-us/azure/ai-services/content-safety/][Azure AI Content Safety Documentation]]
+- [[https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html][AWS Bedrock Guardrails Documentation]]
+- [[https://www.anthropic.com/research/constitutional-classifiers][Anthropic Constitutional Classifiers]]
+- [[https://www.anthropic.com/research/next-generation-constitutional-classifiers][Anthropic Next-Gen Constitutional Classifiers]]
+- [[https://artificialintelligenceact.eu/article/5/][EU AI Act Article 5]]
+- [[https://www.dynamo.ai/blog/foundation-guardrails-for-the-eu-ai-act][DynamoAI Foundation Guardrails for EU AI Act]]
+- [[https://www.f5.com/company/blog/eu-ai-act-compliance-just-got-easier][CalypsoAI/F5 EU AI Act Compliance]]
+- [[https://guardrails.openai.com/][OpenAI Guardrails]]
+- [[https://openai.github.io/openai-agents-python/guardrails/][OpenAI Agents SDK Guardrails]]
+- [[https://developer.nvidia.com/blog/measuring-the-effectiveness-and-performance-of-ai-guardrails-in-generative-ai-applications/][NVIDIA: Measuring Guardrail Effectiveness and Performance]]
+- [[https://toolhalla.ai/blog/ai-agent-guardrails-io-validation-2026][AI Agent Guardrails & Output Validation in 2026 (ToolHalla)]]
