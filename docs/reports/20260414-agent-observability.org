@@ -1,0 +1,581 @@
+#+TITLE: Agent Observability Survey: Platforms, Standards, and Recommendations for guile-sage
+#+AUTHOR: Aidan Pace (aygp-dr)
+#+DATE: 2026-04-14
+#+OPTIONS: toc:3 num:t
+
+* Executive Summary
+
+This report surveys eight observability platforms and two open standards
+for AI agent/LLM systems, evaluates guile-sage's current 6-counter OTLP
+model against industry practice, and makes concrete recommendations for
+the v0.7/v0.8 telemetry roadmap.
+
+Key findings:
+
+1. *guile-sage's counter-only model is unusually lean.* Every surveyed
+   platform uses traces/spans as the primary data model. Counters alone
+   cannot answer "why was this turn slow?" or "which tool call failed in
+   a 4-step chain?"
+
+2. *The OpenTelemetry GenAI semantic conventions (v1.37+) are the
+   emerging lingua franca.* Datadog, Arize Phoenix, Traceloop, and the
+   Envoy AI Gateway all consume OTEL GenAI spans natively. Adopting
+   these conventions gives guile-sage interoperability for free.
+
+3. *OpenInference is complementary, not competing.* It defines span
+   kinds (AGENT, TOOL, CHAIN, LLM) that map cleanly onto guile-sage's
+   architecture but rides on OTEL transport. It is a good conceptual
+   model even if we emit raw OTEL.
+
+4. *No platform supports Guile/Scheme natively.* All SDKs are Python-first,
+   with TypeScript, Go, and Ruby as secondary. guile-sage's approach of
+   emitting raw OTLP/HTTP JSON is the correct strategy for a non-mainstream
+   language runtime.
+
+5. *Cost tracking is universally derived from token counts x pricing
+   tables.* Passing cost=0 for local Ollama is correct; the missing
+   piece is wiring real cost when using LiteLLM/OpenAI providers.
+
+* Platform Survey
+
+** 1. OpenTelemetry GenAI Semantic Conventions
+
+- *Status:* Development (not yet stable), actively maintained under the
+  =open-telemetry/semantic-conventions= repo.
+- *Scope:* Defines traces, metrics, and events for generative AI operations.
+- *Trace model:* Full OTEL spans. Operation types: =chat=, =embeddings=,
+  =execute_tool=, =create_agent=, =invoke_agent=, =retrieval=, =text_completion=.
+- *Metrics (5 defined):*
+  | Metric                                | Instrument | Unit      |
+  |---------------------------------------+------------+-----------|
+  | =gen_ai.client.token.usage=           | Histogram  | ={token}= |
+  | =gen_ai.client.operation.duration=    | Histogram  | =s=       |
+  | =gen_ai.server.request.duration=      | Histogram  | =s=       |
+  | =gen_ai.server.time_per_output_token= | Histogram  | =s=       |
+  | =gen_ai.server.time_to_first_token=   | Histogram  | =s=       |
+- *Key span attributes:* =gen_ai.operation.name=, =gen_ai.provider.name=,
+  =gen_ai.request.model=, =gen_ai.response.model=,
+  =gen_ai.usage.input_tokens=, =gen_ai.usage.output_tokens=,
+  =gen_ai.tool.name=, =gen_ai.tool.call.id=, =gen_ai.conversation.id=.
+- *Agent spans (new, 2025):* =create_agent= and =invoke_agent= operations with
+  =gen_ai.agent.id=, =gen_ai.agent.name=, =gen_ai.agent.description= attributes.
+- *Agentic systems proposal (Issue #2664):* Defines conventions for tasks,
+  actions, agents, teams, artifacts, and memory -- not yet merged.
+- *Cost tracking:* Not built into the spec. Left to backends (Prometheus
+  recording rules, Grafana transforms, or application-side counters).
+- *Language support:* Language-agnostic by design. Any language that can emit
+  OTLP/HTTP JSON or gRPC is a first-class citizen.
+- *License:* Apache 2.0. The conventions are a spec; no runtime.
+- *Self-hosted:* N/A (it is a wire protocol consumed by collectors).
+
+*** Relevance to guile-sage
+
+The OTEL GenAI conventions are the most natural fit. guile-sage already
+emits OTLP/HTTP JSON, so adopting the standard attribute names
+(=gen_ai.usage.input_tokens= instead of =type=input=) is a naming
+change, not an architectural one. The histogram-based =gen_ai.client.token.usage=
+metric is more informative than a cumulative counter because it captures
+distribution, but cumulative counters remain valid for Prometheus-style
+dashboards.
+
+** 2. LangSmith (LangChain)
+
+- *What it instruments:* Every chain step, LLM call, tool invocation, retriever
+  query, and embedding call. Captures inputs, outputs, latency, token counts,
+  cost, error traces, and feedback scores.
+- *Trace model:* Proprietary nested run tree (parent_run_id/child_run_id), not
+  OTEL spans natively. Added OpenTelemetry export support in 2025.
+- *Cost tracking:* Automatic per-model pricing lookup from a built-in table.
+  Custom dashboards show cost by model, user, and time window.
+- *Granularity:* Per-step within a chain. Each LLM call, tool call, and
+  retriever call is a separate "run" (analogous to a span).
+- *Language support:* Python-first, TypeScript SDK, REST API. No Guile/Scheme.
+- *Deployment:* SaaS (managed cloud), BYOC, and self-hosted options.
+- *License:* Proprietary (free tier available).
+- *Eval:* Integrated evaluation framework with LLM-as-judge, human annotation,
+  dataset management, and CI/CD integration (pytest, Vitest).
+
+*** Relevance to guile-sage
+
+LangSmith's run tree model is the closest analogy to guile-sage's
+=execute-tool-chain= loop. Each iteration of the tool chain loop would
+be a child run. The key takeaway is that per-tool-call granularity is
+standard practice, not over-instrumentation.
+
+** 3. Weights & Biases Weave
+
+- *What it instruments:* Any function decorated with =weave.op=. Automatically
+  captures inputs, outputs, latency, cost, token counts. Organizes into trace
+  trees with aggregated metrics at every level.
+- *Trace model:* Custom trace tree with automatic parent-child nesting. Not
+  OTEL-native, but exports are available.
+- *Cost tracking:* Automatic cost calculation based on model pricing tables.
+  Aggregated at every level of the trace tree.
+- *Granularity:* Per-function-call. Any decorated function becomes a span.
+- *Language support:* Python-first, TypeScript. No Guile/Scheme.
+- *Deployment:* SaaS (wandb.ai). Self-hosted W&B Server available for enterprise.
+- *License:* Proprietary (free tier: 100K spans/month in Weave).
+- *Notable:* Chat view for visualizing conversations; code/markdown/text
+  display modes for large string outputs.
+
+*** Relevance to guile-sage
+
+Weave's "any function is a span" model is aspirational but impractical
+for guile-sage given the lack of a Guile SDK. The trace-tree aggregation
+pattern (cost/latency rolled up from leaves to root) is worth emulating
+in our Grafana dashboards even if we use flat counters underneath.
+
+** 4. Helicone
+
+- *What it instruments:* Every LLM API request passing through the proxy.
+  Captures request/response bodies, token counts, latency, cost, cache hits,
+  rate limit events, and user metadata.
+- *Trace model:* Request-centric (each API call is a log entry with session
+  grouping). Added trace/session views for multi-step agents. Not OTEL-native.
+- *Cost tracking:* Automatic from token counts x pricing tables. Semantic
+  caching reduces actual cost. Cost shown per-request and aggregated.
+- *Granularity:* Per-LLM-API-call. Does not instrument tool execution or
+  retrieval steps within the application.
+- *Language support:* Fully language-agnostic by design -- it is a proxy.
+  Change the base URL, add a =Helicone-Auth= header, done. Works with any
+  language that can make HTTP calls.
+- *Deployment:* SaaS, self-hosted (single Docker command).
+- *License:* Open source (GitHub), with managed SaaS.
+- *Scale:* 2B+ LLM interactions processed; 50-80ms average proxy overhead.
+
+*** Relevance to guile-sage
+
+Helicone's proxy model is the most directly applicable to guile-sage
+because it requires zero SDK integration. If guile-sage routed Ollama/
+OpenAI calls through a Helicone proxy, it would get request-level
+observability for free. However, it would not capture tool execution or
+MCP calls -- only the LLM API boundary. This could complement our
+OTLP counters rather than replace them.
+
+** 5. Braintrust
+
+- *What it instruments:* LLM calls, tool invocations, retrieval steps, and
+  custom spans. Full decision-path reconstruction for agent interactions.
+- *Trace model:* OTEL-compatible spans. Custom high-performance storage
+  (Brainstore) optimized for span queries. Tag-based cost attribution.
+- *Cost tracking:* Real-time per-run, per-user, per-feature cost tracking.
+  Semantic caching via AI Proxy reduces costs further.
+- *Granularity:* Per-span (each LLM call, tool call, retrieval step).
+- *Language support:* Python, TypeScript (native). REST API for others.
+  13+ framework integrations (LangChain, LlamaIndex, OpenAI Agents SDK,
+  Anthropic Claude Agent SDK, etc.).
+- *Deployment:* SaaS with free tier (1M spans/month). Pro at $249/month.
+- *License:* Proprietary.
+- *Notable:* AI-assisted prompt optimization ("Loop"), experiments against
+  real datasets, CI/CD integration.
+
+*** Relevance to guile-sage
+
+Braintrust's approach of combining an AI gateway (for routing + cost
+attribution) with span-level tracing is architecturally close to
+guile-sage's LiteLLM proxy + OTLP setup. The key gap is that guile-sage
+does not emit spans, only counters.
+
+** 6. Arize Phoenix
+
+- *What it instruments:* LLM calls, embeddings, retrieval, tool execution,
+  agent loops, guardrails, evaluations. Full trace visualization.
+- *Trace model:* OpenTelemetry-native. Accepts OTLP traces. Uses
+  OpenInference semantic conventions for span kinds and attributes.
+- *Cost tracking:* Derived from token counts. Integrated with LiteLLM
+  cost reporting.
+- *Granularity:* Per-span. Supports LLM, CHAIN, TOOL, AGENT, RETRIEVER,
+  RERANKER, GUARDRAIL, EVALUATOR, and PROMPT span kinds.
+- *Language support:* Python-first, TypeScript. Accepts any OTLP traces
+  (language-agnostic at the collector level).
+- *Deployment:* Fully open source, self-hostable. No feature gates.
+- *License:* Apache 2.0 (fully open source).
+- *Notable:* Prompt management module (April 2025), async workers,
+  scalable storage adapters, plugin system for custom eval judges.
+
+*** Relevance to guile-sage
+
+Phoenix is the most directly compatible platform with guile-sage's
+existing setup. It accepts OTLP/HTTP, is fully open source, and
+self-hostable. If guile-sage emitted OTEL spans (not just counters),
+Phoenix could visualize the full tool-chain execution as a trace tree.
+It could run alongside the existing Prometheus/Grafana stack on nexus.
+
+** 7. OpenInference
+
+- *What it instruments:* Defines a semantic vocabulary, not an
+  instrumentation library. Specifies how to describe LLM operations,
+  tool calls, retrieval, embeddings, agents, guardrails, and evaluators
+  using OpenTelemetry span attributes.
+- *Trace model:* OTEL spans with the required =openinference.span.kind=
+  attribute. 10 span kinds defined:
+  | Span Kind   | guile-sage equivalent     |
+  |-------------+---------------------------|
+  | =AGENT=     | REPL session / agent loop |
+  | =LLM=       | ollama-chat / provider-chat |
+  | =TOOL=      | execute-tool              |
+  | =CHAIN=     | execute-tool-chain loop   |
+  | =RETRIEVER= | (not yet implemented)     |
+  | =GUARDRAIL= | LiteLLM guardrail check   |
+  | =EMBEDDING= | (not yet implemented)     |
+  | =RERANKER=  | (not yet implemented)     |
+  | =EVALUATOR= | (not yet implemented)     |
+  | =PROMPT=    | system prompt loading      |
+- *Key attributes:*
+  - =llm.token_count.prompt=, =llm.token_count.completion=, =llm.token_count.total=
+  - =llm.cost.prompt=, =llm.cost.completion=, =llm.cost.total=
+  - =tool.name=, =tool.description=, =tool_call.function.name=,
+    =tool_call.function.arguments=
+  - =input.value=, =output.value=
+- *Cost tracking:* Explicit =llm.cost.*= attributes on LLM spans.
+- *Language support:* Python, TypeScript (instrumentation packages).
+  Java package exists. Language-agnostic at the spec level.
+- *License:* Apache 2.0 (maintained by Arize AI).
+- *Adoption:* Arize Phoenix, Envoy AI Gateway, BeeAI, HuggingFace
+  SmolAgents, VictoriaMetrics.
+
+*** Relevance to guile-sage
+
+OpenInference provides the best conceptual mapping for guile-sage's
+architecture. The span kinds (AGENT, LLM, TOOL, CHAIN) match exactly to
+guile-sage's module boundaries. Even without adopting the full spec,
+using its span kind taxonomy as a design guide for future trace emission
+is valuable.
+
+** 8. Datadog LLM Observability
+
+- *What it instruments:* LLM calls, tool invocations, retrieval steps,
+  embedding calls, agent workflows. Auto-instruments OpenAI, Anthropic,
+  LangChain, AWS Bedrock.
+- *Trace model:* Full OTEL spans (GenAI semantic conventions v1.37+
+  natively supported). Also has its own SDK with =@workflow=, =@task=,
+  =@tool=, =@agent= decorators for Python.
+- *Cost tracking:* Automatic cost estimation from public pricing tables +
+  token counts on LLM/embedding spans. Cost dashboard with time-series
+  tracking and anomaly detection.
+- *Granularity:* Per-span. Each LLM call, tool invocation, and retrieval
+  step is a distinct span within a trace.
+- *Language support:* Python SDK primary. OTEL GenAI spans accepted from
+  any language via the Datadog Agent or OTLP collector.
+- *Deployment:* SaaS only.
+- *License:* Proprietary (commercial).
+- *Notable:* LLM Experiments for prompt A/B testing against production
+  data. Security evaluations built in.
+
+*** Relevance to guile-sage
+
+Datadog's native support for OTEL GenAI conventions validates our
+OTLP-first approach. If we ever needed enterprise observability, the
+same spans we send to the local OTel Collector could be forwarded to
+Datadog without code changes.
+
+** Supplementary: Langfuse and Traceloop/OpenLLMetry
+
+Two additional platforms worth noting:
+
+- *Langfuse:* Open source (MIT), self-hostable, OTEL-compatible, with
+  full trace visualization, cost tracking (integrates with LiteLLM cost
+  reporting), and evaluation. Infrastructure: Postgres + ClickHouse +
+  Redis + S3. A strong open-source alternative to LangSmith.
+
+- *Traceloop/OpenLLMetry:* Open source (Apache 2.0) OTEL instrumentation
+  libraries for LLMs. Supports Python, TypeScript, Go, and Ruby. Follows
+  OTEL GenAI semantic conventions. Has specific Ollama instrumentation.
+
+* Comparative Analysis
+
+** What They All Instrument
+
+| Signal             | OTEL | LangSmith | Weave | Helicone | Braintrust | Phoenix | Datadog |
+|--------------------+------+-----------+-------+----------+------------+---------+---------|
+| Token counts       | Y    | Y         | Y     | Y        | Y          | Y       | Y       |
+| Latency            | Y    | Y         | Y     | Y        | Y          | Y       | Y       |
+| Tool calls         | Y    | Y         | Y     | N*       | Y          | Y       | Y       |
+| Chain/agent steps  | Y    | Y         | Y     | N*       | Y          | Y       | Y       |
+| Error tracking     | Y    | Y         | Y     | Y        | Y          | Y       | Y       |
+| Cost               | N**  | Y         | Y     | Y        | Y          | Y       | Y       |
+| Prompt/response    | Y    | Y         | Y     | Y        | Y          | Y       | Y       |
+| Evals              | N    | Y         | Y     | N        | Y          | Y       | Y       |
+
+=*= Helicone only sees LLM API boundary, not internal tool/chain steps.
+=**= OTEL defines the token histogram; cost is application-side or backend-derived.
+
+** Trace/Span Model
+
+Every platform except Helicone uses a hierarchical trace/span model:
+
+- A *trace* represents a complete user interaction (one REPL turn in
+  guile-sage terms).
+- *Spans* within the trace represent individual operations: the LLM call,
+  each tool execution, the MCP call, etc.
+- Parent-child relationships show causality: the LLM call is the parent
+  of the tool calls it requested.
+
+guile-sage currently has *no span model* -- only flat cumulative counters.
+
+** Language Support Summary
+
+| Platform       | Python | TypeScript | Go  | Ruby | Guile/Scheme | OTLP/HTTP (any lang) |
+|----------------+--------+------------+-----+------+--------------+----------------------|
+| OTEL GenAI     | Y      | Y          | Y   | N    | N            | *Y*                  |
+| LangSmith      | Y      | Y          | N   | N    | N            | N                    |
+| Weave          | Y      | Y          | N   | N    | N            | N                    |
+| Helicone       | proxy  | proxy      | proxy | proxy | *proxy*   | N/A (proxy)          |
+| Braintrust     | Y      | Y          | N   | N    | N            | N                    |
+| Phoenix        | Y      | Y          | N   | N    | N            | *Y*                  |
+| OpenInference  | Y      | Y          | N   | Y    | N            | *Y*                  |
+| Datadog        | Y      | N          | N   | N    | N            | *Y*                  |
+| OpenLLMetry    | Y      | Y          | Y   | Y    | N            | *Y*                  |
+
+The "OTLP/HTTP (any lang)" column is guile-sage's path. We are already
+on it.
+
+* Analysis: guile-sage's Current Telemetry
+
+** Current State: 6 Counters
+
+| Counter                                | Labels                          | Where emitted        |
+|----------------------------------------+---------------------------------+----------------------|
+| =guile_sage.session.count=             | =session_id=                    | repl-start           |
+| =guile_sage.token.usage=               | =model=, =type=[input\vert{}output]= | every chat turn (x2) |
+| =guile_sage.cost.usage=                | =model=                         | every chat turn      |
+| =guile_sage.active.time=               | =type=[cli\vert{}user]=         | REPL loop timing     |
+| =guile_sage.code_edit.tool_decision=   | =tool_name=, =decision=[accept\vert{}reject]= | execute-tool |
+| =guile_sage.mcp.tool_call=             | =server=, =tool_name=           | mcp-call-tool        |
+
+These counters answer:
+- How many sessions ran? (session.count)
+- How many tokens consumed per model? (token.usage)
+- How many tool calls were accepted vs rejected? (tool_decision)
+- How many MCP calls per server/tool? (mcp.tool_call)
+- How long was the user active? (active.time)
+
+** What the Counters Cannot Answer
+
+1. *Why was this specific turn slow?* No per-turn latency. The
+   =active.time= counter tracks wall-clock session time, not per-turn
+   LLM response time.
+
+2. *What happened in a multi-step tool chain?* The =tool_decision=
+   counter counts accept/reject globally, but cannot show the sequence:
+   "LLM requested read_file, then search_files, then write_file."
+
+3. *Which tool call failed?* Errors in =execute-tool= are logged but not
+   counted. There is no =tool_decision=error= label.
+
+4. *What was the cost of a single turn?* The =cost.usage= counter always
+   emits 0 for Ollama. For LiteLLM, the response cost is not extracted.
+
+5. *How does latency break down?* No distinction between time-to-first-token,
+   LLM inference time, tool execution time, and MCP round-trip time.
+
+6. *What was the context utilization?* Context window warnings fire at 75%/
+   90%/95% but are not surfaced as metrics.
+
+* Recommendations
+
+** Q1: Is our 6-counter OTLP model sufficient?
+
+*No, but it is a solid foundation.* The 6 counters cover the "what
+happened" dimension (tokens, cost, sessions, tool decisions) but miss
+the "how it happened" dimension (latency breakdown, causal ordering,
+error attribution). The industry consensus is that traces/spans are
+essential for debugging agent systems.
+
+*Recommendation:* Keep the counters for dashboard aggregates. Add traces
+for debugging and per-turn visibility. The two are complementary in OTEL.
+
+** Q2: Do we need traces/spans for tool chains?
+
+*Yes.* A tool chain (execute-tool-chain in repl.scm) is exactly the use
+case traces were designed for. The recommended span hierarchy:
+
+#+BEGIN_SRC
+Trace: session-{id}
+  Span: chat_turn (gen_ai.operation.name=chat)
+    Span: llm_call (gen_ai.operation.name=chat, gen_ai.provider.name=ollama)
+      [gen_ai.usage.input_tokens, gen_ai.usage.output_tokens]
+    Span: tool_call (gen_ai.operation.name=execute_tool)
+      [gen_ai.tool.name=read_file, duration]
+    Span: tool_call (gen_ai.operation.name=execute_tool)
+      [gen_ai.tool.name=write_file, duration]
+    Span: llm_followup (gen_ai.operation.name=chat)
+      [gen_ai.usage.input_tokens, gen_ai.usage.output_tokens]
+    Span: mcp_call (gen_ai.operation.name=execute_tool)
+      [gen_ai.tool.name=skills-hub/review, server=skills-hub]
+#+END_SRC
+
+This maps directly to both OTEL GenAI conventions and OpenInference
+span kinds (AGENT > LLM + TOOL + CHAIN).
+
+** Q3: What is the right granularity?
+
+*Per-turn for metrics, per-operation for traces.*
+
+- *Metrics (counters/histograms):* Emit at the chat-turn boundary, as we
+  do today. This gives dashboard-friendly aggregates without high
+  cardinality.
+- *Traces (spans):* Emit per-operation (each LLM call, tool call, MCP call).
+  This gives debuggability. Traces can be sampled (e.g., 10% in production,
+  100% in development) to control volume.
+
+Per-token granularity is never needed for observability. It is only
+relevant for streaming UX (time-to-first-token), which should be a
+histogram metric, not a per-token span.
+
+** Q4: How do other systems handle cost-of-observability?
+
+Three strategies observed:
+
+1. *Content in events, not attributes.* OTEL GenAI conventions put
+   prompt/response content in span events (=gen_ai.input.messages=,
+   =gen_ai.output.messages=), which can be filtered or dropped at the
+   Collector level without losing structural trace data. This is the
+   biggest cost lever.
+
+2. *Tail-based sampling.* Keep 100% of error traces and a sample of
+   successful ones. The OTel Collector's tail sampling processor handles
+   this. AI workloads generate 10-50x more telemetry than traditional
+   services, making sampling essential at scale.
+
+3. *Proxy overhead is minimal.* Helicone adds 50-80ms per request.
+   OpenTelemetry adds <1ms per span. The LLM call itself (100ms-30s)
+   dominates. The cost of observability is storage, not latency.
+
+*For guile-sage:* Our current approach (fire-and-forget POST with
+60-second backoff on failure) is already cost-conscious. Adding traces
+would increase the payload size modestly. At our scale (single-user
+REPL), sampling is unnecessary -- emit everything.
+
+** Q5: Is OpenInference the right standard for tool-calling agents?
+
+*OpenInference is the right conceptual model; OTEL GenAI conventions
+are the right wire format.*
+
+OpenInference defines span kinds (AGENT, LLM, TOOL, CHAIN, GUARDRAIL)
+that map perfectly to guile-sage's module structure. However, OTEL GenAI
+conventions are converging on the same concepts (=invoke_agent=,
+=execute_tool=, =chat=) and have broader adoption (Datadog, Traceloop,
+all OTEL-compatible backends).
+
+*Recommendation:* Use OTEL GenAI attribute names on the wire. Use
+OpenInference span kinds as a design guide for structuring the trace
+hierarchy. This gives maximum interoperability.
+
+* Implementation Roadmap
+
+** Phase 1: Add Missing Counters (low effort, high value)
+
+| Counter                           | Labels                                  | Rationale                        |
+|-----------------------------------+-----------------------------------------+----------------------------------|
+| =guile_sage.tool.error=           | =tool_name=, =error_type=               | Error attribution per tool       |
+| =guile_sage.tool.duration=        | =tool_name=                             | Tool execution latency           |
+| =guile_sage.llm.duration=         | =model=, =provider=                     | Per-turn LLM latency             |
+| =guile_sage.context.usage_ratio=  | =model=                                 | Context window utilization       |
+| =guile_sage.tool_chain.length=    | =model=                                 | Steps per tool chain             |
+
+This brings us to 11 counters, still emitted as cumulative sums via
+the existing =telemetry-flush!= mechanism.
+
+** Phase 2: OTEL GenAI Attribute Alignment (medium effort)
+
+Rename existing counter attributes to match OTEL GenAI conventions:
+
+| Current                          | OTEL GenAI equivalent              |
+|----------------------------------+------------------------------------|
+| =model= label                   | =gen_ai.request.model=             |
+| =type=input/output= label       | =gen_ai.token.type=input/output=   |
+| =tool_name= label               | =gen_ai.tool.name=                 |
+| =decision=accept/reject= label  | keep (no OTEL equivalent)          |
+
+Add new attributes on existing counters:
+- =gen_ai.provider.name= (ollama/openai/gemini)
+- =gen_ai.operation.name= (chat/execute_tool)
+
+** Phase 3: Trace Emission (higher effort, highest value)
+
+Add a minimal trace/span emitter to =telemetry.scm=:
+
+1. Generate a trace ID per REPL turn (=chat_turn= span).
+2. Generate span IDs for each LLM call, tool call, and MCP call.
+3. Emit spans as OTLP/HTTP JSON to =/v1/traces= alongside existing
+   =/v1/metrics= payloads.
+4. Use OTEL GenAI attributes (=gen_ai.operation.name=, =gen_ai.tool.name=,
+   =gen_ai.usage.input_tokens=, etc.) on each span.
+5. Optionally annotate spans with OpenInference =openinference.span.kind=
+   for Phoenix compatibility.
+
+The implementation can reuse the existing =http-post-with-timeout= and
+=build-resource-attributes= infrastructure.
+
+** Phase 4: Visualization (parallel with Phase 3)
+
+- Deploy Arize Phoenix on nexus alongside Grafana for trace visualization.
+  Phoenix accepts OTLP/HTTP natively and is fully open source.
+- Or configure Grafana Tempo as a trace backend in the existing stack
+  (OTel Collector already supports the Tempo exporter).
+- Add Grafana dashboard panels for the new counters from Phase 1.
+
+* Appendix A: OTEL GenAI Metric Naming Comparison
+
+| guile-sage current                      | OTEL GenAI equivalent                | Gap                          |
+|-----------------------------------------+--------------------------------------+------------------------------|
+| =guile_sage.session.count= (counter)   | (no equivalent)                      | Keep; session tracking is sage-specific |
+| =guile_sage.token.usage= (counter)     | =gen_ai.client.token.usage= (histogram) | Instrument type + naming    |
+| =guile_sage.cost.usage= (counter)      | (no equivalent; cost is derived)     | Keep; consider deriving from tokens |
+| =guile_sage.active.time= (counter)     | =gen_ai.client.operation.duration= (histogram) | Different semantics (cumulative vs per-op) |
+| =guile_sage.code_edit.tool_decision= (counter) | (no equivalent)              | Keep; permission model is sage-specific |
+| =guile_sage.mcp.tool_call= (counter)   | (subsumed by =execute_tool= spans)   | Migrate to spans in Phase 3 |
+
+* Appendix B: OpenInference Span Kind Mapping
+
+| OpenInference kind | guile-sage module              | Current telemetry              | Recommended span |
+|--------------------+--------------------------------+--------------------------------+------------------|
+| AGENT              | =repl.scm= (main loop)        | =session.count=                | =invoke_agent=   |
+| LLM                | =ollama.scm=, =openai.scm=    | =token.usage=, =cost.usage=   | =chat=           |
+| TOOL               | =tools.scm= (execute-tool)     | =tool_decision=                | =execute_tool=   |
+| CHAIN              | =repl.scm= (execute-tool-chain)| (none)                         | parent span      |
+| GUARDRAIL          | LiteLLM proxy (external)       | (guardrail header logged)      | (external)       |
+| PROMPT             | =context.scm= (load-agents-context) | (none)                   | optional span    |
+
+* Appendix C: Platform Decision Matrix
+
+For guile-sage's constraints (Guile runtime, self-hosted, LAN-only), the
+viable options are:
+
+| Criterion              | OTEL + Prometheus/Grafana | Phoenix | Langfuse | Helicone |
+|------------------------+---------------------------+---------+----------+----------|
+| Language-agnostic      | Y                         | Y (OTLP)| Y (OTLP) | Y (proxy)|
+| Self-hostable          | Y                         | Y       | Y        | Y        |
+| Open source            | Y                         | Y       | Y        | Y        |
+| Trace visualization    | Tempo/Jaeger needed       | Built-in| Built-in | Limited  |
+| Already deployed       | *Y* (nexus)               | N       | N        | N        |
+| Effort to integrate    | Low (add spans)           | Low     | Medium   | Low      |
+
+*Recommendation:* Extend the existing OTEL + Prometheus/Grafana stack
+with trace support (Grafana Tempo or Phoenix). This minimizes
+deployment changes while adding the trace visibility we lack.
+
+* Sources
+
+- [[https://opentelemetry.io/docs/specs/semconv/gen-ai/][OTEL GenAI Semantic Conventions]]
+- [[https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/][OTEL GenAI Metrics Specification]]
+- [[https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/][OTEL GenAI Client Spans]]
+- [[https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-agent-spans/][OTEL GenAI Agent Spans]]
+- [[https://github.com/open-telemetry/semantic-conventions/issues/2664][OTEL Agentic Systems Proposal (Issue #2664)]]
+- [[https://opentelemetry.io/blog/2025/ai-agent-observability/][OTEL Blog: AI Agent Observability]]
+- [[https://www.langchain.com/langsmith/observability][LangSmith Observability]]
+- [[https://docs.wandb.ai/weave][W&B Weave Documentation]]
+- [[https://github.com/Helicone/helicone][Helicone GitHub]]
+- [[https://www.braintrust.dev][Braintrust]]
+- [[https://www.braintrust.dev/articles/best-ai-observability-tools-2026][Braintrust: AI Observability Tools Buyer's Guide 2026]]
+- [[https://github.com/Arize-ai/phoenix][Arize Phoenix GitHub]]
+- [[https://arize-ai.github.io/openinference/spec/semantic_conventions.html][OpenInference Semantic Conventions]]
+- [[https://github.com/Arize-ai/openinference][OpenInference GitHub]]
+- [[https://docs.datadoghq.com/llm_observability/][Datadog LLM Observability]]
+- [[https://www.datadoghq.com/blog/llm-otel-semantic-convention/][Datadog OTEL GenAI Support]]
+- [[https://github.com/traceloop/openllmetry][Traceloop OpenLLMetry]]
+- [[https://langfuse.com/docs/observability/overview][Langfuse Observability]]
+- [[https://langfuse.com/docs/observability/features/token-and-cost-tracking][Langfuse Cost Tracking]]
+- [[https://oneuptime.com/blog/post/2026-04-01-ai-workload-observability-cost-crisis/view][AI Workloads Observability Cost Crisis]]
+- [[https://uptrace.dev/blog/opentelemetry-ai-systems][OpenTelemetry for AI Systems (Uptrace)]]
