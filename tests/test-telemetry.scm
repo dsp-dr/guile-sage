@@ -5,7 +5,9 @@
 (add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 
 (use-modules (sage telemetry)
+             (sage config)
              (sage util)
+             (srfi srfi-1)
              (srfi srfi-19)
              (ice-9 format))
 
@@ -255,6 +257,82 @@
            (val (hash-ref *counters* key 0)))
       (assert-equal val 35
                     "cumulative total should include all increments across backoff"))))
+
+;;; ----- Direct unit tests for helpers with only indirect coverage -----
+
+(format #t "~%--- Direct helper tests ---~%")
+
+(run-test "current-time-unix-nano returns a large positive integer"
+  (lambda ()
+    (let ((t (current-time-unix-nano)))
+      (assert-true (integer? t) "should be an integer")
+      (assert-true (> t 0) "should be positive")
+      ;; Sanity: should be after 2020-01-01 in nanos (~1.577e18)
+      (assert-true (> t 1577836800000000000)
+                   "should be after 2020-01-01 epoch nanos"))))
+
+(run-test "build-resource-attributes returns vector with service.name"
+  (lambda ()
+    (let* ((attrs (build-resource-attributes))
+           (attrs-list (vector->list attrs)))
+      (assert-true (vector? attrs) "should return a vector")
+      (assert-true (> (vector-length attrs) 0) "should have at least one attr")
+      ;; Check that service.name = "guile-sage" is present
+      (let ((has-service-name
+             (any (lambda (attr)
+                    (and (equal? (assoc-ref attr "key") "service.name")
+                         (equal? (assoc-ref (assoc-ref attr "value") "stringValue")
+                                 "guile-sage")))
+                  attrs-list)))
+        (assert-true has-service-name
+                     "should contain service.name=guile-sage")))))
+
+;;; ----- Guardrail config tests -----
+;;; These test guardrail-proxy-url and guardrail-check-provider from
+;;; (sage config), which are observability exports with no prior test coverage.
+
+(format #t "~%--- Guardrail config ---~%")
+
+(run-test "guardrail-proxy-url returns #f when not configured"
+  (lambda ()
+    ;; Clear any existing env var
+    (unsetenv "SAGE_GUARDRAIL_PROXY")
+    (assert-false (guardrail-proxy-url)
+                  "should return #f when SAGE_GUARDRAIL_PROXY is unset")))
+
+(run-test "guardrail-proxy-url returns value when configured"
+  (lambda ()
+    (setenv "SAGE_GUARDRAIL_PROXY" "http://localhost:4000")
+    (let ((url (guardrail-proxy-url)))
+      (assert-equal url "http://localhost:4000"
+                    "should return the proxy URL from env"))
+    (unsetenv "SAGE_GUARDRAIL_PROXY")))
+
+(run-test "guardrail-check-provider returns #f when no proxy configured"
+  (lambda ()
+    (unsetenv "SAGE_GUARDRAIL_PROXY")
+    (assert-false (guardrail-check-provider "ollama" "http://localhost:11434")
+                  "no proxy -> no warning")))
+
+(run-test "guardrail-check-provider returns #f when provider routes through proxy"
+  (lambda ()
+    (setenv "SAGE_GUARDRAIL_PROXY" "localhost:4000")
+    (assert-false (guardrail-check-provider "litellm" "http://localhost:4000/v1")
+                  "provider host contains proxy -> no warning")
+    (unsetenv "SAGE_GUARDRAIL_PROXY")))
+
+(run-test "guardrail-check-provider returns warning when provider bypasses proxy"
+  (lambda ()
+    (setenv "SAGE_GUARDRAIL_PROXY" "localhost:4000")
+    (let ((result (guardrail-check-provider "ollama" "http://localhost:11434")))
+      (assert-true (string? result) "should return a warning string")
+      (assert-contains result "NOT routed"
+                       "warning should mention NOT routed")
+      (assert-contains result "ollama"
+                       "warning should mention provider name")
+      (assert-contains result "localhost:4000"
+                       "warning should mention proxy URL"))
+    (unsetenv "SAGE_GUARDRAIL_PROXY")))
 
 ;;; Restore disabled state for test isolation
 (setenv "SAGE_TELEMETRY_DISABLE" "1")
