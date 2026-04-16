@@ -1,0 +1,284 @@
+#+TITLE: Prior Art Review: "Security as Proof of Work" Is Not New
+#+DATE: 2026-04-14
+#+AUTHOR: Prof. Marcus "Spark" Wellington
+#+OPTIONS: toc:3 num:t
+
+* Executive Summary
+
+The companion report (=20260414-security-economics.org=) presents Drew
+Breunig's "proof-of-work" framing of AI-driven security as a novel
+insight. It is not. Every core claim in Breunig's thesis has
+well-established prior art in security economics, game theory, and
+software engineering literature spanning 1934--2008. What /is/ new is
+the substrate (LLM tokens instead of analyst-hours), but the
+underlying economic dynamics --- attacker-defender asymmetry,
+diminishing returns on security investment, the public-goods problem
+of open-source hardening --- were formalized decades ago.
+
+This review identifies the prior art, assesses where the companion
+report overclaims novelty, and raises structural concerns the report
+fails to address: risk homeostasis, moral hazard, and the tragedy of
+the commons in token-funded security.
+
+* Prior Art: What Breunig Rediscovered
+
+** Anderson (2001): Why Information Security Is Hard
+
+Ross Anderson's "Why Information Security Is Hard --- An Economic
+Perspective" (ACSAC 2001) established that security failures are
+primarily /economic/, not technical: misaligned incentives, not
+missing technology, explain most failures. Breunig's claim that
+security is now a "spending game" rather than a "cleverness game"
+restates Anderson's core thesis with "tokens" substituted for
+"dollars." Anderson said it first and said it with formal models.
+
+** Gordon-Loeb Model (2002): There IS a Maximum ROI
+
+Lawrence Gordon and Martin Loeb's "The Economics of Information
+Security Investment" (ACM TISSEC, 2002) proved a result the
+companion report conspicuously ignores: *the optimal security
+investment is bounded*. Specifically:
+
+- A firm should never invest more than 36.8% (1/e) of the expected
+  loss from a breach
+- Additional investment beyond this point yields /negative/ marginal
+  returns
+- The optimal investment is a function of the vulnerability's
+  probability and the potential loss, not an unbounded "spend more
+  tokens" directive
+
+The companion report's recommendation to "outspend the attacker"
+(Section 7.1) directly contradicts Gordon-Loeb. If an attacker can
+probe sage for $50, the report recommends spending $150+. But
+Gordon-Loeb tells us to ask: what is the /expected loss/ from a
+successful attack on sage? For a local Scheme REPL with no
+production deployment, that expected loss may be close to zero ---
+making even $28/release an overinvestment.
+
+The report's proposed v1.0 hardening budget of $120 should be
+justified against expected loss, not against attacker expenditure.
+These are different quantities with different optima.
+
+** Schneier (2000): Security Is a Process, Not a Product
+
+Bruce Schneier's "The Process of Security" (2000) anticipated the
+companion report's "hybrid model" by 26 years. The report's
+per-commit scanning, per-release deep audits, and annual external
+reviews are Schneier's layered process model with token budgets
+attached. The structure is sound precisely /because/ it follows
+Schneier's established pattern, not because Breunig invented it.
+
+** Von Stackelberg (1934): Attacker-Defender Games
+
+Heinrich von Stackelberg formalized leader-follower games in 1934.
+Security is a textbook Stackelberg game: the defender commits to a
+posture, the attacker observes and optimizes in response.
+
+Breunig's "spend more tokens than attackers" assumes the attacker's
+budget is fixed and observable. In practice, attackers /adapt/.
+Spending 3x the attacker's budget tells them to spend 4x --- or to
+shift surfaces entirely (social engineering, supply chain, insider
+threat). The correct formulation is to invest up to the point where
+the attacker's /marginal cost of attack/ exceeds the /marginal
+value of a successful breach/ --- a calculation that depends on
+asset value, not on the attacker's current token budget.
+
+** Linus's Law, Updated: From Eyeballs to Tokens
+
+Raymond's "given enough eyeballs, all bugs are shallow" (1997) is
+the direct ancestor. The companion report implicitly updates it to
+"given enough tokens, all vulnerabilities are discoverable." But
+this inherits the original's known weaknesses:
+
+- *Empirically fragile.* Heartbleed persisted in OpenSSL for two
+  years; Shellshock hid in Bash for 25. Millions of eyeballs
+  missed both.
+- *Tokens are not eyeballs.* LLMs have systematic blind spots.
+  More tokens with the same blind spots means more of the same
+  coverage, not deeper coverage.
+- *The right analogy is "more of the same eyeball."* Scaling
+  inference compute amplifies one model's reasoning patterns; it
+  does not diversify perspective.
+
+** Ozment & Schechter (2006): Vulnerability Density Decreases
+
+Andy Ozment and Stuart Schechter ("Milk or Wine: Does Software
+Security Improve with Age?", USENIX Security 2006) showed that
+vulnerability density in mature codebases decreases over time --- but
+never reaches zero.
+
+This result has two implications the companion report misses:
+
+1. *sage's existing test suite may already capture most of the
+   low-hanging fruit.* With 42+ security tests, 6,400+ PBT trials,
+   and a 0.82:1 test-to-code ratio, the marginal vulnerability
+   found by the next 35M tokens may be very low.
+
+2. *The remaining vulnerabilities are the hard ones.* Ozment &
+   Schechter showed that surviving bugs tend to be architectural,
+   not superficial. LLM scanning is strongest against pattern-matched
+   vulnerability classes (injection, traversal) and weakest against
+   novel architectural issues --- precisely the class that persists.
+
+** Bitcoin's Proof of Work (Nakamoto 2008): A Flawed Analogy
+
+Breunig's explicit analogy to Bitcoin's proof of work is colorful but
+economically misleading:
+
+| Property                | Bitcoin PoW                          | "Security PoW"                    |
+|-------------------------+--------------------------------------+-----------------------------------|
+| What is proved          | Computational work was done          | Vulnerabilities were looked for   |
+| Verifiability           | Trivially verifiable (hash check)    | Not verifiable (absence of bugs?) |
+| Fungibility             | One hash = another hash              | Not all scans are equal           |
+| Consensus               | Network agrees on chain state        | No consensus mechanism            |
+| Sybil resistance        | Yes (by design)                      | N/A                               |
+| Difficulty adjustment   | Automatic (every 2016 blocks)        | None proposed                     |
+| Finality                | Probabilistic (6 confirmations)      | Never (new vulns emerge)          |
+
+The core problem: Bitcoin's proof of work /proves/ something (that
+computational resources were expended on a specific block). Security
+token spending proves nothing about the /completeness/ of the scan.
+You can spend 150M tokens and miss a critical vulnerability that a
+5-minute human review would catch. The analogy conflates input
+(tokens spent) with output (security achieved).
+
+* Structural Concerns the Report Ignores
+
+** Risk Homeostasis (Wilde 1982)
+
+Gerald Wilde (1982) showed that when people /feel/ safer, they
+compensate by taking more risks. Seatbelts led to faster driving.
+
+Applied here: if teams believe 35M-token scans have "hardened"
+their release, they may write riskier code, skip manual review, or
+expand the attack surface. The companion report proposes hardening
+as a "release gate" without addressing this behavioral feedback
+loop. A gate that teams learn to treat as a rubber stamp provides
+false assurance.
+
+** Moral Hazard
+
+If scanning is "effectively free" (local inference), the marginal
+cost of introducing a vulnerability also becomes "effectively free
+to fix." This may /increase/ the vulnerability introduction rate,
+creating a treadmill. The insurance industry discovered centuries
+ago that fully insured parties take more risks. The report should
+specify what "deductible" (mandatory human sign-off, manual review
+requirements) prevents moral hazard.
+
+** Tragedy of the Commons: Who Pays for OSS Tokens?
+
+The report claims OSS hardening costs are "amortized across users."
+This is Hardin's tragedy of the commons (1968) in new clothes. OSS
+security is a public good; public goods are underproduced because
+actors free-ride. Who pays? Maintainers are burned out (Heartbleed,
+xz backdoor). Companies free-ride. Governments are slow.
+Foundations are underfunded. Tokens do not solve the incentive
+structure --- they just change the denomination.
+
+** Akerlof's Market for Lemons (1970)
+
+Akerlof showed information asymmetry degrades market quality.
+Buyers cannot distinguish secure software from insecure software;
+the market does not reward security investment. The companion
+report proposes token-spending thresholds as a release gate --- but
+"we spent 35M tokens scanning" is an /input/ metric, not an
+/output/ metric. A project that spent 35M tokens and found nothing
+might be secure or might have a blind scanner. Without verifiable
+output signals (formal verification, standardized certification),
+token-spending metrics risk becoming security theater.
+
+* What IS Genuinely New
+
+To be fair, the report surfaces genuinely new empirical data:
+
+1. *AISI's TLO cost data* ($80/attempt Opus 4.6, $12,500 Mythos)
+   --- the first public figures for AI-powered attack economics.
+2. *Log-linear offensive scaling with tokens* --- prior work assumed
+   human-linear scaling; log-linear with compute is a new regime.
+3. *LiteLLM supply chain incident* --- a valuable multi-hop case
+   study in the LLM dependency ecosystem.
+4. *Trail of Bits' 13x productivity data* --- first empirical basis
+   for defensive scanning ROI.
+5. *Local inference 6,000x cost advantage* --- defenders with local
+   compute have a genuine structural edge over API-only attackers.
+
+These data points are valuable. The framing around them is not.
+
+* Recommendations
+
+** 1. Ground the Analysis in Gordon-Loeb
+
+Replace "outspend the attacker" with "invest up to Gordon-Loeb
+optimal." This requires estimating the expected loss from a
+successful attack on sage --- a number the report never calculates.
+For a local development tool with no production deployment, this
+number may be very small.
+
+** 2. Address the Behavioral Feedback Loop
+
+Any hardening regime must account for risk homeostasis. Proposed
+mitigations:
+
+- Mandatory human review of all unsafe-tool-related code changes,
+  even after automated scanning
+- Periodic "scan the scanner" exercises where human auditors check
+  for systematic blind spots in the AI scanning
+- Tracking not just vulnerabilities found but vulnerabilities
+  /introduced/ per release, to detect moral hazard effects
+
+** 3. Use Output Metrics, Not Input Metrics
+
+"Tokens spent on hardening" is an input metric. Useful output
+metrics include:
+
+- Vulnerabilities found per release (trend over time)
+- Time-to-detection for injected synthetic vulnerabilities
+- Coverage metrics (which OWASP categories were actually tested?)
+- False positive / false negative rates for the scanning pipeline
+
+** 4. Acknowledge the Commons Problem
+
+If OSS projects should adopt token-funded hardening, who funds the
+tokens? Possible models: levies on commercial users (Tidelift),
+government grants (EU FOSSA), foundation infrastructure (OpenSSF),
+or cloud providers scanning dependencies as a loss-leader. Simply
+stating "amortize across the community" is not a funding model.
+
+** 5. Diversify Beyond Token Scaling
+
+"Spend more tokens" is monoculture thinking. A robust program needs
+formal methods (sage's Scheme is amenable to property-based
+verification), architecture review by humans who understand Guile's
+continuation-based control flow, diverse scanning tools (not one
+vendor's model), and red team exercises with human adversaries.
+
+* Conclusion
+
+Breunig's "proof-of-work" framing is a catchy metaphor stretched
+past its breaking point. Anderson, Gordon, Loeb, and Schneier
+formalized these economics before the first Bitcoin block was mined.
+Von Stackelberg modeled attacker-defender games when Turing was
+still an undergraduate. The public-goods problem predates LLMs by
+decades.
+
+The companion report's empirical data (AISI, Trail of Bits) is
+genuinely useful. Its practical recommendations are sound. But drop
+the proof-of-work metaphor and ground investment decisions in
+Gordon-Loeb, not in cryptocurrency analogies.
+
+Spend your tokens wisely. Just do not pretend you invented the idea
+of spending money on security.
+
+* References
+
+- Akerlof, G.A. (1970). "The Market for 'Lemons'." /QJE/ 84(3): 488--500.
+- Anderson, R. (2001). "Why Information Security Is Hard." /ACSAC 2001/.
+- Gordon, L.A. and Loeb, M.P. (2002). "The Economics of Information Security Investment." /ACM TISSEC/ 5(4): 438--457.
+- Hardin, G. (1968). "The Tragedy of the Commons." /Science/ 162(3859): 1243--1248.
+- Nakamoto, S. (2008). "Bitcoin: A Peer-to-Peer Electronic Cash System."
+- Ozment, A. and Schechter, S.E. (2006). "Milk or Wine: Does Software Security Improve with Age?" /USENIX Security 2006/.
+- Raymond, E.S. (1997). "The Cathedral and the Bazaar."
+- Schneier, B. (2000). "The Process of Security."
+- von Stackelberg, H. (1934). /Marktform und Gleichgewicht/. Vienna: Springer.
+- Wilde, G.J.S. (1982). "The Theory of Risk Homeostasis." /Risk Analysis/ 2(4): 209--225.

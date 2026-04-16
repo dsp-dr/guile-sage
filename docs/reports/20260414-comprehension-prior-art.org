@@ -1,0 +1,318 @@
+#+TITLE: Comprehension Debt: A Curmudgeon's Guide to Prior Art
+#+SUBTITLE: Everything Old Is New Again, or, The Field's Collective Amnesia
+#+AUTHOR: Marcus "Spark" Wellington (via dsp-dr research agent)
+#+DATE: 2026-04-14
+#+OPTIONS: toc:3 num:t
+
+* Preamble
+
+The companion report ("Comprehension Debt in AI-Assisted Codebases,"
+20260414-comprehension-debt.org) surveys the 2026 discourse on
+comprehension debt as if the phenomenon were recently discovered.  It is
+not.  The report cites Osmani, Storey, Karpathy, and several arXiv
+preprints --- all from 2025-2026 --- while largely ignoring five decades
+of computer science, cognitive science, and epistemology that anticipated
+every finding it presents.
+
+This is not a rebuttal.  The comprehension debt problem is real, the
+measurements are useful, and the recommendations are sound.  But the
+discourse suffers from /ahistoricism/: by failing to connect to prior
+art, it risks re-deriving known results, ignoring known failures, and
+missing the deeper structural reasons these problems recur.
+
+What follows is a map from each "new" claim to its intellectual
+ancestors, and an argument that the recurrence itself is the most
+important signal.
+
+* Brooks: Essential Complexity Cannot Be Automated Away (1986)
+
+Frederick Brooks' "No Silver Bullet --- Essence and Accident in Software
+Engineering" draws a distinction that the comprehension debt literature
+rediscovers without crediting:
+
+#+BEGIN_QUOTE
+The essence of a software entity is a construct of interlocking
+concepts: data sets, relationships among data items, algorithms, and
+invocations of functions.  This essence is abstract, in that the
+conceptual construct is the same under many different representations.
+It is nonetheless highly precise and richly detailed.
+--- Brooks, 1986
+#+END_QUOTE
+
+Brooks argued that /essential/ complexity --- the irreducible difficulty
+of the problem domain --- could never be eliminated by better tools.
+Only /accidental/ complexity (the friction introduced by inadequate
+notation, slow compilation, poor tooling) yields to engineering
+improvement.
+
+Comprehension debt /is/ essential complexity wearing a new hat.
+Understanding why a system works the way it does, what trade-offs were
+made, and how modules interact under unexpected conditions --- this is
+the essence.  AI removes the accidental complexity of typing code.  It
+does not touch the essential complexity of understanding it.  The 2026
+literature's surprise at this fact suggests the field forgot Brooks.
+
+The epistemic debt formula Ed(t) = Uf(t) - Cc(t) is a quantification of
+what Brooks stated qualitatively: you can push functional utility (Uf)
+arbitrarily high through tooling, but corrective competence (Cc) is
+bounded by essential complexity that no tool eliminates.
+
+* Parnas: Software Aging (1994)
+
+David Parnas' "Software Aging" describes a phenomenon isomorphic to
+comprehension debt, three decades before the term was coined:
+
+#+BEGIN_QUOTE
+Programs, like people, get old.  We can't prevent aging, but we can
+understand its causes, take steps to limits its effects, temporarily
+reverse some of the damage it has caused, and prepare for the day when
+the software is no longer viable.
+--- Parnas, 1994
+#+END_QUOTE
+
+Parnas identifies two causes of software aging: (1) failure to adapt to
+a changing environment, and (2) changes made by people who do not
+understand the original design.  The second cause /is/ comprehension
+debt.  Every patch applied without understanding accelerates decay.
+
+The 2026 discourse treats this as an AI-specific problem.  It is not.
+AI merely increases the rate at which cause (2) occurs, because it
+enables changes by entities (agents) that /cannot/ understand the
+original design --- they can only pattern-match against it.
+
+Parnas' proposed remedy --- "preventive medicine" through documentation,
+design recovery, and planned redesign --- maps directly to the companion
+report's recommendations for ADRs, theory rebuilds, and intent
+documents.  The recommendation is correct; the novelty claim is not.
+
+* Lehman: Laws of Software Evolution (1974-1996)
+
+Manny Lehman's laws of software evolution, developed over two decades of
+empirical study, predict comprehension debt as a mathematical
+inevitability:
+
+- *Law I (Continuing Change)*: A system must be continually adapted or
+  it becomes progressively less satisfactory.
+- *Law II (Increasing Complexity)*: As a system evolves, its complexity
+  increases /unless work is done to maintain or reduce it/.
+- *Law VI (Continuing Growth)*: Functional content must be continually
+  increased to maintain user satisfaction.
+
+Law II is the one that matters here.  Complexity increases unless
+/active work/ is done to fight it.  Comprehension debt is what
+accumulates when that work is not done.  The 2026 discourse presents
+this as a discovery; Lehman presented it as a law, supported by
+longitudinal data from IBM OS/360 and other systems.
+
+AI accelerates Law VI (feature generation) while doing nothing to
+address Law II (complexity management).  The "speed asymmetry" that
+Osmani and Ronacher describe is Lehman's Law II meeting exponentially
+faster Law VI.  The math was always going to produce this outcome.
+
+* Naur: Programming as Theory Building (1985)
+
+The companion report cites Storey citing Naur, but does not engage
+directly with Peter Naur's original argument, which is more radical than
+the 2026 literature acknowledges:
+
+#+BEGIN_QUOTE
+Programming properly should be regarded as an activity by which the
+programmers form or achieve a certain kind of insight, a theory, of the
+matters at hand.  This suggestion is in contrast to what appears to be a
+more common notion, that programming should be regarded as a production
+of a program and certain other texts.
+--- Naur, 1985
+#+END_QUOTE
+
+Naur's claim is not merely that understanding matters alongside code.
+His claim is that the /code is not the program/.  The program is the
+theory in the programmer's mind.  The code is an artifact that can be
+used to reconstruct the theory, but incompletely.
+
+If Naur is right --- and forty years of maintenance nightmares suggest he
+is --- then AI-generated code is not a "program" in any meaningful sense.
+It is an artifact without a corresponding theory.  The comprehension debt
+literature circles around this insight without quite arriving at it,
+because arriving at it would require confronting an uncomfortable
+conclusion: AI does not program.  It emits artifacts that look like the
+output of programming.
+
+* Polanyi: Tacit Knowledge (1966)
+
+"We can know more than we can tell" (Polanyi, 1966).  Much programmer
+understanding is /tacit/ --- intuitions about where bugs lurk, a sense
+of which abstractions fit, an ability to predict change propagation ---
+that resists formalization.
+
+The companion report proposes quizzes, rationale probes, and explanation
+gates.  These measure /explicit/ knowledge only.  An engineer might fail
+a comprehension quiz yet debug brilliantly under pressure.  An LLM might
+produce a "Relational" SOLO-taxonomy explanation without possessing any
+understanding at all.  Every proposed comprehension metric has a built-in
+blind spot that cannot be eliminated, only acknowledged.
+
+* Dreyfus: The Skill Acquisition Model (1980)
+
+The Dreyfus model (Novice -> Advanced Beginner -> Competent -> Proficient
+-> Expert) distinguishes stages not by quantity of knowledge but by
+/kind/ of engagement.  AI coding assistants operate at "Competent":
+rule-following, pattern application, plan execution.  They cannot reach
+"Proficient" (holistic situation recognition) or "Expert" (intuitive
+grasp bypassing deliberation).
+
+The Anthropic study's 17% comprehension drop is a Dreyfus effect:
+developers are held at Novice/Advanced Beginner because the AI handles
+the Competent stage for them.  They never build the pattern recognition
+that comes from struggling through it.  The "Explanation Gate" works
+because it forces passage through the Competent stage --- articulating
+plans and rationale --- that AI delegation otherwise skips.
+
+* Wittgenstein: The Beetle in the Box (1953)
+
+Wittgenstein's thought experiment: everyone has a box containing
+something called a "beetle," but no one can look in anyone else's box.
+The word "beetle" functions in language regardless of what is (or is not)
+inside.  Replace "beetle" with "understanding" and you have the deep
+problem of comprehension measurement: no one can inspect another's
+comprehension.  We observe only behavioral proxies --- quiz answers,
+debugging speed, review quality.  The explanation is a /performance/, not
+a window into cognition.  Measure comprehension; but maintain
+epistemological humility about what the measurements mean.
+
+* The Socratic Method and the Explanation Gate (399 BC)
+
+The Explanation Gate --- requiring novices to explain causal logic before
+integrating AI code --- is the Socratic method applied to code review.
+The epistemic debt paper's 60% debt reduction at 3% utility cost is
+/empirical validation of Socrates/.  But the 2,400-year lineage carries
+implications the paper misses:
+
+1. The method requires a /skilled questioner/.  Automating it with
+   LLM-generated questions risks Socratic theater without substance.
+2. It works through /discomfort/ --- what Socrates called /aporia/.
+   Developers who find the gate annoying are experiencing it correctly.
+3. It is fundamentally /interpersonal/.  Socrates responded dynamically
+   to specific confusions of specific people.  A static gate is a
+   degenerate case --- better than nothing, worse than dialogue.
+
+* Sapir-Whorf, Kuhn, and Conway: Three Lenses the Report Omits
+
+** Linguistic relativity (Sapir-Whorf)
+
+Does the programming language shape what can be comprehended?  A Scheme
+codebase makes recursion and closures natural; an AI trained on Python
+generates Python idioms in Scheme syntax.  The result is /syntactically
+valid/ but /idiomatically alien/.  This is a dimension of comprehension
+debt the 2026 literature ignores: debt incurred when AI-generated code
+does not match the cognitive idioms of the target language.
+
+** Paradigm shifts (Kuhn, 1962)
+
+If AI-assisted development is a paradigm shift, then measuring
+comprehension debt against pre-AI baselines is like measuring automobile
+reliability with horse-care metrics.  I do not believe we are in a
+paradigm shift --- the evidence shows familiar patterns accelerated, not
+transformed --- but the discourse should engage with the possibility.
+
+** Conway's Law (1967)
+
+The AI-human team has an asymmetric communication structure: human
+specifies intent, AI generates code, human reviews partially.  No
+peer-level design dialogue occurs.  Conway predicts the system will
+mirror this asymmetry: high-level intent in specs, low-level
+implementation without deliberation, and a structural gap between the
+two.  That gap /is/ comprehension debt.  ADRs are an attempt to add the
+missing communication channel --- but Conway warns it works only if
+organizational incentives align.
+
+* The Recurrence Is the Signal
+
+The most important observation is one the 2026 discourse misses
+entirely: /comprehension debt keeps being rediscovered/.
+
+| Year | Author | Name | Core claim |
+|------|--------|------|------------|
+| 1966 | Polanyi | Tacit knowledge | Understanding resists formalization |
+| 1974 | Lehman | Increasing complexity | Complexity grows unless actively fought |
+| 1985 | Naur | Theory building | The program lives in the mind, not the code |
+| 1986 | Brooks | Essential complexity | The hard part cannot be automated |
+| 1994 | Parnas | Software aging | Uninformed changes accelerate decay |
+| 2019 | Abramov | WET codebase | Abstraction can destroy comprehension |
+| 2026 | Osmani | Comprehension debt | AI generates faster than we understand |
+| 2026 | Storey | Cognitive debt | Shared theory erodes under AI pressure |
+| 2026 | arXiv | Epistemic debt | Functional utility minus corrective competence |
+
+The phenomenon is invariant across: programming paradigms (structured,
+OO, functional), development methodologies (waterfall, agile, agentic),
+tooling eras (assemblers, compilers, IDEs, AI), and organizational forms
+(cathedral, bazaar, agentic).
+
+This invariance suggests that comprehension debt is not a bug in the
+development process.  It is a /fundamental property/ of the relationship
+between human cognition and complex systems.  No tool, methodology, or
+organizational structure eliminates it.  Each new era simply reveals a
+new face of the same underlying constraint: human minds are finite, and
+the systems they build are not.
+
+* Implications for guile-sage
+
+The companion report's self-assessment (comprehension score of 35-40%)
+and recommendations are sound.  But the prior art suggests tempering
+expectations:
+
+1. *ADRs will help, but not enough.*  Parnas showed that documentation
+   decays almost as fast as the understanding it captures.  ADRs must be
+   actively maintained (budgeted time), not just written.
+
+2. *The Explanation Gate will work, with caveats.*  It restores the
+   Dreyfus Competent stage and invokes the Socratic method.  But
+   Wittgenstein warns: articulate explanation is not proof of
+   understanding.  The gate catches gross ignorance, not subtle
+   misunderstanding.
+
+3. *Comprehension metrics will always be proxies.*  Polanyi's tacit
+   knowledge means no quiz, gate, or rubric can fully capture
+   understanding.  Use the metrics; do not worship them.
+
+4. *The problem will not be solved, only managed.*  Brooks, Lehman, and
+   Parnas all point to the same conclusion: essential complexity is
+   permanent.  The goal is not zero comprehension debt.  The goal is
+   keeping debt at a level where the team can still diagnose and fix
+   failures.
+
+5. *Language-idiomatic code matters.*  The Sapir-Whorf connection
+   suggests that AI-generated Guile code should be reviewed not just for
+   correctness but for /idiomatic fit/.  Code that works but reads like
+   translated Python accumulates comprehension debt specific to the
+   Scheme community.
+
+6. *Observe the system, not just the code.*  Majors is right, and
+   guile-sage already has telemetry.  The next step is connecting
+   runtime behavior (OTLP metrics) to comprehension indicators (time
+   spent debugging, frequency of "why" questions in development logs).
+
+* Conclusion
+
+The 2026 discourse is valuable for quantifying what was previously
+qualitative.  That is genuine progress.  But the failure to cite prior
+art creates two risks: (1) re-deriving known results instead of building
+on them, and (2) missing the structural explanation for /why/ these
+problems recur across every era and methodology.
+
+The field does not need a new vocabulary for an old problem.  It needs to
+read its own history and build on it.
+
+* References
+
+- Brooks, Frederick P. "No Silver Bullet --- Essence and Accident in Software Engineering." /Information Processing 1986/. Elsevier, 1986.
+- Parnas, David Lorge. "Software Aging." /Proceedings of the 16th International Conference on Software Engineering/, 1994, pp. 279-287.
+- Lehman, Manny M. "Programs, Life Cycles, and Laws of Software Evolution." /Proceedings of the IEEE/, vol. 68, no. 9, 1980, pp. 1060-1076.  (Laws first formulated 1974.)
+- Naur, Peter. "Programming as Theory Building." /Microprocessing and Microprogramming/, vol. 15, 1985, pp. 253-261.
+- Polanyi, Michael. /The Tacit Dimension/. University of Chicago Press, 1966.
+- Dreyfus, Hubert L. and Dreyfus, Stuart E. /Mind Over Machine: The Power of Human Intuition and Expertise in the Era of the Computer/. Free Press, 1986.  (Model first presented 1980.)
+- Wittgenstein, Ludwig. /Philosophical Investigations/. Blackwell, 1953.  Section 293 (beetle in a box).
+- Kuhn, Thomas S. /The Structure of Scientific Revolutions/. University of Chicago Press, 1962.
+- Conway, Melvin E. "How Do Committees Invent?" /Datamation/, vol. 14, no. 4, 1968, pp. 28-31.
+- Sapir, Edward. "The Status of Linguistics as a Science." /Language/, vol. 5, 1929, pp. 207-214.
+- Whorf, Benjamin Lee. /Language, Thought, and Reality/. MIT Press, 1956.
+- Socrates, via Plato. /Meno/, /Theaetetus/, /Euthyphro/. c. 399-369 BC.
