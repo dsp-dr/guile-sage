@@ -231,10 +231,16 @@
 ;;; Identifies the main goal and keeps relevant context
 (define* (compact-intent messages #:key (max-tokens 4000))
   (let* ((intent (identify-intent messages))
-         (relevant (filter-by-relevance messages intent))
          (system-msgs (filter (lambda (m)
                                 (equal? (assoc-ref m "role") "system"))
-                              messages)))
+                              messages))
+         ;; Exclude system messages from the relevance filter — they're
+         ;; re-added separately so double-counting would grow the output
+         ;; beyond the input (guile-sage-u0i).
+         (non-system (filter (lambda (m)
+                               (not (equal? (assoc-ref m "role") "system")))
+                             messages))
+         (relevant (filter-by-relevance non-system intent)))
     ;; Add intent marker + relevant messages within budget
     (let ((intent-msg `(("role" . "system")
                         ("content" . ,(format #f "[Conversation Intent: ~a]" intent))

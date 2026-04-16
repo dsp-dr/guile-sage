@@ -507,9 +507,17 @@ Also registers under the bare tool name if no collision with local tools."
                         input-schema
                         exec-fn)
 
-         ;; Also register bare name if no collision (I22)
-         (unless (get-tool tool-name)
-           (register-tool tool-name description input-schema exec-fn))
+         ;; Also register bare name if no collision (I22).
+         ;; We look up the current *tools* via module-ref because the
+         ;; compiled closure over `get-tool`/`*tools*` here has been
+         ;; observed to resolve to a stale empty binding (guile-sage-z9b).
+         ;; Going through resolve-module forces the live registry lookup.
+         (let* ((live-tools (module-ref (resolve-module '(sage tools)) '*tools*))
+                (existing (find (lambda (t)
+                                  (equal? (assoc-ref t "name") tool-name))
+                                live-tools)))
+           (unless existing
+             (register-tool tool-name description input-schema exec-fn)))
 
          (set! count (1+ count))))
      (as-list tools))
