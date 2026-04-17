@@ -1,0 +1,1555 @@
+#+TITLE: AI Coding Agent — Build Spec (Local-First, Self-Modifying, qwen3.6)
+#+AUTHOR: dsp-dr
+#+DATE: 2026-04-17
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Executive Summary
+
+Build a single-process, local-first AI coding agent that lives inside an
+interactive IPython session on a MacBook Pro, binds to a local
+=qwen3.6= runtime on loopback, and is allowed to modify its own source
+code within that session. No remote providers, no gateway, no
+inter-process protocol. One user, one model, one process.
+
+This document is the authoritative build spec. It is /provider-agnostic/
+at the interface boundary (the rest of this document calls the model
+"the LLM" and the model transport "the backend") but the reference
+implementation hardcodes =qwen3.6= over the local HTTP chat endpoint.
+No abstraction layer exists for swapping backends.
+
+The agent is a /tool-using/ agent, not a chat bot. Its job is to drive
+filesystem changes, git operations, tests, and its own source edits on
+behalf of the operator. Every behavioural requirement below is
+phrased as a /testable/ contract, because "tests are the contract" is
+one of the hard-won lessons baked into this spec. See
+[[*Lessons Baked In][§ Lessons Baked In]] for the failure modes this spec is written to
+prevent.
+
+Follows the five-principle spec-writing framework from Osmani (O'Reilly
+Radar, "How to Write a Good Spec for AI Agents", 2026-02):
+
+1. High-level vision first, with the agent drafting the details.
+2. PRD/SRS structure covering the six core areas.
+3. Modular prompts: one focused task at a time, not a monolithic
+   prompt.
+4. Self-checks, three-tier boundaries, injected domain knowledge.
+5. Test, iterate, evolve the spec alongside the code.
+
+Sections are ordered so that a fresh reader can land in any single
+section with the surrounding context inferrable from the headings.
+The spec is long on purpose. It is meant to be /sliced/ at delivery time
+— see [[*Spec Slicing Protocol][§ Spec Slicing Protocol]] for how to feed chunks to the agent
+without blowing out the context window.
+
+* 1. Mission and Scope
+
+** 1.1 Mission Statement
+
+The agent exists to turn terse natural-language intent from one human
+operator into correct, reviewable, reversible changes to a codebase
+on the same laptop, using a local LLM, with every external action
+either obviously safe (reads) or explicitly gated (writes, git
+mutators, code execution, self-edits).
+
+** 1.2 In-Scope
+
+- Interactive operation inside a running IPython kernel on macOS.
+- A single local model binary (=qwen3.6=) reached over loopback HTTP.
+- A fixed, enumerated tool set bound to the running Python process.
+- Persistent session state across IPython restarts (file-backed).
+- Self-modification: the agent can edit, reload, and re-enter its
+  own modules while its kernel is live.
+- Multi-step tool chains with a hard iteration cap and degenerate
+  loop detection.
+- Context window management with compaction.
+- Structured logging (JSONL) and optional OTLP metrics/spans to a
+  local collector.
+- A conformance test suite that pins every rule in this document.
+
+** 1.3 Out of Scope (explicitly)
+
+Everything in this list is /intentionally/ not built. Asking for any
+of them shifts the agent out of spec and is a review-stopping event.
+
+- Any remote LLM provider. No OpenAI, Anthropic, Gemini, Ollama
+  Cloud, LiteLLM proxy, or AI gateway of any kind. The backend is
+  local.
+- A provider abstraction layer. Do not write a =providers/= package,
+  a =Backend= interface, or a pluggable model module. The coupling
+  to the local qwen3.6 runtime is /deliberate/.
+- A TUI, curses interface, prompt-toolkit shell, ncurses status
+  line, or any terminal UI framework. The only UI is IPython's
+  prompt and standard stdout/stderr. Display is line-oriented.
+- MCP clients, MCP servers, stdio-JSON-RPC frameworks, plugin
+  systems with dynamic discovery.
+- A daemonised service, background worker, or any process-level
+  concurrency beyond asyncio inside the IPython kernel.
+- A containerised distribution. The agent runs as =pip install -e .=
+  in a virtualenv; Docker is out of scope.
+- IRC integration, pubsub, or any multi-agent coordination layer.
+- Cloud sync, shareable sessions, team configurations.
+- Voice input, accessibility features beyond stdout.
+- Image generation, embeddings, or any non-chat model call.
+
+If a task seems to require one of these, the agent MUST stop and
+raise it with the operator rather than building it anyway. See
+[[*Three-Tier Boundaries][§ Three-Tier Boundaries]].
+
+** 1.4 Success Criteria
+
+The agent ships when all of the following hold simultaneously:
+
+1. A fresh clone + =make install= + =make check= passes on a MacBook
+   Pro running macOS, against a local =qwen3.6= server on
+   =127.0.0.1=.
+2. The conformance suite in =tests/conformance/= is green. Every
+   requirement in [[*Conformance][§ Conformance]] has at least one test that
+   fails if the behaviour regresses.
+3. The agent can complete the canonical [[*Self-Modification Smoke Task][self-modification smoke task]]:
+   add a new tool to its own registry, register it, exercise it,
+   and roll back — all from inside a single IPython session.
+4. The agent refuses to do any [[*Boundary: Never][Never-do]] action without an explicit
+   operator override, and the refusal is logged.
+5. Observability is usable: every turn produces a JSONL log record
+   with at minimum session id, tokens in, tokens out, tool calls,
+   chain depth, and wall time.
+
+** 1.5 Non-Goals That Look Like Goals
+
+These sound like good ideas but are deliberately rejected; do not
+implement them without reopening the spec.
+
+- "Just in case" multi-backend flag. Hardcoding is the feature.
+- Automatic test-writing for the code the agent produces. Tests
+  are the operator's job; the agent can be asked to write them
+  but must not insert tests unprompted.
+- Emoji in logs or output unless explicitly asked.
+- Fancy progress bars. Plain lines. Line-based spinners only if
+  unavoidable.
+- Plugin / extension points beyond the fixed tool registry.
+
+* 2. Target Environment
+
+** 2.1 Hardware
+
+- Apple Silicon MacBook Pro (M-series). The reference target is
+  M4 with 16 GB unified memory; tested also on M2 16 GB and M3
+  36 GB.
+- Disk: SSD with >=10 GB free for model weights + session history.
+- No GPU expected beyond the integrated Apple GPU the local
+  model runtime uses.
+
+** 2.2 Operating System
+
+- macOS 14 (Sonoma) or 15 (Sequoia). No Linux, no Windows.
+- zsh or bash as the login shell. =make= means GNU =gmake= if you
+  are ever on BSD; on macOS =make= is GNU make, no rename needed.
+- Xcode Command Line Tools installed (for =git=, =clang=).
+
+** 2.3 Runtime
+
+- CPython 3.12 or newer.
+- IPython 8.x or newer, installed into a project-local venv at
+  =.venv/=.
+- The reference implementation targets a local =qwen3.6= model
+  reachable on =http://127.0.0.1:<port>=. The port and base URL
+  are hardcoded (see [[*Configuration][§ Configuration]]); there is no host/port
+  override flag.
+- The agent SHOULD verify connectivity at startup ([[*Doctor Check][§ Doctor Check]])
+  and fail fast with a clear message if the backend is absent.
+
+** 2.4 Assumed Tools on PATH
+
+All of the following MUST be present for the tool registry to work:
+
+- =git= 2.40+
+- =ripgrep= (=rg=) for file-content search
+- =python= pointing at the project venv
+- =ipython= pointing at the project venv
+- =gh= for GitHub operations, optional but recommended
+- =pytest= as the test runner
+
+If any of these is missing, the affected tool MUST be unregistered
+rather than failing at call time. See [[*Tool Registration and Probing][§ Tool Registration and Probing]].
+
+** 2.5 Project Layout
+
+Strict layout. The agent reads its own layout at startup to resolve
+paths; do not rearrange without updating the code.
+
+#+BEGIN_SRC
+repo/
+  pyproject.toml          # packaging + pytest config
+  Makefile                # commands (see § Commands)
+  README.md               # human-facing overview
+  SPEC.org                # this document
+  AGENT.md                # full system prompt for the LLM
+  AGENT-LEAN.md           # compact system prompt for small ctx
+  .env.template           # documented env vars (checked in)
+  .env                    # gitignored — operator's secrets
+  src/
+    agent/                # installed as package `agent`
+      __init__.py
+      cli.py              # entrypoint (argparse)
+      kernel.py           # IPython-facing facade
+      session.py          # conversation store + compaction hook
+      messages.py         # message record + token accounting
+      backend.py          # HARDCODED qwen3.6 client (no abstraction)
+      streaming.py        # NDJSON / SSE reader
+      tools/
+        __init__.py       # registry
+        fs_read.py        # safe read tools
+        fs_write.py       # gated write tools
+        git_read.py       # safe git tools
+        git_write.py      # gated git tools
+        shell.py          # gated shell tools
+        code_edit.py      # self-modification helpers
+        testing.py        # gated test runner
+        introspect.py     # log readers (safe)
+      permissions.py      # three-tier gate + path safety
+      context.py          # token counter + threshold warnings
+      compaction.py       # five strategies + auto-compact
+      chain.py            # multi-step tool chain + loop detection
+      guardrails.py       # pre/post-call content checks
+      observability.py    # JSONL + OTLP emitters
+      config.py           # env + dotenv + defaults
+      doctor.py           # connectivity diagnostic
+      self_mod.py         # hot-reload + edit-then-reimport
+  tests/
+    conformance/          # pins every rule in this spec
+    unit/                 # module-scoped
+    integration/          # cross-module + live backend (marked)
+    pbt/                  # property-based (hypothesis)
+    security/             # adversarial (YOLO off)
+    fixtures/             # canned backend responses, tool inputs
+  sessions/               # XDG data dir if set; fallback here (gitignored)
+  .logs/                  # JSONL logs (gitignored)
+#+END_SRC
+
+The layout is /part of the contract/. Tests in =tests/conformance/=
+verify it.
+
+* 3. Commands
+
+Every feature is reachable through three surfaces: a shell command
+(Makefile target or direct =python -m=), an IPython magic (=%agent_*=),
+and a programmatic call. Naming MUST line up across all three. This
+is the lesson from
+a predecessor-project ADR: if a feature has only one surface, users can't discover it and tests can't
+exercise it. (Predecessor project ADR-0004 established the rule
+after three features ended up single-surface and undocumented.)
+
+** 3.1 Shell Surface (Makefile)
+
+The Makefile is the canonical entry point for humans and CI. All
+non-trivial operations go through it. Targets are /phony/ unless
+noted.
+
+| Target       | What it does                                       |
+|--------------+----------------------------------------------------|
+| =install=    | Create =.venv=, =pip install -e ".[dev]"=          |
+| =run=        | Launch IPython with the agent autoloaded           |
+| =run-safe=   | Same as =run= but with AGENT_YOLO unset            |
+| =check=      | Run every suite under =tests/= (auto-discovery)    |
+| =check-fast= | Run only =tests/unit/= (quick regression)          |
+| =check-pbt=  | Run =tests/pbt/= with =--hypothesis-show-statistics= |
+| =check-security= | Run =tests/security/= with YOLO explicitly unset |
+| =check-conformance= | Run =tests/conformance/=                      |
+| =lint=       | Run =ruff check= + =ruff format --check=           |
+| =lint-fix=   | Run =ruff check --fix= + =ruff format=             |
+| =typecheck=  | Run =mypy src/=                                    |
+| =doctor=     | Run connectivity diagnostic (see § Doctor Check)   |
+| =clean=      | Remove =__pycache__/=, =.pytest_cache/=, =.ruff_cache/= |
+| =distclean=  | =clean= + remove =.venv= + =.logs/= + =sessions/=  |
+
+Requirements:
+
+- Every target MUST be idempotent. Running =make check= twice in a
+  row MUST produce the same result.
+- =make run= MUST set =AGENT_YOLO=1= so the interactive session
+  does not prompt on every write. =make run-safe= MUST NOT.
+- =make check= MUST auto-discover =tests/**/test_*.py=. No hand-
+  maintained list of suites. This is how the predecessor project
+  caught three silent regressions.
+
+** 3.2 IPython Magic Surface
+
+When the agent is autoloaded, it installs IPython line and cell
+magics. Magics are the /only/ way the operator interacts at runtime.
+They are the agent equivalent of slash commands.
+
+| Magic              | Arg             | Effect                                    |
+|--------------------+-----------------+-------------------------------------------|
+| =%agent=           | prompt          | Single-turn chat with full tool chain     |
+| =%%agent=          | (cell)          | Same but multi-line prompt                |
+| =%agent_status=    | —               | Show session, tokens, model, host         |
+| =%agent_tools=     | —               | List registered tools, tier, boundary     |
+| =%agent_history=   | [n]             | Print last N turns                        |
+| =%agent_save=      | name            | Snapshot session to =sessions/<name>.json= |
+| =%agent_load=      | name            | Replace current session with saved one    |
+| =%agent_compact=   | [strategy]      | Run compaction now (default: truncate)    |
+| =%agent_yolo=      | on\vert off     | Toggle YOLO for the running session       |
+| =%agent_reload=    | [module]        | Hot-reload one or all agent modules       |
+| =%agent_doctor=    | —               | Connectivity + backend probe              |
+| =%agent_logs=      | [n] [level]     | Print last N JSONL log lines filtered     |
+| =%agent_exit=      | —               | Flush logs and metrics, clear session     |
+
+Rules:
+
+- Magic names use underscores, not hyphens, because IPython magic
+  names are Python identifiers.
+- Every magic MUST have a one-line docstring; =%agent?= should
+  produce a useful summary.
+- No magic may take more than three positional args; long options
+  go through the programmatic surface.
+
+** 3.3 Programmatic Surface
+
+Every magic maps to a public function in the =agent= package:
+
+#+BEGIN_SRC python
+from agent import (
+    chat, status, tools_list, history,
+    session_save, session_load,
+    compact, set_yolo, reload_module,
+    doctor, logs_tail,
+)
+#+END_SRC
+
+Rules:
+
+- Functions never =print=. They return values.
+- Functions never prompt on stdin. Interactive confirmation lives
+  in the magic wrapper.
+- Functions are import-safe: importing =agent= MUST NOT hit the
+  network, write to disk, or instantiate the backend client. Side
+  effects happen only when a function is called. This matters
+  for test isolation.
+
+** 3.4 Full Command Reference
+
+Exact command examples for the agent (and humans) to use. Include
+these literally in AGENT.md.
+
+#+BEGIN_SRC bash
+# Install + first run
+make install
+make doctor               # confirm qwen3.6 is reachable
+make run                  # launches IPython + autoloads agent
+
+# Inside IPython
+%agent "list .py files under src/ and count them"
+%agent_status
+%agent_save my-refactor
+%agent_compact truncate
+%agent_yolo off           # gate writes for next turn
+%agent "draft a failing test for agent.chain.detect_degenerate"
+%agent_yolo on
+%agent "apply the test"
+%agent_logs 20 warning
+
+# Run a single non-interactive turn from shell
+python -m agent.cli --prompt "summarise src/agent/session.py"
+
+# Quality gates
+make lint
+make typecheck
+make check-fast           # inner loop
+make check                # full loop before commit
+make check-security       # adversarial suite
+make check-conformance    # spec contract
+#+END_SRC
+
+* 4. Project Structure, Code Style, and Conventions
+
+** 4.1 Packaging
+
+- =pyproject.toml= with PEP 621 metadata.
+- Package name: =agent=. Import as =import agent=, =from agent
+  import X=.
+- Editable install (=pip install -e .=) is the only supported mode
+  during development. Wheels may be built but are not distributed.
+- Pin Python to =requires-python = ">=3.12"=.
+
+** 4.2 Runtime Dependencies
+
+Keep the runtime footprint small. The agent is a single local
+process that must start in under one second.
+
+- =httpx= for the local HTTP client (not =requests=; we want
+  =httpx.Client= streaming and timeouts).
+- =orjson= for JSON parsing/serialisation on the hot path.
+- =rich= only for =%agent_logs= and =%agent_status= formatting —
+  NOT for progress bars, NOT for anything UI-adjacent. No =Live=
+  displays.
+- =hypothesis= for property-based tests (dev-only).
+- =pytest=, =pytest-asyncio= (dev-only).
+- =ruff= (dev-only).
+- =mypy= (dev-only).
+
+No other runtime deps unless an explicit spec amendment lands.
+
+** 4.3 Code Style
+
+- =ruff= with =line-length = 100=, =target-version = "py312"=.
+  Lint rules: =E=, =F=, =W=, =I=, =N=, =UP=, =B=, =SIM=, =PL=, =RUF=.
+- Type-hint every public function. =mypy --strict= on =src/agent/=.
+- Prefer =dataclasses= for records; prefer =typing.Protocol= over
+  ABCs for small interfaces.
+- No =print=. Logging only. Output destined for the human goes
+  through the magic layer.
+- No =from foo import *=. No wildcard re-exports.
+- No globals except frozen config in =config.py=.
+- No deeply-nested asyncio. The chat loop is allowed to be async;
+  tools are sync unless explicitly marked.
+- Never catch =Exception:= bare. Catch the narrowest type and log
+  with =exc_info=.
+
+** 4.4 One Code Example Is Worth Three Paragraphs
+
+This is the canonical in-house style. Reviewers MUST reject code
+that drifts from it. AGENT.md embeds this block.
+
+#+BEGIN_SRC python
+"""Module docstring: one line, imperative."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Protocol
+
+from agent.config import Config
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(slots=True, frozen=True)
+class ToolResult:
+    name: str
+    ok: bool
+    text: str
+    bytes_out: int = 0
+
+
+class Tool(Protocol):
+    name: str
+
+    def __call__(self, **kwargs: object) -> ToolResult: ...
+
+
+def run_tool(tool: Tool, **kwargs: object) -> ToolResult:
+    """Run a tool and log outcome. Never raises to caller."""
+    try:
+        result = tool(**kwargs)
+    except Exception:
+        log.exception("tool %s raised", tool.name)
+        return ToolResult(name=tool.name, ok=False, text="tool raised")
+    log.info("tool %s ok=%s bytes=%d", tool.name, result.ok, result.bytes_out)
+    return result
+#+END_SRC
+
+** 4.5 Naming
+
+- Modules: =snake_case=, single-word preferred.
+- Classes: =PascalCase=.
+- Functions and variables: =snake_case=.
+- Constants: =UPPER_SNAKE_CASE=.
+- Private-by-convention names start with a single underscore.
+- Test functions: =test_<thing>_<condition>=, e.g.
+  =test_safe_path_rejects_dotdot=.
+- Test modules: =test_<module>.py= mirroring the =src/agent/=
+  layout when sensible.
+
+** 4.6 Commit Conventions
+
+- Conventional Commits. Scope MUST be a package path or a feature
+  tag: =feat(tools)=, =fix(chain)=, =docs(spec)=, =test(security)=,
+  =refactor(session)=, =chore(deps)=.
+- =--trailer 'Co-authored-by: agent <agent@localhost>'= on any
+  commit the agent authored. Human-only commits do not use this
+  trailer.
+- Never use "generated with" in the message body. No bot
+  signatures. No emoji unless the operator explicitly asks.
+- One change per commit. Progressive commits. Never =git add -A=.
+  Stage specific files. The rationale is reviewability and clean
+  reverts — the predecessor project regressed three tests once because
+  of a wildcard =add=.
+- Failing pre-commit hook → fix, re-stage, new commit. Never
+  =--no-verify=. Never =--amend= after a failed hook.
+
+** 4.7 Branch and PR Conventions
+
+- Default branch: =main=.
+- Feature branches: =feat/<slug>=, =fix/<slug>=, =exp/<slug>=.
+- Self-modification branches live in sibling worktrees: see
+  [[*Self-Modification][§ Self-Modification]].
+- PRs are required for anything touching =permissions.py=,
+  =backend.py=, =chain.py=, or =SPEC.org=. Direct pushes to =main=
+  for other files are allowed if tests are green.
+- PR title: imperative mood, under 70 characters.
+- PR description: why + test plan. Not what — that's the diff.
+
+* 5. Testing Strategy
+
+Tests are the spec in executable form. If this document disagrees
+with =tests/conformance/=, the test wins until a spec amendment
+lands.
+
+** 5.1 Test Suites
+
+| Suite              | Path                    | Purpose                                       |
+|--------------------+-------------------------+-----------------------------------------------|
+| Unit               | =tests/unit/=           | Module-scoped, no IO                          |
+| Integration        | =tests/integration/=    | Real backend (marked =@pytest.mark.live=)     |
+| Property-based     | =tests/pbt/=            | Hypothesis-driven invariants                   |
+| Security           | =tests/security/=       | Adversarial; YOLO explicitly disabled          |
+| Conformance        | =tests/conformance/=    | One test per spec rule; this is /the/ contract |
+| Fixtures           | =tests/fixtures/=       | Canned JSON bodies, not a suite                |
+
+Rules:
+
+- =make check= runs all suites.
+- =make check-fast= runs only =tests/unit/=.
+- Integration tests MUST be marked =@pytest.mark.live= and MUST be
+  skippable with =-m 'not live'=.
+- Security tests MUST =monkeypatch.delenv("AGENT_YOLO", raising=False)=
+  in their fixtures. They fail if YOLO silently re-enables.
+- PBT minimum: each property runs 100 trials, seed fixed in
+  =conftest.py= for reproducibility.
+
+** 5.2 What the Conformance Suite Must Pin
+
+One test per item. The list is exhaustive — if you add a rule
+elsewhere in this spec, add a matching test here, and vice versa.
+Treat it as a numbered-invariant contract.
+
+1. Safe tools list contents. Adding or removing a tool from the
+   safe tier is a test failure.
+2. YOLO-gated tools list contents. Same discipline.
+3. =safe_path= rejects =..=, =.env=, =.git/=, =.ssh=, =.gnupg=.
+4. =safe_path= accepts =/tmp/= and nested =/tmp/...=.
+5. =safe_path= rejects =/tmp/../etc/passwd=.
+6. =check_permission= returns =False= for gated tools when YOLO
+   is off and the tool is not in the safe list.
+7. =check_permission= returns =True= for safe tools regardless of
+   YOLO.
+8. =check_permission= returns =True= for gated tools when YOLO
+   is on.
+9. The chain loop halts at =MAX_TOOL_ITERATIONS= (10).
+10. The chain loop breaks after three consecutive identical tool
+    calls (degenerate-loop detection).
+11. The chain loop halts when the model returns no =tool_calls=.
+12. Streaming read assembles NDJSON/SSE chunks into a single
+    =Message= record.
+13. Context-window thresholds fire at 50%, 80%, 90%.
+14. Auto-compaction fires at or above =AGENT_COMPACT_THRESHOLD=
+    (default 0.8).
+15. =compact_truncate= preserves system messages and the N most
+    recent messages.
+16. The guardrail layer, if enabled, strips PII regexes before
+    the model call.
+17. The structured log includes at minimum =ts=, =session_id=,
+    =level=, =event=, =duration_ms=.
+18. Importing =agent= performs zero IO.
+19. =doctor()= returns a structured result, never raises.
+20. =self_mod.reload(name)= refreshes a live module without
+    dropping the in-memory session.
+21. =config.get(key)= resolves in the documented precedence order.
+22. Tool registration is idempotent across =%agent_reload=.
+23. The CLI =--prompt= path exits non-zero on backend failure.
+24. The agent refuses to run a =Never= action (see [[*Three-Tier Boundaries][§ Three-Tier Boundaries]])
+    even with YOLO on.
+
+** 5.3 Writing New Tests
+
+- Co-locate unit tests with the module under =tests/unit/=.
+- Each test has one =assert= unless parametrised.
+- Name the test after the behaviour, not the function:
+  =test_chain_stops_on_empty_tool_calls=, not =test_run_chain=.
+- No sleeps. No wall-clock assertions beyond =duration > 0=.
+- Fixtures live under =tests/fixtures/<module>/*.json=. Loaders
+  live in =conftest.py=.
+
+** 5.4 Definition of Done
+
+A change is not done until:
+
+1. The new behaviour has at least one unit test.
+2. If it crosses a module boundary, there is an integration test
+   under =tests/integration/= (marked =live=).
+3. If it changes =permissions.py=, =chain.py=, or =backend.py=,
+   there is a matching =tests/conformance/= test.
+4. =make lint typecheck check= is green.
+5. =SPEC.org= updated if the change touches documented behaviour.
+
+* 6. Three-Tier Boundaries
+
+The Osmani spec article calls for /three/ tiers: =Always=, =Ask
+first=, =Never=. The predecessor project had two (=Safe= and =YOLO=) and
+paid for it — three gated tools were silently in the safe list for
+months. This spec uses three.
+
+** 6.1 Boundary: Always
+
+Actions the agent MAY perform without prompting. Read-only and
+scoped to the workspace or the agent's own log directory.
+
+- =read_file=, =list_dir=, =glob_files=, =grep_content=
+- =git_status=, =git_log=, =git_diff=, =git_show=
+- =read_logs=, =search_logs=
+- =session_list=, =session_read=
+- =self_inspect= (reads the agent's own source)
+
+No tool in this tier may mutate disk, git, or process state.
+=safe_path= still applies.
+
+** 6.2 Boundary: Ask First
+
+Actions that mutate disk, git, or process state. The agent MUST
+emit a confirmation request to the operator through the magic
+layer, waiting for =y= / =n= before proceeding. Non-interactive
+mode (=AGENT_YOLO=1=) converts "Ask first" into =Always for this
+session= but the decision MUST be logged.
+
+- =write_file=, =edit_file=, =delete_file=, =rename_file=
+- =git_add=, =git_commit=, =git_reset=, =git_stash=, =git_restore=
+- =run_tests=, =run_shell= (bounded command allowlist)
+- =pip_install= (only into the project venv, never system-wide)
+- =self_mod_edit=, =self_mod_reload=
+- =create_tool= (adds to the tool registry at runtime)
+
+Rules:
+
+- The prompt must describe /exactly what will change/: path,
+  operation, and a preview diff if applicable.
+- The default answer is =n=. Pressing =<Enter>= MUST NOT mean yes.
+- A declined "Ask first" MUST be logged with a reason field.
+
+** 6.3 Boundary: Never
+
+Hard stops. The agent refuses even with YOLO on. The refusal goes
+through the normal log path.
+
+- =git_push= to =origin/main= without a non-empty =--operator-ack=
+  passed explicitly in the same turn.
+- =git push --force= to any branch.
+- =rm -rf= of any path outside =./build/=, =./dist/=, or the agent's
+  own =.logs/=.
+- Any write to =.env=, =.git/config=, =.git/hooks/=, =~/.ssh/=,
+  =~/.gnupg/=, =~/.aws/=.
+- Any operation that would install a package system-wide (no
+  =sudo pip=, no =brew install=).
+- Any HTTP call to a host that is not =127.0.0.1= or =localhost=.
+  This is the literal hardcoded-local-backend invariant; violating
+  it is a P0 bug.
+- Any subprocess invocation that launches =curl=, =wget=, =ssh=, or
+  =scp= against a non-loopback host.
+- Modifying =tests/conformance/= or =tests/security/= without the
+  operator typing =OVERRIDE_CONFORMANCE= at the prompt. The
+  conformance tests are the contract; the agent may not silently
+  rewrite its own grader. This is the Kent Beck "cheating the
+  genie" failure mode.
+- Deleting tests "because they were failing".
+
+The Never list MUST be enumerated in code as a constant and
+covered by =tests/conformance/=. Test: for every name in the
+Never list, =check_permission= returns =False= even with YOLO on.
+
+** 6.4 Path Safety Is Orthogonal
+
+All three tiers layer on top of =safe_path=. YOLO bypasses the
+/permission/ gate, not the /path/ gate. A YOLO-on =write_file=
+still cannot write to =.env= or escape the workspace.
+
+=safe_path= rules:
+
+- Relative paths anchor to =workspace_root= (cwd at startup).
+- Absolute paths are allowed only under =/tmp/= or under
+  =workspace_root= after =Path.resolve()=.
+- =..= components anywhere in the input are a hard reject,
+  /before/ resolution.
+- Symlinks are followed via =Path.resolve(strict=False)=; the
+  resolved path must still satisfy the above.
+- The blocklist prefixes (=.env=, =.git/=, =.ssh=, =.gnupg=,
+  =.aws=) are checked against the /resolved/ relative path.
+
+All seven rules above get a test each. This is not where we skimp.
+
+* 7. Core Components
+
+** 7.1 Backend Client (=agent/backend.py=)
+
+Hardcoded local =qwen3.6= client. No provider abstraction.
+
+- Base URL: =http://127.0.0.1:<PORT>=. =PORT= is a module-level
+  constant in =config.py=. Not an env var. Not a CLI flag.
+- Endpoints consumed: =/v1/chat/completions= (OpenAI-compatible
+  path is the convention the reference server exposes; this is
+  the /only/ endpoint the agent knows).
+- Client is a single module-level =httpx.Client= with:
+  - =timeout=httpx.Timeout(connect=5, read=120, write=10, pool=5)=
+  - =http2=False= (the loopback server is HTTP/1.1)
+  - Persistent connection pool of 2.
+- Public functions:
+  - =chat(messages, tools)= — non-streaming completion.
+  - =chat_streaming(messages, tools, on_token)= — NDJSON stream
+    reader yielding token deltas via callback. Must also catch
+    =tool_calls= chunks.
+  - =chat_with_tools(messages, tools)= — non-streaming but tool-
+    aware; used by CI and tests.
+- Tool-call parsing mirrors the shape qwen3.6 emits natively. No
+  fallback to parsing code fences from message content. If the
+  model produces a fenced tool call outside =tool_calls=, log a
+  warning and treat as plain text.
+- Token usage is lifted from the backend's =usage= block and
+  surfaced through =Message.usage=.
+- On non-2xx: raise =BackendError(code, body_preview)=. Callers
+  log and surface a terse human error; they do not retry
+  automatically.
+
+=backend.py= MUST NOT import any tool module, session module, or
+permission module. Keep the dependency arrow pointing inward.
+
+** 7.2 Message and Session (=agent/messages.py=, =agent/session.py=)
+
+Message record (frozen dataclass):
+
+#+BEGIN_SRC python
+@dataclass(slots=True, frozen=True)
+class Message:
+    role: str                  # "system" | "user" | "assistant" | "tool"
+    content: str
+    tool_calls: tuple["ToolCall", ...] = ()
+    tool_call_id: str | None = None   # present on role="tool"
+    usage: "Usage | None" = None
+    ts: float = 0.0
+#+END_SRC
+
+Session:
+
+- A =Session= owns an ordered list of =Message= and a =stats=
+  block (tokens in/out, turn count, tool call count).
+- Session lives in memory during a chat loop and is flushed to
+  =sessions/<session_id>.json= at the end of every turn.
+- Loading a saved session replaces the in-memory session atomically;
+  partial loads are not a thing.
+- Session id is =sess-<unix_ms>= by default; operator may pick.
+- JSON schema for sessions is documented in
+  =tests/fixtures/session/schema.json= and validated by a
+  conformance test.
+
+** 7.3 Context Window (=agent/context.py=)
+
+- Hardcoded token limit for qwen3.6: look up once at startup via
+  backend =/v1/models= and cache. If the probe fails, use the
+  fallback constant =CONTEXT_DEFAULT_TOKENS= (document current
+  value in =config.py=).
+- Token counter: use the backend's own =usage= counts when present;
+  otherwise approximate with =len(content) / 4= as a lower bound
+  and flag as approximate in the log.
+- Emit a warning at 50% usage, another at 80%, another at 90%.
+  Warnings go to stderr and into the JSONL log; they do not
+  interrupt the chat loop.
+- Expose =context_status() -> ContextStatus= with tokens used,
+  ceiling, percent, and the next warning threshold.
+
+** 7.4 Compaction (=agent/compaction.py=)
+
+Five strategies. =truncate= is the default and wins the eval.
+
+1. =truncate(messages, keep=10)=: last N messages plus all system
+   messages. Simple, predictable, highest eval score in prior art.
+2. =token_limit(messages, budget)=: newest-first under a token
+   budget.
+3. =importance(messages)=: heuristic scoring on role, keywords,
+   tool calls; keep highest.
+4. =summarize(messages)=: LLM call to summarise older messages
+   into one system message. Expensive. Optional.
+5. =intent(messages)=: detect intent label, keep messages
+   matching. Least reliable; kept for research.
+
+Auto-compaction:
+
+- Fires when =context_status().percent >= AGENT_COMPACT_THRESHOLD=
+  (default =0.8=).
+- Strategy determined by =AGENT_COMPACT_STRATEGY= (default
+  =truncate=).
+- Triggered /between/ turns, never mid-stream.
+
+Security:
+
+- Compaction MUST NOT emit secret strings in summaries. The
+  summariser prompt enumerates content categories, not content
+  itself. The test =test_compaction_does_not_leak_api_keys= pins
+  this.
+
+** 7.5 Multi-Step Tool Chain (=agent/chain.py=)
+
+Core chat loop. This is where most of the lessons from the
+predecessor project concentrated.
+
+Loop shape:
+
+#+BEGIN_SRC
+run_turn(user_msg):
+  messages <- session.append("user", user_msg)
+  iterations <- 0
+  last_calls <- deque(maxlen=3)
+  while iterations < MAX_TOOL_ITERATIONS:
+    response <- backend.chat_with_tools(messages, tools)
+    messages.append(response.message)
+    if response.message.tool_calls is empty:
+      return response.message
+    if is_degenerate(response.message.tool_calls, last_calls):
+      break with degenerate-loop error
+    for call in response.message.tool_calls:
+      result <- execute_tool(call)  # permission-gated
+      messages.append(role="tool", tool_call_id=call.id, content=result)
+    last_calls.append(response.message.tool_calls)
+    iterations += 1
+  emit_warning("hit MAX_TOOL_ITERATIONS")
+  return last response
+#+END_SRC
+
+Rules:
+
+- =MAX_TOOL_ITERATIONS= is a module-level constant, default 10.
+  Do not make it an env var without adding a conformance test.
+- Degenerate loop: three consecutive rounds in which the
+  normalised =(name, args)= tuple of the first tool call is
+  identical. The deque tracks the last three.
+- Each iteration emits a telemetry event
+  =agent.chain.iteration{session_id,n,tool_count}=.
+- At the end of a turn, emit =agent.chain.turn{session_id,
+  iterations, terminal_reason}=. Terminal reasons:
+  =no_tool_calls=, =max_iterations=, =degenerate_loop=,
+  =backend_error=.
+- Anti-hallucination guard: when a tool call returns an empty or
+  error result, inject a synthetic user message before the next
+  backend call: ="Tool <name> returned empty. Do not fabricate
+  results. Either call a different tool or report the empty
+  result."=. This directly addresses the
+  "(duplicate) entries" and "11 files" hallucinations observed
+  in qwen3 UX runs.
+
+** 7.6 Tool Registry (=agent/tools/__init__.py=)
+
+- A single =Registry= instance at module top level.
+- Tools register themselves via =@register_tool(name, tier)=
+  decorator at import time.
+- =tier= is one of =Tier.ALWAYS=, =Tier.ASK=, =Tier.NEVER=.
+  =Tier.NEVER= is enforced at dispatch; no tool should be
+  registered as =NEVER= except system-managed placeholders for
+  future gate enforcement tests.
+- Registration also records the tool's JSON schema for the
+  backend. Schemas live next to the tool, not in a central file.
+- =%agent_reload= clears and rebuilds the registry; registration
+  is idempotent (registering the same name twice replaces the
+  prior entry and logs a warning).
+- A curated /small-model tool subset/ exists as a separate list
+  (=SMALL_MODEL_CORE=), exposed when the backend model has
+  fewer than 2 B params. qwen3.6 at 7 B is above this threshold,
+  so the full set is exposed; the hook exists because the
+  predecessor project learned that tool-name confusion dominates
+  small-model failure (documented in its UX-qwen3 report).
+
+** 7.7 Self-Modification (=agent/self_mod.py=)
+
+The agent can edit its own source and reload modules in the
+running IPython kernel. This is the core differentiator versus
+the predecessor project.
+
+Workflow (canonical, documented in AGENT.md):
+
+1. Create a worktree for the change: =git worktree add
+   ../agent-<slug> -b <slug>=.
+2. Edit files in the worktree using =edit_file= / =write_file=
+   (both gated by YOLO).
+3. Run =make check-fast= inside the worktree.
+4. Commit in the worktree.
+5. From the main checkout, merge: =git merge --no-ff <slug>=.
+6. In the running IPython kernel: =%agent_reload= or
+   =%agent_reload agent.chain=.
+7. Re-register tools if =tools/= changed. Idempotent.
+
+Hot reload is implemented via =importlib.reload= with a careful
+order: leaf modules first, then re-import whichever module the
+magic layer binds to. Cyclic imports are a known footgun; the
+packaging is structured so that =backend.py=, =permissions.py=,
+and =tools/= have no cross-imports.
+
+Self-mod MUST NEVER rewrite =tests/conformance/=,
+=tests/security/=, or =SPEC.org= without the operator's explicit
+=OVERRIDE= token. The gate lives in =permissions.py= and is
+tested in the conformance suite. This is the single most
+important invariant to guard: an agent that can rewrite its own
+grader has no grader.
+
+** 7.8 Guardrails (=agent/guardrails.py=)
+
+Optional pre- and post-call content filters. Disabled by default
+because they add latency and the reference spec is local-first
+(the threat model is the operator's own laptop).
+
+When enabled (=AGENT_GUARDRAILS=1=), before a backend call:
+
+- Redact emails: regex =r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"=
+  replaced with =[REDACTED_EMAIL]=.
+- Redact AWS access keys: =r"AKIA[0-9A-Z]{16}"= →
+  =[REDACTED_AWS_KEY]=.
+- Redact OpenAI-style keys: =r"sk-(?:proj-)?[a-zA-Z0-9-_]{20,}"=
+  → =[REDACTED_OPENAI_KEY]=. (Prior art missed the =sk-proj-=
+  variant; this spec covers it.)
+
+After a backend response, re-scan the assistant content for the
+same patterns. A post-call match is logged as a WARN with the
+match class (not the matched string).
+
+Guardrail hits surface through a single-byte indicator in
+=%agent_status=: =G=.
+
+Tests: each redaction pattern gets a unit test with a positive
+match and a near-miss negative. The negatives are the lesson
+from the predecessor project's guardrail-testing report.
+
+** 7.9 Observability (=agent/observability.py=)
+
+Two sinks, both optional but both on by default in =make run=.
+
+Structured JSONL logs:
+
+- =.logs/agent.jsonl= with one record per event.
+- Required fields: =ts= (ISO-8601), =session_id=, =level=,
+  =event=, =module=, =duration_ms=.
+- Standard events: =turn.start=, =turn.end=, =tool.call=,
+  =tool.result=, =chain.iteration=, =chain.terminal=,
+  =context.warning=, =compaction.run=, =permission.deny=,
+  =backend.request=, =backend.response=, =self_mod.reload=,
+  =guardrail.hit=.
+
+OTLP export (off unless =OTEL_EXPORTER_OTLP_ENDPOINT= is set):
+
+- Counters:
+  - =agent.session.count= — session starts.
+  - =agent.token.usage{session_id,type}= — in/out tokens.
+  - =agent.active.time{type}= — seconds spent in =user= (readline)
+    vs =cli= (model + tools).
+  - =agent.tool.decision{tool_name,decision}= — allow/deny.
+  - =agent.chain.iterations= — chain depth per turn.
+- Histograms (adopt from OpenTelemetry GenAI semantic
+  conventions, prior art report =20260414-agent-observability.org=):
+  - =gen_ai.client.operation.duration=
+  - =gen_ai.client.token.usage=
+  - =gen_ai.server.time_to_first_token=
+- Spans for =chat= and =execute_tool= operations, with attributes
+  =gen_ai.operation.name=, =gen_ai.request.model=,
+  =gen_ai.response.model=, =gen_ai.usage.input_tokens=,
+  =gen_ai.usage.output_tokens=, =gen_ai.tool.name=.
+- Telemetry emission is /fire-and-forget/. A failed export MUST
+  NOT propagate; log once per minute at most (rate-limit).
+
+Wire-level HTTP logging:
+
+- =AGENT_DEBUG_HTTP=1= appends request/response pairs to
+  =.logs/http.jsonl=.
+- Authorisation headers are redacted.
+- Request and response bodies are truncated to 8 KiB unless
+  =AGENT_DEBUG_HTTP_FULL=1=.
+- Streaming responses log =chunk_count=, =first_chunk=,
+  =last_chunk=.
+
+** 7.10 Configuration (=agent/config.py=)
+
+Resolution order for =config.get(key, default)=:
+
+1. Env var =AGENT_<KEY>=.
+2. Env var =<KEY>= (the bare form).
+3. Dotenv file =.env= in the workspace root.
+4. Hard-coded default.
+
+Rules:
+
+- =.env= is gitignored. A checked-in =.env.template= enumerates
+  every var with one-line docs.
+- Secrets (if any) are never logged. Wire logger redacts
+  =Authorization= and any header whose name matches
+  =r"(?i)(auth|key|token|secret)"=.
+- Precedence order is pinned by a conformance test.
+- The backend URL and port are /not/ configurable. They are
+  constants. This is the point.
+
+Env vars consumed:
+
+| Var                              | Default        | Purpose                                  |
+|----------------------------------+----------------+------------------------------------------|
+| =AGENT_YOLO=                     | unset          | Permission gate for Ask-first tier        |
+| =AGENT_COMPACT_THRESHOLD=        | =0.8=          | Auto-compaction trigger                   |
+| =AGENT_COMPACT_STRATEGY=         | =truncate=     | Which strategy auto-compact uses          |
+| =AGENT_GUARDRAILS=               | unset          | Enable pre/post-call redaction            |
+| =AGENT_DEBUG_HTTP=               | unset          | Enable wire-level HTTP JSONL              |
+| =AGENT_DEBUG_HTTP_FULL=          | unset          | Don't truncate HTTP bodies                |
+| =AGENT_LOG_LEVEL=                | =info=         | stderr + JSONL log level                  |
+| =AGENT_SESSION_DIR=              | =./sessions/=  | Override session store location           |
+| =OTEL_EXPORTER_OTLP_ENDPOINT=    | unset          | Enable OTLP export                        |
+
+** 7.11 Doctor Check (=agent/doctor.py=)
+
+=make doctor= and =%agent_doctor= both call =agent.doctor.run()=.
+It returns a structured result and never raises.
+
+Checks:
+
+1. Python version >= 3.12.
+2. IPython importable and version >= 8.0.
+3. Backend HTTP probe: =GET /v1/models= with a 3-second timeout.
+4. Model presence: =qwen3.6= listed in probe response.
+5. =git= on PATH and repo is a git worktree.
+6. Workspace is writable.
+7. =.logs/= creatable.
+8. Tool registry loads without errors.
+9. =AGENT.md= and =AGENT-LEAN.md= exist.
+
+Output is a table. Each check has =name=, =status=
+(=ok=/=warn=/=fail=), =detail=. A single =fail= is an exit-1.
+
+** 7.12 Startup Sequence
+
+In =kernel.autoload()= (called from IPython's =%load_ext agent=):
+
+1. =config.load()= — resolve env + dotenv.
+2. =logging.configure()= — JSONL sink, console handler.
+3. =observability.init()= — OTLP init only if endpoint set.
+4. =doctor.run(quiet=True)= — short-circuit if backend unreachable.
+5. =tools.register_all()= — import every =tools/*.py=.
+6. =session.create_or_load()= — depending on =--continue=.
+7. =self_mod.install_hooks()= — register reload watchers.
+8. Emit welcome line with version, model, boundary state (YOLO?),
+  session id.
+
+If any step fails except =doctor=, startup aborts with a clear
+error and non-zero exit. If =doctor= fails, startup continues in
+a "degraded" mode where all chat calls return a clear error.
+
+** 7.13 Shutdown Sequence
+
+On IPython =exit=, a magic =%agent_exit=, or SIGINT after a
+confirmation:
+
+1. =session.flush()= — write final JSON.
+2. =observability.flush()= — final OTLP export + log rotate.
+3. =backend.close()= — close httpx client.
+4. Print session summary: turns, tokens, tools, wall time.
+
+Signal handling: SIGINT inside a running turn cancels the backend
+request and returns control to the IPython prompt, but does not
+exit the kernel.
+
+* 8. Tool Catalog
+
+The exhaustive list. Every row has a tier. Every tier has a test.
+
+** 8.1 File System, Safe (Always)
+
+| Name           | Args                                   | Returns                 |
+|----------------+----------------------------------------+-------------------------|
+| =read_file=    | =path:str, max_bytes:int=200_000=     | text (UTF-8 lossy)      |
+| =list_dir=     | =path:str=                             | list of names           |
+| =glob_files=   | =pattern:str, root:str="."=           | list of matching paths  |
+| =grep_content= | =pattern:str, path:str=".", ignore_case:bool=False= | list of =path:line:snippet= |
+| =head_file=    | =path:str, lines:int=40=              | first N lines           |
+| =tail_file=    | =path:str, lines:int=40=              | last N lines            |
+| =file_info=    | =path:str=                             | size, mtime, mode       |
+
+** 8.2 File System, Gated (Ask First)
+
+| Name         | Args                                             | Notes                     |
+|--------------+--------------------------------------------------+---------------------------|
+| =write_file= | =path:str, content:str, overwrite:bool=False=    | Rejects binary paths       |
+| =edit_file=  | =path:str, patches:list[Patch]=                  | Unified-diff patch format  |
+| =delete_file= | =path:str=                                      | No recursion               |
+| =rename_file= | =src:str, dst:str=                             | Both paths safe-path-checked |
+
+=edit_file= semantics: each =Patch= is =(old_str, new_str,
+exact:bool=True)=. If =exact=True=, =old_str= must match exactly
+once. If =False=, fuzzy match within a 10-character Levenshtein
+budget (prior art showed fuzzy matching is needed for small-
+model-generated diffs).
+
+** 8.3 Git, Safe (Always)
+
+| Name         | Args                       | Returns                       |
+|--------------+----------------------------+-------------------------------|
+| =git_status= | —                          | porcelain output              |
+| =git_diff=   | =path:str=?, staged:bool=False= | unified diff              |
+| =git_log=    | =n:int=10, path:str?=     | hash + subject                |
+| =git_show=   | =ref:str="HEAD"=          | commit detail                  |
+| =git_branch= | —                          | current branch + list          |
+
+** 8.4 Git, Gated (Ask First)
+
+| Name         | Args                                        | Notes                          |
+|--------------+---------------------------------------------+--------------------------------|
+| =git_add=    | =paths:list[str]=                           | Never =-A= or =--all=          |
+| =git_commit= | =message:str, trailers:dict[str,str]={}=    | Enforces conventional commits  |
+| =git_restore= | =paths:list[str], staged:bool=False=       |                                |
+| =git_stash=  | =message:str=                               |                                |
+
+Never tier: =git_push=, =git_push_force=, any history rewrite.
+
+** 8.5 Process, Gated (Ask First)
+
+| Name         | Args                                 | Notes                                    |
+|--------------+--------------------------------------+------------------------------------------|
+| =run_tests=  | =args:list[str]=[]=                  | Shells out to =pytest= in venv            |
+| =run_shell=  | =command:str, timeout:int=60=        | Allowlist of commands (see next line)     |
+
+=run_shell= allowlist: =ls=, =cat=, =wc=, =head=, =tail=, =rg=,
+=git=, =pytest=, =python=, =ipython=, =make=, =gh=. Anything
+else is a =Tier.NEVER= at call time.
+
+** 8.6 Self-Modification, Gated (Ask First)
+
+| Name             | Args                       | Notes                                      |
+|------------------+----------------------------+--------------------------------------------|
+| =self_mod_edit=  | =path:str, patches:list[Patch]= | Same as =edit_file= but scoped to =src/agent/= |
+| =self_mod_reload= | =module:str?=             | =importlib.reload=                         |
+| =create_tool=    | =name:str, schema:dict, impl_code:str= | Executes =impl_code= in a fresh module namespace |
+
+=create_tool= is the sharpest edge in the catalogue. It is
+Ask-first even under YOLO. Declined invocations are logged. The
+=impl_code= body MUST pass a minimal AST check (no =import os=
+in unexpected places, no =subprocess= unless the tool declares a
+shell tier). The AST check is a best-effort guard, not a sandbox.
+
+** 8.7 Introspection, Safe (Always)
+
+| Name              | Args                   | Returns                              |
+|-------------------+------------------------+--------------------------------------|
+| =read_logs=       | =n:int=50, level:str?= | Last N JSONL log lines filtered      |
+| =search_logs=     | =pattern:str, n:int=50= | Matching log lines                  |
+| =log_timeline=    | =event:str?=           | Count of event types over last hour  |
+| =self_inspect=    | =module:str=           | Source text of an =agent= submodule  |
+| =tools_list=      | —                      | Registered tool names + tiers        |
+| =session_summary= | —                      | Current session stats                |
+
+* 9. Modular Prompts and Spec Slicing
+
+The full spec is too long to feed to a 7-B model as one system
+prompt. This section defines how to slice it.
+
+** 9.1 Spec Slicing Protocol
+
+Three derivatives are generated from this spec:
+
+1. =AGENT.md= — human-readable system prompt (~4k tokens). Covers
+   boundaries, tool catalog summary, commit conventions, and the
+   anti-hallucination guard. Loaded at session start.
+2. =AGENT-LEAN.md= — compressed system prompt (~1.2k tokens).
+   Used when the model's context is small or when a turn starts
+   above the 80% threshold. Covers only the three-tier boundary
+   and the commit convention.
+3. =tools/*.schema.json= — per-tool JSON schemas assembled into
+   the =tools= array on every backend call. These ARE the tool
+   spec; the prose in =AGENT.md= is advisory.
+
+The spec-to-prompt derivation is a =scripts/build_prompts.py=
+target. It runs in CI. A drift between =SPEC.org= and
+=AGENT.md= is a lint error.
+
+** 9.2 Hierarchical TOC
+
+The LLM receives a compact TOC of this document in =AGENT.md=,
+pointing to headings rather than including the text:
+
+#+BEGIN_SRC
+SPEC TOC (reference only; ask for a section by name if needed)
+ 1 Mission and Scope
+ 2 Target Environment
+ 3 Commands (Makefile, IPython magics, Python API)
+ 4 Project Structure, Code Style, Conventions
+ 5 Testing Strategy
+ 6 Three-Tier Boundaries  <-- you live here
+ 7 Core Components (backend, session, chain, tools, ...)
+ 8 Tool Catalog with tiers
+ 9 Modular Prompts and Slicing
+10 Evaluation Harness
+11 Conformance
+12 Self-Modification
+13 Lessons Baked In
+14 Anti-Patterns
+#+END_SRC
+
+The TOC doubles as an /index/ the model can consult via
+=self_inspect("SPEC")=. This is the "extended TOC/summaries for
+large specs" pattern from Osmani, principle 3.
+
+** 9.3 Subagent-Style Decomposition (Single-Agent Simulation)
+
+This system runs as a single IPython process; there is no
+orchestrator spawning subagents. We /simulate/ subagent focus by
+resetting the turn's system prompt between major tasks. Patterns:
+
+- =%agent_reset context: "planning"= rotates the system prompt to
+  =AGENT-LEAN.md=+=prompts/planning.md=.
+- =%agent_reset context: "editing"= rotates to =AGENT.md= with
+  the full tool catalog.
+- =%agent_reset context: "reviewing"= rotates to
+  =AGENT-LEAN.md=+=prompts/reviewing.md= which forbids writes
+  (sets =AGENT_YOLO=off= for the session).
+
+Each context preset is a file under =prompts/=, checked into the
+repo.
+
+* 10. Evaluation Harness
+
+** 10.1 Purpose
+
+Evaluation separates /capability/ from /regression/. Regression
+lives in =tests/conformance/=. Capability lives here. The eval
+harness answers questions like "how often does qwen3.6 pick the
+right tool on first try?" without gating CI on the answer.
+
+** 10.2 Layered Scoring
+
+Per the prior-art survey (=20260414-eval-frameworks.org=), adopt
+three layers:
+
+1. Binary PASS/NEUTRAL/FAIL per case (gate layer).
+2. Continuous score per case when a pattern match has a confidence
+   (capability layer).
+3. Trial-based repetition (=n_trials=5=, same seed per case) to
+   surface non-determinism (stability layer).
+
+** 10.3 Case Format (=evals/cases.json=)
+
+#+BEGIN_SRC json
+{
+  "cases": [
+    {
+      "id": "fs.read.version",
+      "prompt": "What version of Python are we on? Read pyproject.toml.",
+      "expected_tool": "read_file",
+      "expected_path": "pyproject.toml",
+      "assert_content_regex": "python_requires.*3\\.12",
+      "tier": "always",
+      "n_trials": 5
+    }
+  ]
+}
+#+END_SRC
+
+** 10.4 Runner (=scripts/eval.py=)
+
+- Loads cases, instantiates a fresh session per case.
+- Runs each case =n_trials= times.
+- Records tool name, args, final content, wall time, tokens.
+- Scores each trial PASS/FAIL/NEUTRAL; aggregates per case.
+- Emits a markdown table to =evals/last_run.md=.
+- Does not fail CI. Eval regressions file GitHub issues via a
+  (future) webhook; for now they are operator-reviewed.
+
+** 10.5 Traffic Cases
+
+Keep a =traffic-cases.json= of 20-50 realistic prompts covering
+the agent's target use cases. Seed with prior-art categories:
+
+- Read-and-summarise one file.
+- Find all usages of a symbol.
+- Implement a failing test.
+- Fix a linter error.
+- Add a new tool to the registry and exercise it.
+- Refuse a Never-tier request.
+- Detect a degenerate loop deliberately induced.
+
+* 11. Conformance
+
+The conformance suite is the /executable/ version of this spec.
+Every numbered rule in [[*What the Conformance Suite Must Pin][§ 5.2]] maps to exactly one test.
+The mapping lives in =tests/conformance/map.json= and is itself
+checked for completeness by =test_conformance_map_is_complete=.
+
+Amending this spec requires:
+
+1. A PR modifying =SPEC.org=.
+2. Corresponding changes in =tests/conformance/=.
+3. An entry in =CHANGELOG.md= (even for unreleased changes).
+4. =make check-conformance= green.
+
+The conformance suite is the single most important guard against
+the agent rewriting its own grader. Review of any diff that
+touches =tests/conformance/= is a human-mandatory step.
+
+* 12. Self-Modification
+
+The agent's ability to edit its own source is the feature that
+distinguishes this system from the predecessor project. It is also
+the feature most likely to produce unbounded damage if
+mis-designed.
+
+** 12.1 Capabilities
+
+- =self_mod_edit= — patch a file under =src/agent/=.
+- =self_mod_reload= — call =importlib.reload= on a module.
+- =create_tool= — add a new tool to the registry at runtime.
+
+All three are Ask-first even under YOLO. Declines are logged.
+
+** 12.2 Canonical Workflow
+
+Goal: add a new tool =count_lines(path)= safely.
+
+1. In IPython, the operator types:
+
+   =%agent "Add a tool called count_lines(path) that counts newline-terminated lines of a UTF-8 file. Register it as Always tier. Add a unit test."=
+
+2. The agent calls =self_inspect("tools")= to find a suitable
+   module.
+
+3. The agent proposes a diff for =src/agent/tools/fs_read.py=
+   and a new test file =tests/unit/test_count_lines.py=.
+
+4. Operator reviews the diff, types =y=. The agent applies both
+   patches via =self_mod_edit=.
+
+5. The agent runs =make check-fast=.
+
+6. If green, the agent commits with a conventional-commit
+   message.
+
+7. The agent reloads =agent.tools.fs_read= and re-registers
+   =count_lines=.
+
+8. The agent proves end-to-end by calling =count_lines= on
+   =SPEC.org= and reporting the count.
+
+The whole sequence happens inside a single IPython kernel.
+=%agent_status= after step 7 shows the new tool in the registry.
+
+** 12.3 Self-Modification Smoke Task
+
+The conformance suite includes =test_self_mod_smoke=. It
+parameterises the workflow above end-to-end against a fixture
+backend (so it runs deterministically). Breaks if the self-mod
+path regresses.
+
+** 12.4 Rollback
+
+- Each =self_mod_edit= records the diff and its sha.
+- =self_mod_rollback(sha)= reverts and reloads.
+- Magic: =%agent_rollback <sha>=.
+
+** 12.5 Guards
+
+- The agent may NOT =self_mod_edit= any file under
+  =tests/conformance/= or =tests/security/= without an operator
+  token. Enforced in =permissions.py=. Tested in the conformance
+  suite.
+- The agent may NOT delete files with =self_mod_edit= (that's
+  =delete_file=, which has its own gate).
+- A failed =self_mod_edit= (patch doesn't apply) leaves the file
+  untouched.
+
+* 13. Lessons Baked In
+
+Each rule below exists because a predecessor got it wrong. Kept
+compact to fit the agent's context.
+
+- /Permission tiers must be three, not two./ Two tiers produced
+  silent drift: mutating tools quietly ended up on the safe list
+  for months. Three tiers (=Always=, =Ask=, =Never=) force an
+  explicit decision at registration.
+- /Hardcoded backend is the feature./ A provider abstraction
+  invites "just one more provider" PRs that never stabilise. The
+  backend is loopback qwen3.6. Trying to parameterise it is a
+  code smell.
+- /Tests are the contract, and the agent may not rewrite them./
+  The Beck "cheating the genie" failure — an agent deleting a
+  failing test — is blocked by the =tests/conformance/= guard.
+- /Truncate wins compaction./ Importance, summarise, and intent
+  strategies scored worse than plain recency truncation. Ship the
+  simple thing first; keep the others for research.
+- /Anti-hallucination guard matters for small models./ qwen3 at
+  0.6 B appended fake results after a correct tool output; the
+  synthetic "do not fabricate" follow-up message stopped it. The
+  same guard helps 7 B models on edge cases.
+- /Degenerate-loop detection is non-negotiable./ llama3.2 looped
+  on =git_diff= ten times without progress. A deque-of-three
+  fixes it for a handful of lines of code.
+- /User-set model silently overridden by tier routing/ — prior
+  art showed what happens when a user-set =MODEL= env var is
+  quietly discarded by an auto-tier router. The reference
+  implementation has no tiers; if we ever add them, an explicit
+  operator override MUST win over auto-routing, and the banner
+  MUST show the effective model, not the configured one.
+- /File-based persistence beats in-memory/. Anything that lives
+  only in the conversation is lost on restart. Sessions, tasks,
+  notes — write them to files.
+- /Progressive commits, never =-A=/. One wildcard add regressed
+  three security tests. Stage files by name.
+- /Never commit the endpoint/. The backend base URL is
+  loopback-only; it still does not belong in any committed file
+  that a future fork might repurpose against a remote host.
+- /Wire-level HTTP logs save hours/. When the backend changes
+  its tool-call envelope, =.logs/http.jsonl= tells you instantly.
+- /Tests must auto-discover/. Hand-maintained lists of suites
+  rot. A glob over =tests/**/test_*.py= cannot.
+- /Lean prompt for small-context, full prompt for large/. A 2-tier
+  system prompt covers both cases. Prior art showed a 9 k-char
+  =AGENTS.md= ate 2 k tokens before the user even spoke.
+- /Observability is cumulative counters first, traces second./
+  Cumulative counters are cheap and survive restarts when
+  Prometheus is behind. Traces cost more but answer "which tool
+  call failed mid-chain?" — which counters can't.
+- /Tool-name confusion dominates small-model failure./ Keep the
+  core catalogue ≤ 8 tools for any model under 2 B. qwen3 at
+  7 B gets the full set.
+- /Timeouts and connect-timeouts are different./ Use
+  =httpx.Timeout(connect=..., read=...)=; do not collapse into
+  one number.
+
+* 14. Anti-Patterns (From Osmani's List, Applied)
+
+The agent MUST recognise and refuse these patterns when asked
+for them.
+
+- /Vague prompt acceptance/. If the operator types "make it
+  better", the agent MUST ask at least one clarifying question
+  before writing code. Single-word and sub-five-word prompts
+  trigger the clarifier automatically.
+- /Dumping the whole spec as system prompt/. Only =AGENT.md= or
+  =AGENT-LEAN.md= goes into the system message. The TOC is the
+  pointer.
+- /Skipping the operator review/. Every Ask-first action prompts.
+  Suppressing the prompt (=AGENT_YOLO=1=) is recorded in the
+  session's metadata so the operator can audit afterward.
+- /Conflating vibe coding with production/. The agent MUST NOT
+  push to =origin/main= without an explicit operator ack.
+- /Ignoring the lethal trifecta/. Speed, non-determinism, and
+  cost. Partial mitigations:
+  - Speed — rate-limit chain iterations to 10.
+  - Non-determinism — seed the evaluator and pin conformance.
+  - Cost — the backend is local and free, so cost guards here
+    are for the prior-art record only.
+- /Missing the six core areas/. This spec covers Commands,
+  Testing, Project structure, Code style, Git workflow,
+  Boundaries. Any PR that touches the spec must preserve all six.
+
+* 15. Development Phases (Osmani's Four Gates)
+
+** 15.1 Specify
+
+- This document is the deliverable for the =Specify= phase.
+- The operator's brief was: "a local-first, self-modifying AI
+  coding agent running in IPython, hardcoded to qwen3.6 on a
+  MacBook Pro, no gateways, no abstractions."
+- User stories: operator drives the MacBook Pro, asks for code
+  changes, gets reviewable diffs; operator does not want to
+  manage multiple providers or a daemon.
+
+** 15.2 Plan
+
+Technical plan, enumerated in this spec:
+
+- Language: Python 3.12 with typing.
+- IO: =httpx= only for the local backend.
+- Concurrency: asyncio only if strictly necessary; default sync.
+- Packaging: editable install.
+- Testing: pytest + hypothesis + ruff + mypy.
+- Observability: stdlib logging → JSONL; optional OTLP.
+
+** 15.3 Tasks
+
+Task breakdown (each should fit a single turn; sizes M or smaller):
+
+1. Bootstrap =pyproject.toml=, =Makefile=, =src/agent/__init__.py=,
+   and =tests/conformance/test_import_is_side_effect_free.py=.
+2. =agent/config.py= with env resolution and =.env.template=.
+3. =agent/backend.py= minimum viable: =chat()=, =chat_with_tools()=.
+4. =agent/messages.py= + =agent/session.py= + fixture schema.
+5. =agent/permissions.py= with three-tier check, path safety, and
+   matching conformance tests.
+6. =agent/tools/*= initial registry: the Always tier.
+7. =agent/tools/*= Ask tier + =edit_file= patching.
+8. =agent/chain.py= with =MAX_TOOL_ITERATIONS= and degenerate
+   detection.
+9. =agent/context.py= + =agent/compaction.py= with truncate.
+10. =agent/observability.py= JSONL sink.
+11. =agent/self_mod.py= + =create_tool= with AST guard.
+12. =agent/guardrails.py= redactors + tests.
+13. =agent/doctor.py= and =%agent_doctor=.
+14. IPython magic layer (=agent/kernel.py=).
+15. =AGENT.md= + =AGENT-LEAN.md= + prompt-derivation script.
+16. Evaluation harness under =evals/= + =scripts/eval.py=.
+17. OTLP exporter (optional path).
+
+** 15.4 Implement
+
+Each task above is a single commit or small PR. CI runs
+=lint + typecheck + check-fast + check-conformance= on every
+push. The full =check= runs on PR against =main=.
+
+* 16. Glossary
+
+- /Agent/ — this system, running inside IPython, calling a local
+  model.
+- /Backend/ — the local HTTP server that serves qwen3.6. Not a
+  provider, not an abstraction.
+- /Chain/ — a multi-step tool-calling loop within a single turn.
+- /Compaction/ — reducing the message list to fit a context
+  budget while preserving relevance.
+- /Conformance/ — the test suite that pins spec rules.
+- /Degenerate loop/ — three consecutive identical tool calls.
+- /Guardrail/ — a pre- or post-call content filter, distinct
+  from the permission gate.
+- /Ordinance/ — reserved for future policy docs; not in use.
+- /Self-modification/ — the agent editing =src/agent/= while the
+  kernel is live.
+- /Session/ — an ordered list of messages plus stats, persisted
+  to =sessions/*.json=.
+- /Tier/ — one of =Always=, =Ask=, =Never= in the permission
+  model.
+- /Tool/ — a Python callable registered to the model's tool
+  schema; the agent's effector.
+- /Turn/ — one operator prompt and the full chain of tool calls
+  plus final assistant message that answers it.
+- /YOLO/ — operator-set environment flag that auto-confirms
+  Ask-tier tools. Does not downgrade Never-tier.
+
+* 17. References
+
+Prior art and sources the spec draws on. Included because the
+downstream agent may want to follow them itself.
+
+- Addy Osmani. "How to Write a Good Spec for AI Agents." O'Reilly
+  Radar, 2026-02. The five principles, the six core areas, and
+  the four-phase Specify/Plan/Tasks/Implement workflow.
+- Addy Osmani. "Comprehension Debt." March 2026.
+- Kent Beck. "Augmented Coding." 2025. The =plan.md= +
+  system-prompt contract model, the "cheating the genie"
+  failure mode.
+- MemGPT / Letta. arxiv:2310.08560. Virtual-context memory tiers.
+- LangGraph. Checkpoint-based state persistence.
+- Berkeley Function-Calling Leaderboard. AST-matching for
+  function-call grading.
+- ToolBench / ToolLLM. Pass-rate vs Win-rate eval layering.
+- Model Context Protocol, 2024-11-05. Not adopted here but
+  influences tool-schema naming.
+- OpenTelemetry GenAI Semantic Conventions v1.37+.
+- Drew Breunig. "Cybersecurity Looks Like Proof of Work Now."
+  April 2026.
+- Simon Willison. Conformance-test advocacy.
+- Internal prior art: a predecessor agent project (not named
+  here, per the handoff instructions) whose failure modes seeded
+  [[*Lessons Baked In][§ 13]]. The anti-patterns in this spec are all concrete
+  mistakes from that predecessor. Treat them as empirical, not
+  theoretical.
+
+* 18. Amendment Log
+
+A running log of changes to /this/ file. Each entry is one line.
+
+- 2026-04-17 Initial draft, derived from a predecessor project's
+  278-commit history, ~40 internal reports, 4 ADRs, and the
+  Osmani framework.
