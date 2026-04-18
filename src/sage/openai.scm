@@ -19,6 +19,7 @@
             openai-model
             openai-api-key
             openai-auth-headers
+            openai-find-header
             openai-list-models
             openai-chat
             openai-chat-streaming
@@ -99,49 +100,41 @@
 ;;; Chat Completions
 ;;; ============================================================
 
-;;; openai-post-with-headers: POST that also captures response headers.
-;;; Returns (code body guardrails) where guardrails is a string or #f.
+;;; openai-find-header: Case-insensitive lookup in a response-headers alist.
+(define (openai-find-header headers name)
+  (let loop ((hs headers))
+    (cond
+     ((null? hs) #f)
+     ((and (pair? (car hs))
+           (string? (caar hs))
+           (string-ci=? (caar hs) name))
+      (cdar hs))
+     (else (loop (cdr hs))))))
+
+;;; openai-post-with-headers: POST with response-header capture.
+;;;
+;;; Routes through util.scm:http-post-with-headers-captured so that
+;;; SAGE_DEBUG_HTTP=1 traces openai-provider traffic (LiteLLM, CF AI
+;;; Gateway, vLLM). Previously this shelled out to curl directly,
+;;; bypassing the wire logger — see docs/reports/20260417-cloudflare
+;;; -ai-gateway-requirements.org § R7.
+;;;
+;;; Returns (code body guardrails) where guardrails is the value of the
+;;; `x-litellm-applied-guardrails` response header or #f.
 (define (openai-post-with-headers url body timeout headers)
-  "POST via curl capturing response headers for guardrail detection."
-  (let* ((header-file (format #f "/tmp/sage-headers-~a" (getpid)))
-         (in-file (format #f "/tmp/sage-post-in-~a" (getpid)))
-         (out-file (format #f "/tmp/sage-post-out-~a" (getpid)))
-         (_ (call-with-output-file in-file
-              (lambda (port) (display body port))))
-         (header-args (string-join
-                       (cons "-H 'Content-Type: application/json'"
-                             (map (lambda (h)
-                                    (format #f "-H '~a: ~a'" (car h) (cdr h)))
-                                  headers))
-                       " "))
-         (cmd (format #f "curl -s --max-time ~a -D '~a' -w '\\n%{http_code}' -X POST ~a -d '@~a' '~a' > '~a'"
-                      timeout header-file header-args in-file url out-file)))
-    (system cmd)
-    (let* ((output (if (file-exists? out-file)
-                       (call-with-input-file out-file get-string-all)
-                       ""))
-           (lines (string-split output #\newline))
-           (code-line (if (pair? lines) (last lines) "0"))
-           (body-lines (if (pair? lines) (drop-right lines 1) '()))
-           (resp-body (string-join body-lines "\n"))
-           (code (or (string->number (string-trim-both code-line)) 0))
-           ;; Extract guardrail header
-           (guardrails
-            (if (file-exists? header-file)
-                (let ((hdrs (call-with-input-file header-file get-string-all)))
-                  (let ((match (string-contains hdrs "x-litellm-applied-guardrails:")))
-                    (if match
-                        (let* ((start (+ match (string-length "x-litellm-applied-guardrails:")))
-                               (end (or (string-index hdrs #\newline start)
-                                        (string-length hdrs))))
-                          (string-trim-both (substring hdrs start end)))
-                        #f)))
-                #f)))
-      ;; Cleanup
-      (when (file-exists? in-file) (delete-file in-file))
-      (when (file-exists? out-file) (delete-file out-file))
-      (when (file-exists? header-file) (delete-file header-file))
-      (list code resp-body guardrails))))
+  (let* ((result (http-post-with-headers-captured
+                  url body
+                  #:timeout timeout
+                  #:headers headers))
+         (code (if (and (list? result) (>= (length result) 1))
+                   (car result) 0))
+         (resp-body (if (and (list? result) (>= (length result) 2))
+                        (cadr result) ""))
+         (resp-headers (if (and (list? result) (>= (length result) 3))
+                           (caddr result) '()))
+         (guardrails (openai-find-header resp-headers
+                                         "x-litellm-applied-guardrails")))
+    (list code resp-body guardrails)))
 
 ;;; openai-chat: Non-streaming chat completion.
 (define* (openai-chat model messages #:key (stream #f))

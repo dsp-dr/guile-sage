@@ -20,6 +20,7 @@
   #:export (http-get
             http-post
             http-post-with-timeout
+            http-post-with-headers-captured
             http-post-streaming
             json-read-string
             json-write-string
@@ -27,10 +28,12 @@
             as-list
             string-replace-substring
             make-temp-file
+            parse-curl-header-dump
             ;; HTTP debug logging (SAGE_DEBUG_HTTP=1)
             http-debug-enabled?
             http-debug-log-file
-            http-debug-log!))
+            http-debug-log!
+            http-debug-sensitive-header?))
 
 ;;; ============================================================
 ;;; JSON Parser (minimal implementation)
@@ -306,14 +309,22 @@
             (close-port port))))
       (lambda args #f))))
 
+(define (http-debug-sensitive-header? name)
+  "Return #t if a header name should be redacted in debug logs.
+Covers bearer-token-bearing headers for OpenAI-shape providers and
+Cloudflare AI Gateway (cf-aig-authorization)."
+  (and (string? name)
+       (or (string-ci=? name "Authorization")
+           (string-ci=? name "cf-aig-authorization")
+           (string-ci=? name "x-api-key"))))
+
 (define (http-debug-headers->display headers)
   ;; Render header alist as a list of "k: v" pairs for the log entry.
-  ;; Redacts Authorization values to avoid leaking bearer tokens.
+  ;; Redacts bearer-token-bearing headers to avoid credential leaks.
   (map (lambda (h)
          (let ((k (car h))
                (v (cdr h)))
-           (if (and (string? k)
-                    (string-ci=? k "Authorization"))
+           (if (http-debug-sensitive-header? k)
                (format #f "~a: <redacted>" k)
                (format #f "~a: ~a" k v))))
        headers))
@@ -536,6 +547,167 @@
          ("code" . ,code)
          ("elapsed_ms" . ,elapsed-ms)
          ("body_size" . ,(string-length (or resp "")))
+         ("body" . ,(http-debug-truncate (or resp "")))))
+      result)))
+
+;;; parse-curl-header-dump: Parse curl `-D` output into a response-headers alist.
+;;; curl emits the status line followed by `Name: Value\r\n` pairs, a blank
+;;; line, and potentially a second block if the server sent redirects or a
+;;; 100-Continue. We want the LAST block (the response that carries the body)
+;;; so we always return headers from the final non-empty block.
+(define (parse-curl-header-dump text)
+  (if (or (not (string? text)) (string-null? text))
+      '()
+      (let* ((normalised (string-replace-substring text "\r" ""))
+             (raw-lines (string-split normalised #\newline))
+             ;; Find the last status line (HTTP/...); headers we want are
+             ;; everything after it, stopping at the next empty line.
+             (reversed (reverse raw-lines))
+             (after-last-status
+              (let loop ((lines reversed) (acc '()))
+                (cond
+                 ((null? lines) acc)
+                 ((string-prefix? "HTTP/" (string-trim-both (car lines)))
+                  acc)
+                 (else (loop (cdr lines) (cons (car lines) acc))))))
+             ;; Stop at the first empty line (end of headers).
+             (header-lines
+              (let loop ((lines after-last-status) (acc '()))
+                (cond
+                 ((null? lines) (reverse acc))
+                 ((string-null? (string-trim-both (car lines)))
+                  (reverse acc))
+                 (else (loop (cdr lines) (cons (car lines) acc)))))))
+        (filter-map
+         (lambda (line)
+           (let ((colon (string-index line #\:)))
+             (if (and colon (> colon 0))
+                 (cons (string-trim-both (substring line 0 colon))
+                       (string-trim-both (substring line (1+ colon))))
+                 #f)))
+         header-lines))))
+
+;;; response-headers->alist: Convert Guile `(web response)` response-headers
+;;; (which is a list of (symbol . value)) to a string-keyed alist matching
+;;; the curl path's shape. Values can be strings or structured pairs; for
+;;; unknown header types Guile returns the raw string, which is what we want.
+(define (response-headers->alist raw)
+  (map (lambda (h)
+         (let ((k (car h))
+               (v (cdr h)))
+           (cons (cond ((symbol? k) (symbol->string k))
+                       ((string? k) k)
+                       (else (format #f "~a" k)))
+                 (cond ((string? v) v)
+                       (else (format #f "~a" v))))))
+       raw))
+
+;;; http-post-with-headers-captured-native: Native Guile POST that also
+;;; returns the response headers. Used for non-HTTPS (local proxies, test).
+(define* (http-post-with-headers-captured-native url body #:key (headers '()))
+  (receive (response response-body)
+      (http-request url
+                    #:method 'POST
+                    #:body body
+                    #:headers (cons '(content-type application/json)
+                                    (headers->alist headers)))
+    (list (response-code response)
+          (body->string response-body)
+          (response-headers->alist (response-headers response)))))
+
+;;; http-post-with-headers-captured-curl: Curl fallback for HTTPS, using -D
+;;; to spool response headers to a temp file so we can extract them after
+;;; the body lands.
+(define* (http-post-with-headers-captured-curl url body
+                                               #:key (headers '()) (timeout 300))
+  (let* ((in-file (make-temp-file "sage-post-in"))
+         (out-file (make-temp-file "sage-post-out"))
+         (header-file (make-temp-file "sage-post-hdrs"))
+         (dummy (call-with-output-file in-file
+                  (lambda (port) (display body port))))
+         (header-args (string-join
+                       (cons "-H 'Content-Type: application/json'"
+                             (map (lambda (h)
+                                    (format #f "-H '~a: ~a'"
+                                            (shell-escape (car h))
+                                            (shell-escape (cdr h))))
+                                  headers))
+                       " "))
+         (cmd (format #f "curl -s --max-time ~a -D '~a' -w '\\n%{http_code}' -X POST ~a -d '@~a' '~a' > '~a'"
+                      timeout header-file header-args in-file
+                      (shell-escape url)
+                      out-file)))
+    (system cmd)
+    (let* ((output (if (file-exists? out-file)
+                       (call-with-input-file out-file get-string-all)
+                       ""))
+           (lines (string-split output #\newline))
+           (code-line (if (pair? lines) (last lines) "0"))
+           (body-lines (if (pair? lines) (drop-right lines 1) '()))
+           (resp-body (string-join body-lines "\n"))
+           (code (or (string->number (string-trim-both code-line)) 0))
+           (resp-headers
+            (if (file-exists? header-file)
+                (parse-curl-header-dump
+                 (call-with-input-file header-file get-string-all))
+                '())))
+      (when (file-exists? in-file) (delete-file in-file))
+      (when (file-exists? out-file) (delete-file out-file))
+      (when (file-exists? header-file) (delete-file header-file))
+      (list code resp-body resp-headers))))
+
+;;; http-post-with-headers-captured: POST that returns code, body, AND
+;;; response headers. Honours SAGE_DEBUG_HTTP like http-post-with-timeout.
+;;;
+;;; Returns: (code body response-headers-alist)
+;;;   - code: integer HTTP status (0 on transport failure)
+;;;   - body: response body as string
+;;;   - response-headers-alist: ((name . value) ...) with string keys
+;;;
+;;; The openai-compat provider uses this to read guardrail headers like
+;;; x-litellm-applied-guardrails without breaking wire debug logging.
+(define* (http-post-with-headers-captured url body
+                                          #:key (timeout 300) (headers '()))
+  (let ((start (gettimeofday)))
+    (http-debug-log!
+     `(("ts" . ,(http-debug-now-iso))
+       ("type" . "request")
+       ("method" . "POST")
+       ("url" . ,url)
+       ("timeout_s" . ,timeout)
+       ("headers" . ,(list->vector (http-debug-headers->display headers)))
+       ("body_size" . ,(string-length (or body "")))
+       ("body" . ,(http-debug-truncate (or body "")))))
+    (let* ((result
+            (catch #t
+              (lambda ()
+                (if (https? url)
+                    (http-post-with-headers-captured-curl
+                     url body #:headers headers #:timeout timeout)
+                    (http-post-with-headers-captured-native
+                     url body #:headers headers)))
+              (lambda (key . args)
+                (list 0
+                      (format #f "HTTP error: ~a ~a" key args)
+                      '()))))
+           (now (gettimeofday))
+           (elapsed-ms (+ (* 1000 (- (car now) (car start)))
+                          (quotient (- (cdr now) (cdr start)) 1000)))
+           (code (if (and (list? result) (>= (length result) 1))
+                     (car result) 0))
+           (resp (if (and (list? result) (>= (length result) 2))
+                     (cadr result) ""))
+           (resp-headers (if (and (list? result) (>= (length result) 3))
+                             (caddr result) '())))
+      (http-debug-log!
+       `(("ts" . ,(http-debug-now-iso))
+         ("type" . "response")
+         ("url" . ,url)
+         ("code" . ,code)
+         ("elapsed_ms" . ,elapsed-ms)
+         ("body_size" . ,(string-length (or resp "")))
+         ("response_headers"
+          . ,(list->vector (http-debug-headers->display resp-headers)))
          ("body" . ,(http-debug-truncate (or resp "")))))
       result)))
 

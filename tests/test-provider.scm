@@ -164,6 +164,50 @@
           (assert-equal (assoc-ref fn "name") "read_file" "function name"))))))
 
 ;;; ============================================================
+;;; OpenAI Response-Header Extraction Tests
+;;; ============================================================
+
+(format #t "~%--- OpenAI Response-Header Extraction ---~%")
+
+(run-test "openai-find-header finds guardrail header (exact case)"
+  (lambda ()
+    (let ((headers '(("content-type" . "application/json")
+                     ("x-litellm-applied-guardrails" . "redact-email")
+                     ("x-request-id" . "abc123"))))
+      (assert-equal (openai-find-header headers "x-litellm-applied-guardrails")
+                    "redact-email"
+                    "should extract guardrail value"))))
+
+(run-test "openai-find-header is case-insensitive"
+  (lambda ()
+    (let ((headers '(("Content-Type" . "application/json")
+                     ("X-LiteLLM-Applied-Guardrails" . "redact-pii"))))
+      (assert-equal (openai-find-header headers "x-litellm-applied-guardrails")
+                    "redact-pii"
+                    "should find header regardless of case"))))
+
+(run-test "openai-find-header returns #f when missing"
+  (lambda ()
+    (let ((headers '(("content-type" . "application/json"))))
+      (assert-false (openai-find-header headers "x-litellm-applied-guardrails")
+                    "should return #f when header absent"))))
+
+(run-test "openai-find-header handles empty alist"
+  (lambda ()
+    (assert-false (openai-find-header '() "anything")
+                  "empty alist returns #f")))
+
+(run-test "parse-curl-header-dump extracts guardrail header"
+  (lambda ()
+    ;; Simulate curl -D output
+    (let* ((dump "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nx-litellm-applied-guardrails: redact-email\r\nx-request-id: abc\r\n\r\n")
+           (headers (parse-curl-header-dump dump))
+           (guardrails (openai-find-header headers
+                                           "x-litellm-applied-guardrails")))
+      (assert-equal guardrails "redact-email"
+                    "curl-dumped header should parse into alist"))))
+
+;;; ============================================================
 ;;; Gemini Message Conversion Tests
 ;;; ============================================================
 
