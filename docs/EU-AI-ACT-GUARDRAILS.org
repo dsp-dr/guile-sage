@@ -278,7 +278,7 @@ Or in the guile-sage config file (if it uses one):
 ;; guile-sage litellm config
 (define *llm-api-base* "http://dev-host:4000")
 (define *llm-api-key* "sk-REDACTED")
-(define *llm-model* "ollama-llama3.2")  ; or gemini-2.5-flash, gpt-4o-mini
+(define *llm-model* "ollama-llama3.2")  ; substitute any model your LiteLLM config registers
 #+end_src
 
 Any requests from guile-sage through the proxy will be:

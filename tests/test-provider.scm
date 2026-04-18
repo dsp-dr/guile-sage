@@ -90,8 +90,20 @@
 
 (run-test "openai-model returns configured model"
   (lambda ()
+    (setenv "SAGE_MODEL" "test-model-name")
     (let ((model (openai-model)))
+      (unsetenv "SAGE_MODEL")
       (assert-true (string? model) "model should be a string"))))
+
+(run-test "openai-model errors when SAGE_MODEL unset"
+  (lambda ()
+    (unsetenv "MODEL")
+    (unsetenv "SAGE_MODEL")
+    (assert-true
+     (catch #t
+       (lambda () (openai-model) #f)
+       (lambda (key . args) #t))
+     "should raise when no model configured")))
 
 (run-test "gemini-host returns configured host"
   (lambda ()

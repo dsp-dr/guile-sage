@@ -47,7 +47,7 @@
 (define (openai-model)
   (or (config-get "MODEL")
       (config-get "SAGE_MODEL")
-      "gpt-4o-mini"))
+      (error "SAGE_MODEL must be set when SAGE_PROVIDER=openai (no vendor default)")))
 
 ;;; openai-aig-token: Cloudflare AI Gateway token (for stored-keys mode).
 ;;; When set, sage emits cf-aig-authorization alongside or instead of the
