@@ -26,7 +26,7 @@ GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench presentation eval
+.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench presentation eval tmux-session tmux-kill
 
 all: $(OBJECTS)
 
@@ -303,6 +303,26 @@ docker-push: docker
 	docker push $(DOCKER_IMAGE):latest
 	@echo "Pushed: $(DOCKER_IMAGE):$(VERSION)"
 
+# tmux development session
+SESSION = guile-sage
+
+tmux-session:
+	@if tmux has-session -t $(SESSION) 2>/dev/null; then \
+		echo "Session '$(SESSION)' already exists. Attaching..."; \
+		tmux attach-session -t $(SESSION); \
+	else \
+		tmux new-session -d -s $(SESSION) -n repl; \
+		tmux send-keys -t $(SESSION):repl 'SAGE_YOLO_MODE=1 $(GUILE) -L $(SRCDIR) -c "(use-modules (sage repl)) (repl-start)"' Enter; \
+		tmux new-window -t $(SESSION) -n tests; \
+		tmux send-keys -t $(SESSION):tests 'gmake check' Enter; \
+		tmux new-window -t $(SESSION) -n shell; \
+		tmux select-window -t $(SESSION):repl; \
+		tmux attach-session -t $(SESSION); \
+	fi
+
+tmux-kill:
+	@tmux kill-session -t $(SESSION) 2>/dev/null && echo "Killed session '$(SESSION)'" || echo "No session '$(SESSION)' to kill"
+
 # UAT tests
 uat:
 	@echo "Running UAT tests..."
@@ -353,6 +373,10 @@ help:
 	@echo "Install options:"
 	@echo "  PREFIX=~/.local  - Installation prefix (default)"
 	@echo "  PREFIX=/opt/sage - System-wide install"
+	@echo ""
+	@echo "Tmux:"
+	@echo "  tmux-session  - Create/attach dev tmux session (repl + tests + shell)"
+	@echo "  tmux-kill     - Kill the dev tmux session"
 	@echo ""
 	@echo "Docker:"
 	@echo "  docker        - Build Docker image"

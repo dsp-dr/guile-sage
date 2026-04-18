@@ -81,6 +81,7 @@ System_Boundary(sage, "guile-sage process (GNU Guile 3.0)") {
   Container(compact,     "compaction.scm",  "Guile", "5 strategies: truncate, token-limit,\nimportance, summarize, intent.\ncompact-auto selects best.")
   Container(commands,    "commands.scm",    "Guile", "Custom /command registry.\nPersisted in XDG config.")
   Container(logging,     "logging.scm",     "Guile", "Structured JSONL logging\nto .logs/sage.log.")
+  Container(provenance,  "provenance.scm",  "Guile", "Ingress provenance tracking.\nSHA-256 hash, XML trust wrapping,\noptional GPG signing.\n.logs/provenance.jsonl.")
   Container(agent,       "agent.scm",       "Guile", "In-memory task system.\nNo external deps (decoupled from bd).")
   Container(irc_mod,     "irc.scm",         "Guile", "IRC integration (optional).\nOnly registered when connected.")
   Container(status,      "status.scm",      "Guile", "Streaming status display.")
@@ -114,6 +115,7 @@ Rel(tools_mod, mcp_mod, "mcp-call-tool (for MCP tools)")
 Rel(telem_mod, util_mod, "http-post-with-timeout")
 Rel(config, util_mod, "json-read-string (.env)")
 Rel(util_mod, logging, "http-debug-log!")
+Rel(util_mod, provenance, "provenance-log!, content-sha256")
 Rel(ollama_mod, ollama, "HTTP")
 Rel(mcp_mod, skills_hub, "HTTP POST + SSE (curl+FIFO)")
 Rel(telem_mod, otel, "POST /v1/metrics")
@@ -122,13 +124,16 @@ SHOW_LEGEND()
 @enduml
 #+END_SRC
 
-** Module Summary (17 source files, ~7k LOC)
+** Module Summary (21 source files, ~8.4k LOC)
 
 | Module         | File             | Role                                        | Key exports                                              |
 |----------------+------------------+---------------------------------------------+----------------------------------------------------------|
 | main           | =main.scm=      | CLI entry, getopt                           | =(main)=                                                 |
 | repl           | =repl.scm=      | REPL loop, chat dispatch                    | =repl-start=, =repl-eval=, =handle-command=             |
+| provider       | =provider.scm=  | Multi-provider dispatch                     | =provider-chat-with-tools=, =provider-resolve=           |
 | ollama         | =ollama.scm=    | Ollama API client                           | =ollama-chat[-streaming]=, =ollama-parse-tool-call=      |
+| openai         | =openai.scm=    | OpenAI-compat client (LiteLLM, vLLM)       | =openai-chat-with-tools=, =openai-chat=                 |
+| gemini         | =gemini.scm=    | Google AI Gemini native client              | =gemini-chat-with-tools=, =gemini-chat=                 |
 | mcp            | =mcp.scm=       | MCP SSE client                              | =mcp-init=, =mcp-call-tool=, =mcp-shutdown!=            |
 | tools          | =tools.scm=     | Tool registry + dispatch                    | =register-tool=, =execute-tool=, =tools-to-schema=      |
 | telemetry      | =telemetry.scm= | OTLP/HTTP counter emission                  | =telemetry-init=, =inc-counter!=, =telemetry-flush!=    |
@@ -143,6 +148,7 @@ SHOW_LEGEND()
 | status         | =status.scm=    | Streaming output display                    | =status-stream-start=, =status-stream-token=            |
 | version        | =version.scm=   | Semver constants                            | =*version*=, =version-string=                           |
 | commands       | =commands.scm=  | Custom command loader                       | =load-custom-commands!=                                  |
+| irc            | =irc.scm=       | IRC integration (optional)                  | =irc-connected?=, =irc-send=                            |
 
 * 3. Network Topology
 
