@@ -18,7 +18,10 @@
   #:export (openai-host
             openai-model
             openai-api-key
+            openai-aig-token
+            openai-aig-mode
             openai-auth-headers
+            openai-find-header
             openai-list-models
             openai-chat
             openai-chat-streaming
@@ -46,8 +49,59 @@
       (config-get "SAGE_MODEL")
       "gpt-4o-mini"))
 
+;;; openai-aig-token: Cloudflare AI Gateway token (for stored-keys mode).
+;;; When set, sage emits cf-aig-authorization alongside or instead of the
+;;; downstream Authorization header (controlled by openai-aig-mode).
+(define (openai-aig-token)
+  (or (config-get "OPENAI_AIG_TOKEN")
+      (getenv "SAGE_OPENAI_AIG_TOKEN")))
+
+;;; openai-aig-mode: One of "stored", "both", "byok".
+;;;   stored — emit ONLY cf-aig-authorization, suppress Authorization.
+;;;           The gateway injects the downstream provider key itself.
+;;;   both   — emit BOTH Authorization (BYOK downstream) and
+;;;           cf-aig-authorization (gateway auth).
+;;;           Will fail with 400 "Multiple authentication credentials"
+;;;           if the gateway also has stored keys configured for the
+;;;           same provider. Valid for BYOK-behind-a-gateway.
+;;;   byok   — emit only Authorization (default when AIG_TOKEN unset).
+;;;
+;;; Default resolution: if AIG_TOKEN is set and mode is unset, default
+;;; to "stored" (the most common CF AI Gateway deployment shape).
+(define (openai-aig-mode)
+  (let ((explicit (or (config-get "OPENAI_AIG_MODE")
+                      (getenv "SAGE_OPENAI_AIG_MODE"))))
+    (cond
+     ((and (string? explicit) (not (string-null? explicit)))
+      (string-downcase explicit))
+     ((openai-aig-token) "stored")
+     (else "byok"))))
+
 (define (openai-auth-headers)
-  `(("Authorization" . ,(string-append "Bearer " (openai-api-key)))))
+  "Assemble auth headers for openai-compat providers.
+
+For Cloudflare AI Gateway configurations:
+- stored mode → only `cf-aig-authorization: Bearer <gateway_token>`
+- both mode   → both Authorization and cf-aig-authorization
+- byok mode   → only Authorization (current / non-gateway default)"
+  (let* ((aig-token (openai-aig-token))
+         (mode (openai-aig-mode))
+         (auth `("Authorization" . ,(string-append "Bearer "
+                                                   (openai-api-key))))
+         (aig (and aig-token
+                   `("cf-aig-authorization" . ,(string-append "Bearer "
+                                                              aig-token)))))
+    (cond
+     ;; Stored keys: CF gateway supplies the downstream key; sage must NOT
+     ;; send Authorization or the gateway rejects with 400.
+     ((and aig (string=? mode "stored"))
+      (list aig))
+     ;; Both: BYOK downstream, plus gateway auth.
+     ((and aig (string=? mode "both"))
+      (list auth aig))
+     ;; Explicit byok OR AIG_TOKEN missing — original behaviour.
+     (else
+      (list auth)))))
 
 ;;; ============================================================
 ;;; Model Listing
@@ -99,49 +153,41 @@
 ;;; Chat Completions
 ;;; ============================================================
 
-;;; openai-post-with-headers: POST that also captures response headers.
-;;; Returns (code body guardrails) where guardrails is a string or #f.
+;;; openai-find-header: Case-insensitive lookup in a response-headers alist.
+(define (openai-find-header headers name)
+  (let loop ((hs headers))
+    (cond
+     ((null? hs) #f)
+     ((and (pair? (car hs))
+           (string? (caar hs))
+           (string-ci=? (caar hs) name))
+      (cdar hs))
+     (else (loop (cdr hs))))))
+
+;;; openai-post-with-headers: POST with response-header capture.
+;;;
+;;; Routes through util.scm:http-post-with-headers-captured so that
+;;; SAGE_DEBUG_HTTP=1 traces openai-provider traffic (LiteLLM, CF AI
+;;; Gateway, vLLM). Previously this shelled out to curl directly,
+;;; bypassing the wire logger — see docs/reports/20260417-cloudflare
+;;; -ai-gateway-requirements.org § R7.
+;;;
+;;; Returns (code body guardrails) where guardrails is the value of the
+;;; `x-litellm-applied-guardrails` response header or #f.
 (define (openai-post-with-headers url body timeout headers)
-  "POST via curl capturing response headers for guardrail detection."
-  (let* ((header-file (format #f "/tmp/sage-headers-~a" (getpid)))
-         (in-file (format #f "/tmp/sage-post-in-~a" (getpid)))
-         (out-file (format #f "/tmp/sage-post-out-~a" (getpid)))
-         (_ (call-with-output-file in-file
-              (lambda (port) (display body port))))
-         (header-args (string-join
-                       (cons "-H 'Content-Type: application/json'"
-                             (map (lambda (h)
-                                    (format #f "-H '~a: ~a'" (car h) (cdr h)))
-                                  headers))
-                       " "))
-         (cmd (format #f "curl -s --max-time ~a -D '~a' -w '\\n%{http_code}' -X POST ~a -d '@~a' '~a' > '~a'"
-                      timeout header-file header-args in-file url out-file)))
-    (system cmd)
-    (let* ((output (if (file-exists? out-file)
-                       (call-with-input-file out-file get-string-all)
-                       ""))
-           (lines (string-split output #\newline))
-           (code-line (if (pair? lines) (last lines) "0"))
-           (body-lines (if (pair? lines) (drop-right lines 1) '()))
-           (resp-body (string-join body-lines "\n"))
-           (code (or (string->number (string-trim-both code-line)) 0))
-           ;; Extract guardrail header
-           (guardrails
-            (if (file-exists? header-file)
-                (let ((hdrs (call-with-input-file header-file get-string-all)))
-                  (let ((match (string-contains hdrs "x-litellm-applied-guardrails:")))
-                    (if match
-                        (let* ((start (+ match (string-length "x-litellm-applied-guardrails:")))
-                               (end (or (string-index hdrs #\newline start)
-                                        (string-length hdrs))))
-                          (string-trim-both (substring hdrs start end)))
-                        #f)))
-                #f)))
-      ;; Cleanup
-      (when (file-exists? in-file) (delete-file in-file))
-      (when (file-exists? out-file) (delete-file out-file))
-      (when (file-exists? header-file) (delete-file header-file))
-      (list code resp-body guardrails))))
+  (let* ((result (http-post-with-headers-captured
+                  url body
+                  #:timeout timeout
+                  #:headers headers))
+         (code (if (and (list? result) (>= (length result) 1))
+                   (car result) 0))
+         (resp-body (if (and (list? result) (>= (length result) 2))
+                        (cadr result) ""))
+         (resp-headers (if (and (list? result) (>= (length result) 3))
+                           (caddr result) '()))
+         (guardrails (openai-find-header resp-headers
+                                         "x-litellm-applied-guardrails")))
+    (list code resp-body guardrails)))
 
 ;;; openai-chat: Non-streaming chat completion.
 (define* (openai-chat model messages #:key (stream #f))
