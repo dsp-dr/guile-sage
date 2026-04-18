@@ -18,6 +18,8 @@
   #:export (openai-host
             openai-model
             openai-api-key
+            openai-aig-token
+            openai-aig-mode
             openai-auth-headers
             openai-find-header
             openai-list-models
@@ -47,8 +49,59 @@
       (config-get "SAGE_MODEL")
       "gpt-4o-mini"))
 
+;;; openai-aig-token: Cloudflare AI Gateway token (for stored-keys mode).
+;;; When set, sage emits cf-aig-authorization alongside or instead of the
+;;; downstream Authorization header (controlled by openai-aig-mode).
+(define (openai-aig-token)
+  (or (config-get "OPENAI_AIG_TOKEN")
+      (getenv "SAGE_OPENAI_AIG_TOKEN")))
+
+;;; openai-aig-mode: One of "stored", "both", "byok".
+;;;   stored — emit ONLY cf-aig-authorization, suppress Authorization.
+;;;           The gateway injects the downstream provider key itself.
+;;;   both   — emit BOTH Authorization (BYOK downstream) and
+;;;           cf-aig-authorization (gateway auth).
+;;;           Will fail with 400 "Multiple authentication credentials"
+;;;           if the gateway also has stored keys configured for the
+;;;           same provider. Valid for BYOK-behind-a-gateway.
+;;;   byok   — emit only Authorization (default when AIG_TOKEN unset).
+;;;
+;;; Default resolution: if AIG_TOKEN is set and mode is unset, default
+;;; to "stored" (the most common CF AI Gateway deployment shape).
+(define (openai-aig-mode)
+  (let ((explicit (or (config-get "OPENAI_AIG_MODE")
+                      (getenv "SAGE_OPENAI_AIG_MODE"))))
+    (cond
+     ((and (string? explicit) (not (string-null? explicit)))
+      (string-downcase explicit))
+     ((openai-aig-token) "stored")
+     (else "byok"))))
+
 (define (openai-auth-headers)
-  `(("Authorization" . ,(string-append "Bearer " (openai-api-key)))))
+  "Assemble auth headers for openai-compat providers.
+
+For Cloudflare AI Gateway configurations:
+- stored mode → only `cf-aig-authorization: Bearer <gateway_token>`
+- both mode   → both Authorization and cf-aig-authorization
+- byok mode   → only Authorization (current / non-gateway default)"
+  (let* ((aig-token (openai-aig-token))
+         (mode (openai-aig-mode))
+         (auth `("Authorization" . ,(string-append "Bearer "
+                                                   (openai-api-key))))
+         (aig (and aig-token
+                   `("cf-aig-authorization" . ,(string-append "Bearer "
+                                                              aig-token)))))
+    (cond
+     ;; Stored keys: CF gateway supplies the downstream key; sage must NOT
+     ;; send Authorization or the gateway rejects with 400.
+     ((and aig (string=? mode "stored"))
+      (list aig))
+     ;; Both: BYOK downstream, plus gateway auth.
+     ((and aig (string=? mode "both"))
+      (list auth aig))
+     ;; Explicit byok OR AIG_TOKEN missing — original behaviour.
+     (else
+      (list auth)))))
 
 ;;; ============================================================
 ;;; Model Listing
