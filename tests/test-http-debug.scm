@@ -155,6 +155,92 @@
                  (not (string-contains (car lines) "<redacted>")))
         (error "Authorization header should show <redacted>")))))
 
+;;; ----- http-post-with-headers-captured (new openai-compat path) -----
+
+(format #t "~%--- http-post-with-headers-captured ---~%")
+
+(run-test "http-post-with-headers-captured logs req+resp"
+  (lambda ()
+    (reset-test-dir)
+    (setenv "SAGE_DEBUG_HTTP" "1")
+    (when (ollama-up?)
+      (http-post-with-headers-captured
+       "http://localhost:11434/api/version"
+       ""
+       #:timeout 5))
+    (let ((lines (read-log-lines)))
+      ;; Only assert if the local ollama was reachable; skip otherwise.
+      (when (>= (length lines) 2)
+        (let ((req (json-read-string (car lines)))
+              (resp (json-read-string (cadr lines))))
+          (unless (equal? (assoc-ref req "type") "request")
+            (error "first line should be request"))
+          (unless (equal? (assoc-ref resp "type") "response")
+            (error "second line should be response"))
+          (unless (number? (assoc-ref resp "code"))
+            (error "response should have numeric code")))))))
+
+(run-test "http-post-with-headers-captured returns 3-tuple"
+  (lambda ()
+    (reset-test-dir)
+    (setenv "SAGE_DEBUG_HTTP" "1")
+    (when (ollama-up?)
+      (let ((result (http-post-with-headers-captured
+                     "http://localhost:11434/api/version"
+                     ""
+                     #:timeout 5)))
+        (unless (and (list? result) (= (length result) 3))
+          (error "expected (code body headers) triple" result))
+        (unless (number? (car result))
+          (error "first element should be numeric code"))
+        (unless (string? (cadr result))
+          (error "second element should be string body"))
+        (unless (list? (caddr result))
+          (error "third element should be header alist"))))))
+
+;;; ----- cf-aig-authorization redaction -----
+
+(format #t "~%--- cf-aig-authorization redaction ---~%")
+
+(run-test "cf-aig-authorization header is redacted in log"
+  (lambda ()
+    (reset-test-dir)
+    (setenv "SAGE_DEBUG_HTTP" "1")
+    ;; Log a synthetic entry directly to avoid needing a reachable gateway.
+    (http-debug-log!
+     `(("type" . "request")
+       ("headers"
+        . ,(list->vector
+            (map (lambda (h)
+                   (let ((k (car h)) (v (cdr h)))
+                     (if (http-debug-sensitive-header? k)
+                         (format #f "~a: <redacted>" k)
+                         (format #f "~a: ~a" k v))))
+                 '(("cf-aig-authorization" . "Bearer cfut_SECRET_XYZ")
+                   ("X-Other" . "visible")))))))
+    (let ((lines (read-log-lines)))
+      (when (null? lines)
+        (error "log should not be empty"))
+      (when (string-contains (car lines) "cfut_SECRET_XYZ")
+        (error "cf-aig gateway token leaked into log"))
+      (unless (string-contains (car lines) "<redacted>")
+        (error "cf-aig-authorization should show <redacted>")))))
+
+(run-test "http-debug-sensitive-header? covers Authorization, cf-aig, x-api-key"
+  (lambda ()
+    (unless (http-debug-sensitive-header? "Authorization")
+      (error "Authorization should be sensitive"))
+    (unless (http-debug-sensitive-header? "authorization")
+      (error "case-insensitive check"))
+    (unless (http-debug-sensitive-header? "cf-aig-authorization")
+      (error "cf-aig-authorization should be sensitive"))
+    (unless (http-debug-sensitive-header? "CF-AIG-AUTHORIZATION")
+      (error "cf-aig case-insensitive"))
+    (unless (http-debug-sensitive-header? "x-api-key")
+      (error "x-api-key should be sensitive"))
+    (when (http-debug-sensitive-header? "Content-Type")
+      (error "Content-Type should not be sensitive"))))
+
 ;;; Cleanup
 (unsetenv "SAGE_DEBUG_HTTP")
 (unsetenv "SAGE_LOG_DIR")
