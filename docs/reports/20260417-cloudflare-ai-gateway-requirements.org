@@ -1,0 +1,180 @@
+#+TITLE: Cloudflare AI Gateway — Integration Requirements
+#+DATE: 2026-04-17
+#+AUTHOR: guile-sage
+#+OPTIONS: toc:2 num:t ^:nil
+
+* Context
+
+Sage already supports OpenAI-compat backends via =src/sage/openai.scm=
+and =SAGE_PROVIDER=openai=. Cloudflare AI Gateway exposes a compat
+endpoint at =.../compat/chat/completions= that multiplexes across
+downstream LLM providers by model prefix. Wiring sage through the
+gateway gives us:
+
+- unified billing and rate limiting for any downstream provider,
+- request/response logging at the edge (dashboard /Logs/ tab),
+- a single audit surface instead of per-provider keys in =.env=.
+
+This report captures the /requirements/ for that integration. The
+empirical testing process and observed failures live in a separate
+(private) gist — see =References=.
+
+* Requirements
+
+** R1. Provider module reuse
+
+The existing =openai.scm= module MUST work unchanged against the
+gateway compat endpoint. Sage talks OpenAI /shape/; the gateway
+speaks the same shape and forwards to the downstream provider.
+
+Success criterion: setting the existing env pair
+
+#+BEGIN_EXAMPLE
+SAGE_PROVIDER=openai
+SAGE_OPENAI_BASE=<gateway-compat-base>
+SAGE_OPENAI_API_KEY=<token>
+SAGE_MODEL=<provider>/<model>
+#+END_EXAMPLE
+
+and nothing else makes sage issue a successful chat completion. No
+code changes required in sage.
+
+** R2. Account ID and token handling
+
+- Gateway base URLs contain a Cloudflare account ID. That ID is
+  sensitive enough to keep out of committed files.
+- =.env= is already gitignored (=.gitignore= line 8). All gateway
+  config (base URL, token) MUST live there, never in =.env.template=
+  or any doc committed to the repo.
+- Sage's existing HTTP debug logger (=util.scm:311=) redacts
+  =Authorization= headers. That redaction covers the compat endpoint
+  path; no new redaction code needed.
+- Tokens with prefixes =cfut_=, =hf_=, =sk-=, =AQ.Ab8= (Google
+  Express) SHOULD all be treated identically at the log layer —
+  the redactor already case-insensitively matches on header name,
+  not token shape. OK as-is.
+
+** R3. Model-prefix routing
+
+The gateway uses =<provider>/<model>= syntax. The list we need to
+work against:
+
+| Prefix             | Auth path                                    | Verified? |
+|--------------------+----------------------------------------------+-----------|
+| =workers-ai/@cf/*= | =Authorization: Bearer <cf_token>=           | YES       |
+| =openai/*=         | =Authorization: Bearer <openai_key>=         | not tested|
+| =anthropic/*=      | =Authorization: Bearer <anthropic_key>=      | not tested|
+| =google-ai-studio/*= | stored-key path or downstream Google key   | FAILED    |
+| =google-vertex-ai/*= | Vertex OAuth (not API key)                 | FAILED    |
+| =huggingface/<model>= | =Authorization: Bearer <hf_token>=        | FAILED (HF API migration, not gateway) |
+
+Only =workers-ai/*= is confirmed end-to-end through sage. See the
+testing gist for request/response details.
+
+** R4. Stored keys vs BYOK
+
+The gateway supports two auth models:
+
+1. /Bring-your-own-key (BYOK)/: client sends
+   =Authorization: Bearer <downstream_provider_key>=. Gateway
+   forwards as-is.
+2. /Stored keys/: operator uploads provider credentials via the
+   /Provider Keys/ dashboard. Client sends only
+   =cf-aig-authorization: Bearer <cf_aig_token>=. Gateway injects
+   stored credentials on the forwarded request.
+
+Sage today supports BYOK trivially (it's just
+=Authorization: Bearer=). Stored keys require the =cf-aig-
+authorization= header, which sage does NOT emit.
+
+If stored keys become the preferred operational model, sage needs
+a small addition: an optional =SAGE_OPENAI_AIG_TOKEN= env var that,
+when set, is emitted as =cf-aig-authorization=. The =Authorization=
+header MAY still be emitted with the same value or omitted depending
+on the downstream provider. Empirical behaviour varies (see testing
+gist).
+
+** R5. Non-functional requirements
+
+- *Latency*: compat endpoint adds one network hop. Budget: add at
+  most 200 ms p50 over direct-to-provider. Confirm with
+  =.logs/http.jsonl= once the debug logger is wired into
+  =openai.scm= (see R7).
+- *Timeout*: existing =*request-timeout*= (30 s) is adequate; the
+  gateway itself times out at 100 s.
+- *Streaming*: =openai-chat-streaming= uses
+  =http-post-streaming=; verify it still works against the gateway.
+  Not yet tested.
+- *Cost*: gateway does not add a surcharge for workers-ai traffic
+  beyond the underlying compute cost (~$0.00002–$0.00019 per call
+  in testing).
+
+** R6. Dashboard as observability sink
+
+The gateway /Logs/ tab persists up to 10M logs per gateway. This
+duplicates some of what sage's structured JSONL log captures but
+adds:
+
+- edge-side latency,
+- downstream provider response shape,
+- downstream model name as seen by the provider (workers-ai's
+  =@cf/meta/llama-3.1-8b-instruct= comes back un-prefixed in the
+  gateway logs).
+
+No sage code change needed to get dashboard visibility — just
+route traffic through the gateway.
+
+** R7. Debug log gap (follow-up)
+
+=openai.scm= shells out to =curl= directly in
+=openai-post-with-headers= rather than going through =util.scm='s
+=http-post-with-timeout=. Consequence: =SAGE_DEBUG_HTTP=1= does
+NOT produce a =.logs/http.jsonl= entry for openai-path calls.
+
+Fix (out of scope for this report, but recommended): route
+=openai.scm= through =util.scm= so the wire logger catches both
+providers. File as =guile-sage-XXX=.
+
+* Security Considerations
+
+- /Never commit/ the account ID, gateway name, or any token. The
+  account ID alone enables fingerprinting of gateway names via
+  dashboard URL probing.
+- Gateway tokens (=cfut_*=) are Cloudflare user API tokens. Scope
+  them narrowly (AI Gateway Run only). A compromised gateway
+  token is a billing risk, not a provider-credential exfil risk,
+  as long as stored keys are not configured.
+- Downstream provider keys passed via BYOK are visible to the
+  gateway operator (Cloudflare) and logged at the edge. For
+  provider keys under strong confidentiality constraints, prefer
+  stored keys.
+- The =cf-aig-authorization= header is additive, not a replacement
+  for the downstream =Authorization=. When stored keys are
+  configured, passing both headers yielded a 400 "Multiple
+  authentication credentials" in our test. Treat this as evidence
+  that the gateway /does/ inject stored keys even when the client
+  already provided a downstream key.
+
+* References
+
+- Cloudflare AI Gateway docs: =https://developers.cloudflare.com/ai-gateway/=
+- Cloudflare AI Gateway llms.txt: =https://developers.cloudflare.com/ai-gateway/llms-full.txt=
+- Testing process, request/response samples, and observed failures:
+  /see private gist/ (operator-maintained; not linked from this
+  report to avoid coupling a public doc to an unlisted URL).
+
+* Decision
+
+Minimum-viable integration is already achieved: sage can route
+through the gateway for =workers-ai/*= models with no code changes
+beyond =.env= edits. For =google-ai-studio/*= or
+=google-vertex-ai/*=, gateway-side Provider Keys configuration is
+required; without it, requests fail at the downstream-auth step.
+
+Recommend:
+
+1. Keep sage's openai provider unchanged for now.
+2. File =guile-sage-XXX= to route =openai.scm= HTTP through
+   =util.scm= so wire logs capture gateway traffic.
+3. If stored keys become relevant, add =SAGE_OPENAI_AIG_TOKEN=
+   support behind a flag.
