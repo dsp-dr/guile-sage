@@ -17,6 +17,7 @@
   #:use-module (ice-9 receive)
   #:use-module (ice-9 popen)
   #:use-module (srfi srfi-1)
+  #:use-module (sage provenance)
   #:export (http-get
             http-post
             http-post-with-timeout
@@ -474,13 +475,19 @@ Cloudflare AI Gateway (cf-aig-authorization)."
 
 ;;; http-get: Use curl for HTTPS (gnutls cert issues), native for HTTP
 (define* (http-get url #:key (headers '()))
-  (catch #t
-    (lambda ()
-      (if (https? url)
-          (http-get-curl url #:headers headers)
-          (http-get-native url #:headers headers)))
-    (lambda (key . args)
-      (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
+  (let ((result (catch #t
+                  (lambda ()
+                    (if (https? url)
+                        (http-get-curl url #:headers headers)
+                        (http-get-native url #:headers headers)))
+                  (lambda (key . args)
+                    (cons 0 (format #f "HTTP error: ~a ~a" key args))))))
+    (when (provenance-enabled?)
+      (let ((code (if (pair? result) (car result) 0))
+            (body (if (pair? result) (cdr result) "")))
+        (provenance-log! url code (string-length body)
+                         (content-sha256 body))))
+    result))
 
 ;;; http-post: Native for HTTP, curl fallback for HTTPS
 (define* (http-post url body #:key (headers '()))
@@ -513,6 +520,9 @@ Cloudflare AI Gateway (cf-aig-authorization)."
          ("elapsed_ms" . ,elapsed-ms)
          ("body_size" . ,(string-length (or resp "")))
          ("body" . ,(http-debug-truncate (or resp "")))))
+      (when (provenance-enabled?)
+        (provenance-log! url code (string-length (or resp ""))
+                         (content-sha256 (or resp ""))))
       result)))
 
 ;;; http-post-with-timeout: POST with explicit timeout in seconds
@@ -548,6 +558,9 @@ Cloudflare AI Gateway (cf-aig-authorization)."
          ("elapsed_ms" . ,elapsed-ms)
          ("body_size" . ,(string-length (or resp "")))
          ("body" . ,(http-debug-truncate (or resp "")))))
+      (when (provenance-enabled?)
+        (provenance-log! url code (string-length (or resp ""))
+                         (content-sha256 (or resp ""))))
       result)))
 
 ;;; parse-curl-header-dump: Parse curl `-D` output into a response-headers alist.
