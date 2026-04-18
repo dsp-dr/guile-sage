@@ -26,7 +26,7 @@ GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench presentation eval tmux-session tmux-kill
+.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench presentation eval tmux-session tmux-kill eval-provenance
 
 all: $(OBJECTS)
 
@@ -242,6 +242,9 @@ sage-commit:
 eval:
 	@scripts/eval-sage.sh $(ARGS)
 
+eval-provenance:
+	@scripts/eval-provenance.sh $(ARGS)
+
 test-guardrails:
 	@scripts/test-guardrails.sh
 
@@ -362,6 +365,7 @@ help:
 	@echo "  sage-commit            - Commit as guile-sage identity (MSG='msg')"
 	@echo "  test-guardrails        - Run LiteLLM guardrail policy tests"
 	@echo "  timing-bench           - Run per-model timing benchmarks"
+	@echo "  eval-provenance        - Eval traffic + validate provenance ledger"
 	@echo ""
 	@echo "Version & Release:"
 	@echo "  patch         - Bump patch version (0.1.0 -> 0.1.1)"
