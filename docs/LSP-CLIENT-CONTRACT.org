@@ -1,0 +1,270 @@
+#+TITLE: guile-sage — LSP Client Integration Contract
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-19
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This contract specifies how =guile-sage= operates as an *LSP client*,
+connecting to external language servers (TypeScript, Ruby, Python, Go,
+etc.) to give the agent code-aware capabilities: diagnostics,
+definitions, references, completion, rename, and code actions.
+
+The companion document =docs/LSP-CONTRACT.org= specifies sage operating
+as an LSP *server* (editors connect to sage). Both roles coexist — sage
+can run as a server for Emacs/VSCode while simultaneously consuming
+other language servers as tools.
+
+The schema and commands in this contract follow GitHub Copilot CLI
+conventions (https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/add-lsp-servers)
+for cross-tool consistency.
+
+*Status:* N/A --- speculative feature. No implementation exists yet.
+This contract defines the target behavior for =src/sage/lsp-client.scm=.
+
+* 1. Configuration schema
+
+sage reads LSP server definitions from =~/.config/sage/config.json=
+(user scope) and =.sage/config.json= (project scope). Project scope
+overrides user scope for servers with the same name.
+
+#+BEGIN_SRC json
+{
+  "lspServers": {
+    "typescript": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "fileExtensions": {
+        ".ts": "typescript",
+        ".tsx": "typescriptreact",
+        ".js": "javascript",
+        ".jsx": "javascriptreact",
+        ".mjs": "javascript"
+      }
+    },
+    "ruby": {
+      "command": "ruby-lsp",
+      "args": [],
+      "fileExtensions": {
+        ".rb": "ruby",
+        ".erb": "eruby"
+      }
+    },
+    "python": {
+      "command": "pylsp",
+      "args": [],
+      "fileExtensions": {
+        ".py": "python",
+        ".pyi": "python"
+      }
+    }
+  }
+}
+#+END_SRC
+
+** Schema fields
+
+| Field            | Type               | Required | Purpose                                    |
+|------------------+--------------------+----------+--------------------------------------------|
+| =command=        | string             | yes      | Executable name or absolute path           |
+| =args=           | array of strings   | no       | CLI args passed to the server on launch    |
+| =fileExtensions= | object (ext->lang) | yes      | Maps file extension to LSP =languageId=    |
+| =rootMarkers=    | array of strings   | no       | Files that mark the workspace root         |
+| =initOptions=    | object             | no       | Passed as =initializationOptions=          |
+| =env=            | object             | no       | Extra env vars for the spawned server      |
+
+File extensions must start with =.= and map to LSP =languageId= values
+per the LSP 3.17 specification
+(https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocumentItem).
+
+* 2. Installing language servers
+
+These are the reference commands for the three servers sage ships
+default config for. Each is a user-scope install and requires the
+corresponding runtime to already be on PATH.
+
+** TypeScript / JavaScript
+
+#+BEGIN_SRC sh
+npm install -g typescript typescript-language-server
+#+END_SRC
+
+Verify: =typescript-language-server --version=
+
+** Ruby
+
+#+BEGIN_SRC sh
+gem install ruby-lsp
+#+END_SRC
+
+Verify: =ruby-lsp --version=
+
+** Python
+
+#+BEGIN_SRC sh
+pip install python-lsp-server
+#+END_SRC
+
+Verify: =pylsp --version=
+
+Optional plugins for python-lsp-server (ruff, mypy, black):
+
+#+BEGIN_SRC sh
+pip install 'python-lsp-server[all]' python-lsp-ruff pylsp-mypy
+#+END_SRC
+
+** Other servers (documented, not auto-configured)
+
+| Language | Install                                                    | Command                  |
+|----------+------------------------------------------------------------+--------------------------|
+| Go       | =go install golang.org/x/tools/gopls@latest=               | =gopls=                  |
+| Rust     | =rustup component add rust-analyzer=                       | =rust-analyzer=          |
+| Clojure  | =brew install clojure-lsp/brew/clojure-lsp-native=         | =clojure-lsp=            |
+| Lua      | via Homebrew: =brew install lua-language-server=           | =lua-language-server=    |
+| Haskell  | =ghcup install hls=                                        | =haskell-language-server= |
+
+Users add these to their =lspServers= config manually.
+
+* 3. Three-way access (CLI flag | slash command | Scheme API)
+
+| Operation         | CLI flag              | Slash command              | Scheme API                         |
+|-------------------+-----------------------+----------------------------+------------------------------------|
+| List servers      | =--lsp-list=          | =/lsp list=                | =(lsp-list-servers)=               |
+| Test a server     | =--lsp-test NAME=     | =/lsp test NAME=           | =(lsp-test-server NAME)=           |
+| Start a server    | (implicit on demand)  | =/lsp start NAME=          | =(lsp-start-server NAME)=          |
+| Stop a server     | —                     | =/lsp stop NAME=           | =(lsp-stop-server NAME)=           |
+| Show status       | =--lsp-status=        | =/lsp status=              | =(lsp-server-status)=              |
+| Reload config     | —                     | =/lsp reload=              | =(lsp-client-config-reload!)=      |
+
+** =/lsp test= behavior
+
+After adding and configuring an LSP server, start (or restart) sage.
+Use =/lsp test SERVER-NAME= to verify the server launches correctly.
+
+The command:
+1. Looks up =SERVER-NAME= in the merged =lspServers= config
+2. Spawns the configured =command= with =args= (stdio piped)
+3. Sends a minimal =initialize= request with a temporary workspace
+4. Waits up to 10 s for the server to return capabilities
+5. Sends =shutdown= + =exit=
+6. Prints =PASS= (with reported capabilities) or =FAIL= (with reason)
+
+Example:
+
+#+BEGIN_EXAMPLE
+sage[llama3.2@local]> /lsp test typescript
+[lsp-client] spawning: typescript-language-server --stdio
+[lsp-client] initialize ... ok (140 ms)
+[lsp-client] capabilities: textDocumentSync, completion, hover, definition,
+             references, documentHighlight, documentSymbol, codeAction,
+             codeLens, formatting, rangeFormatting, rename, foldingRange
+[lsp-client] shutdown ... ok
+PASS typescript — initialized in 140 ms, 13 capabilities reported
+#+END_EXAMPLE
+
+* 4. Lifecycle
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+  participant S as sage
+  participant C as config loader
+  participant L as lsp-client
+  participant P as language server process
+  participant M as LLM
+
+  S->>C: lsp-client-config-load
+  C-->>S: {lspServers: {...}}
+  S->>M: chat turn mentions foo.ts
+  M-->>S: tool_call lsp_definition(path=foo.ts, line=42)
+  S->>L: route by extension (.ts -> typescript)
+  L->>P: spawn (if not running) + initialize
+  P-->>L: capabilities
+  L->>P: textDocument/definition
+  P-->>L: Location[]
+  L-->>S: tool result
+  S->>M: continue with result
+#+END_SRC
+
+* 5. Invariants (LC01-LC16)
+
+| ID   | Invariant                                                                                    | Test strategy                         |
+|------+----------------------------------------------------------------------------------------------+---------------------------------------|
+| LC01 | Config parsed without crashing on malformed JSON — fail open with WARN log                   | Unit test with truncated JSON         |
+| LC02 | Project =.sage/config.json= overrides user =~/.config/sage/config.json= for same server name | Integration test with both files      |
+| LC03 | =command= field required — missing = WARN + skip server registration                         | Unit test                             |
+| LC04 | =fileExtensions= keys must start with =.= — validated at load time                           | PBT: random extension strings         |
+| LC05 | File extension lookup returns the languageId for the matching server                         | Unit test per configured server       |
+| LC06 | If two servers claim the same extension, the last one loaded wins (project > user)           | Integration test                      |
+| LC07 | Server spawned lazily on first routed tool call                                              | Test that no processes start at boot  |
+| LC08 | Server reused across tool calls within a sage session                                        | Integration test                      |
+| LC09 | =initialize= timeout = 10 s — exceeded = mark server unhealthy, skip                         | Test with a deliberately slow server  |
+| LC10 | =shutdown= + =exit= sent on sage exit — no orphan processes                                  | Process count before/after sage run   |
+| LC11 | =/lsp test= spawns a fresh process (does not reuse running server) so it is idempotent       | Manual test + automated process count |
+| LC12 | Tool permission model (ADR-0003) applies: LSP code actions are UNSAFE by default             | Unit test on permission check         |
+| LC13 | Concurrent LSP requests within a session are queued per-server (sequential processing)       | Stress test                           |
+| LC14 | =env= overrides do not leak between servers                                                  | Integration test                      |
+| LC15 | Malformed server responses (non-JSON-RPC) are logged and the server is marked unhealthy      | Mock server emitting garbage          |
+| LC16 | =rootMarkers= (if set) used to walk up and find workspace root; default = closest =.git=     | Unit test on nested dirs              |
+
+* 6. Tool mapping
+
+sage exposes these LSP-backed tools to the LLM:
+
+| Tool                        | LSP method                       | Safe? |
+|-----------------------------+----------------------------------+-------|
+| =lsp_definition=            | =textDocument/definition=        | yes   |
+| =lsp_references=            | =textDocument/references=        | yes   |
+| =lsp_hover=                 | =textDocument/hover=             | yes   |
+| =lsp_document_symbols=      | =textDocument/documentSymbol=    | yes   |
+| =lsp_workspace_symbols=     | =workspace/symbol=               | yes   |
+| =lsp_diagnostics=           | (cached from =publishDiagnostics=) | yes   |
+| =lsp_code_action=           | =textDocument/codeAction=        | *no*  |
+| =lsp_rename=                | =textDocument/rename=            | *no*  |
+| =lsp_apply_workspace_edit=  | =workspace/applyEdit= (executor) | *no*  |
+
+Unsafe tools require =SAGE_YOLO_MODE=1= or explicit permission grant per
+=docs/adr/0003-security-model.md=.
+
+* 7. Observed divergences
+
+N/A --- speculative feature. Divergences will be recorded here when the
+implementation starts spawning real servers and observing their behavior.
+Expect differences from the LSP 3.17 spec in at least:
+
+- =ruby-lsp= adds custom =rubyLsp/*= notifications outside spec
+- =typescript-language-server= expects =preferences= object in init options
+- =pylsp= has per-plugin init options (=pylsp.plugins.*=)
+
+* 8. Implementation notes
+
+Target module: =src/sage/lsp-client.scm= (does not exist yet).
+
+Reuse opportunities:
+- JSON-RPC envelope: =src/sage/mcp.scm:88-110= (=mcp-make-request=,
+  =mcp-make-notification=) produce valid JSON-RPC 2.0. Extract to a
+  shared =src/sage/jsonrpc.scm= module before both MCP and LSP grow.
+- Content-Length framing: to be added; see =docs/LSP-TRANSPORT-CONTRACT.org=
+  for the transport-layer invariants (LT01-LT12).
+- Process spawn: reuse =(ice-9 popen)= with =open-pipe*= for stdin+stdout
+  piping, mirroring the FIFO pattern in =mcp.scm= (without the FIFO
+  since LSP is pure stdio).
+- Safe-path checks: =src/sage/tools.scm= =safe-path?= for any file paths
+  passed as tool arguments.
+
+Config loading follows =src/sage/config.scm:256-282= (existing
+=find-agents-md= / =load-agents-md= pattern) but reads JSON instead of
+markdown.
+
+* 9. Test strategy
+
+- Unit tests: =tests/test-lsp-client.scm= — schema validation, extension
+  routing, config merge semantics, PBT fuzzing of the parser (LC01-LC06,
+  LC14)
+- Integration tests: =tests/test-lsp-integration.scm= — requires at
+  least one installed server (gated on =SAGE_LSP_INTEGRATION=1=); spawns
+  =pylsp= against a fixture directory, runs a definition + hover
+  sequence (LC07-LC11, LC13, LC15, LC16)
+- =/lsp test= manual verification: run against the three reference
+  servers documented in section 2; record capabilities in
+  =docs/reports/20260420-lsp-client-verification.org= once implemented.
