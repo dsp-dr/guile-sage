@@ -143,7 +143,7 @@ done
 #!/bin/bash
 # quick-synthetic.sh - Generate 100k token synthetic session
 
-cd /home/dsp-dr/ghq/github.com/dsp-dr/guile-sage
+cd $HOME/ghq/github.com/dsp-dr/guile-sage
 
 # Use existing sage source as content
 CONTENT=$(cat src/sage/*.scm | head -c 400000)  # ~100k tokens
@@ -182,7 +182,7 @@ EOF
 
 # Copy to sessions directory
 cp experiments/stress-test-session-3/synthetic-100k.json \
-   ~/.local/share/sage/projects/-home-dsp-dr-ghq-github.com-dsp-dr-guile-sage/sessions/
+   ~/.local/share/sage/projects/-home-user-ghq-github.com-dsp-dr-guile-sage/sessions/
 
 echo "Created synthetic-100k session with ~$TOKENS tokens"
 echo "Load with: /load synthetic-100k"

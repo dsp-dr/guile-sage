@@ -199,7 +199,7 @@
         (error "output directory does not exist")))))
 
 ;;; ============================================================
-;;; Integration Tests (requires mac.lan:11434 + flux model)
+;;; Integration Tests (requires localhost:11434 + flux model)
 ;;; ============================================================
 
 (format #t "~%=== Image Generation Integration Tests ===~%")

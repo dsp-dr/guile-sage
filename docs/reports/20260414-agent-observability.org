@@ -199,7 +199,7 @@ Phoenix is the most directly compatible platform with guile-sage's
 existing setup. It accepts OTLP/HTTP, is fully open source, and
 self-hostable. If guile-sage emitted OTEL spans (not just counters),
 Phoenix could visualize the full tool-chain execution as a trace tree.
-It could run alongside the existing Prometheus/Grafana stack on nexus.
+It could run alongside the existing Prometheus/Grafana stack on infra-host.
 
 ** 7. OpenInference
 
@@ -510,7 +510,7 @@ The implementation can reuse the existing =http-post-with-timeout= and
 
 ** Phase 4: Visualization (parallel with Phase 3)
 
-- Deploy Arize Phoenix on nexus alongside Grafana for trace visualization.
+- Deploy Arize Phoenix on infra-host alongside Grafana for trace visualization.
   Phoenix accepts OTLP/HTTP natively and is fully open source.
 - Or configure Grafana Tempo as a trace backend in the existing stack
   (OTel Collector already supports the Tempo exporter).
@@ -549,7 +549,7 @@ viable options are:
 | Self-hostable          | Y                         | Y       | Y        | Y        |
 | Open source            | Y                         | Y       | Y        | Y        |
 | Trace visualization    | Tempo/Jaeger needed       | Built-in| Built-in | Limited  |
-| Already deployed       | *Y* (nexus)               | N       | N        | N        |
+| Already deployed       | *Y* (infra-host)          | N       | N        | N        |
 | Effort to integrate    | Low (add spans)           | Low     | Medium   | Low      |
 
 *Recommendation:* Extend the existing OTEL + Prometheus/Grafana stack

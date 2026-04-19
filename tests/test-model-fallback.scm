@@ -134,7 +134,7 @@
 
 (run-test "select-fallback picks 7B over 14B when both are present"
   (lambda ()
-    ;; Mimic the live mini host: only qwen2.5-coder variants left, no llama.
+    ;; Mimic the live dev-host: only qwen2.5-coder variants left, no llama.
     ;; Smallest = 7b at 4.7 GB.
     (let ((picked (select-fallback-model "mistral:latest"
                                          (list gguf-qwen-big gguf-qwen))))

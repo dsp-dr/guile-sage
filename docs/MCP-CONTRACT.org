@@ -43,7 +43,7 @@ System_Boundary(sage_boundary, "guile-sage") {
   System(sage, "sage REPL", "Guile Scheme CLI. Orchestrates prompts, tools, sessions, context window.")
 }
 
-System_Ext(ollama, "Ollama", "Local LLM runtime on nexus. Provides chat completions + native tool_calls.")
+System_Ext(ollama, "Ollama", "Local LLM runtime on dev-host. Provides chat completions + native tool_calls.")
 
 System_Ext(skills_hub, "skills-hub MCP server", "Python/uvicorn MCP server exposing ~35 skills as tools over HTTP+SSE on port 8400.")
 
@@ -97,9 +97,9 @@ System_Boundary(sage, "guile-sage process") {
   }
 }
 
-System_Ext(ollama, "Ollama", "nexus:11434")
+System_Ext(ollama, "Ollama", "dev-host:11434")
 
-System_Boundary(skills_hub, "skills-hub (remote, nexus:8400)") {
+System_Boundary(skills_hub, "skills-hub (remote, infra-host:8400)") {
   Container(sse_endpoint, "GET /sse",        "uvicorn", "Opens SSE stream, emits `endpoint` event")
   Container(msg_endpoint, "POST /messages/?session_id=…", "uvicorn", "Receives JSON-RPC, returns 202, dispatches response via SSE")
   Container(skill_impl,   "Skill executor",  "Python", "Loads SKILL.md from aygp-dr/skills-hub, returns content blocks")
@@ -147,7 +147,7 @@ sequenceDiagram
     participant T as sse-transport
     participant S as skills-hub<br/>(uvicorn)
 
-    C->>T: (mcp-connect "http://nexus:8400/sse" token)
+    C->>T: (mcp-connect "http://infra-host:8400/sse" token)
     T->>S: GET /sse<br/>Authorization: Bearer <REDACTED-AUTH-TOKEN><br/>Accept: text/event-stream
     S-->>T: HTTP 200 text/event-stream (keep-alive)
     S-->>T: event: endpoint\ndata: /messages/?session_id=<hex>\n\n
@@ -297,7 +297,7 @@ flowchart TD
     U[User types prompt at sage REPL] --> R[repl.scm handle-input]
     R --> A[agent.scm run-turn]
     A --> OS[ollama.scm ollama-chat<br/>POST /api/chat with tools schema]
-    OS -->|HTTP NDJSON| OL[(Ollama nexus:11434)]
+    OS -->|HTTP NDJSON| OL[(Ollama dev-host:11434)]
     OL -->|streaming chunks| OS
     OS --> OPT[ollama-parse-tool-call<br/>decode message.tool_calls]
     OPT -->|no tool call| FIN[display assistant text] --> U
@@ -320,7 +320,7 @@ flowchart TD
     OS --> R
     R --> U
 
-    subgraph skills-hub [skills-hub nexus:8400]
+    subgraph skills-hub [skills-hub infra-host:8400]
         SSE[GET /sse<br/>long-lived stream]
         POST[POST /messages/?session_id=<hex>]
         SK[skill executor<br/>loads SKILL.md]
@@ -734,7 +734,7 @@ exercised by this server; the implementation should still handle
     "content": [
       {
         "type": "text",
-        "text": "# bd (workflow)\nSource: /home/jwalsh/ghq/github.com/aygp-dr/skills-hub/workflow/bd/SKILL.md\n\n---\nname: bd\ndescription: Manage issues via bd (beads)...\n---\n\n# bd — Beads Issue Tracker\n\nWraps the `bd` CLI tool for local-first issue tracking with\ndependency chains...\n"
+        "text": "# bd (workflow)\nSource: /home/user/ghq/github.com/aygp-dr/skills-hub/workflow/bd/SKILL.md\n\n---\nname: bd\ndescription: Manage issues via bd (beads)...\n---\n\n# bd — Beads Issue Tracker\n\nWraps the `bd` CLI tool for local-first issue tracking with\ndependency chains...\n"
       }
     ],
     "isError": false

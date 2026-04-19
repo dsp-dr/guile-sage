@@ -17,7 +17,7 @@ Use **Ollama** as the sole provider for v0.1-v0.5, with multi-provider support p
 ## Rationale
 
 ### Why Ollama First
-1. **Local-first**: Can run completely offline on mac.lan
+1. **Local-first**: Can run completely offline on dev-host
 2. **Free for local**: No API costs during development
 3. **Cloud option**: Ollama Cloud provides paid scaling path
 4. **Simple API**: REST-based, well-documented

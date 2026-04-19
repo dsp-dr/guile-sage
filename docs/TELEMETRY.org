@@ -34,17 +34,17 @@ gRPC, no protobuf — just a fail-soft JSON POST through the existing
                                          │
                                          ▼ POST /v1/metrics
                                  ┌───────────────┐
-                                 │ OTel Collector│ nexus:4318
+                                 │ OTel Collector│ infra-host:4318
                                  └───────┬───────┘
                                          │ Prometheus exporter
                                          ▼
                                  ┌───────────────┐
-                                 │ Prometheus    │ nexus:9090
+                                 │ Prometheus    │ infra-host:9090
                                  └───────┬───────┘
                                          │
                                          ▼
                                  ┌───────────────┐
-                                 │ Grafana       │ nexus:3000
+                                 │ Grafana       │ infra-host:3000
                                  │ /d/ai-tools/  │
                                  └───────────────┘
 #+END_SRC
@@ -107,7 +107,7 @@ In order of preference:
    mkdir -p ~/.config/sage
    cat > ~/.config/sage/.env <<'EOF'
    OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=${OTEL_HTTP_ENDPOINT}/v1/metrics
-   OTEL_RESOURCE_ATTRIBUTES=host.name=mini,team=aygp-dr
+   OTEL_RESOURCE_ATTRIBUTES=host.name=dev-host,team=aygp-dr
    EOF
    #+END_SRC
 
@@ -295,7 +295,7 @@ Why deferred:
 - Adds an HTTP server to the REPL process — non-trivial for a stdin/
   stdout REPL today.
 - The OTel Collector debug exporter already provides this visibility
-  on nexus when enabled.
+  on infra-host when enabled.
 
 * Reference
 
