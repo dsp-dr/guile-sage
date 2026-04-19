@@ -36,15 +36,23 @@
     (string-append dir "/provenance.jsonl")))
 
 (define (provenance-gpg-sign?)
-  "GPG signing when SAGE_PROVENANCE_SIGN=1 and gpg is available."
+  "GPG signing when SAGE_PROVENANCE_SIGN=1 and gpg is available.
+Uses file redirection instead of pipes (Guile popen crashes on FreeBSD 14.3)."
   (and (equal? "1" (getenv "SAGE_PROVENANCE_SIGN"))
        (catch #t
          (lambda ()
-           (let* ((port (open-input-pipe "gpg --version 2>/dev/null"))
-                  (line (read-line port))
-                  (ok (and (string? line) (string-contains line "gpg"))))
-             (close-pipe port)
-             ok))
+           (let* ((tmp (format #f "/tmp/sage-gpg-check-~a" (getpid)))
+                  (rc (prov-exec "/bin/sh" "-c"
+                                (format #f "gpg --version > '~a' 2>/dev/null" tmp))))
+             (if (and (zero? rc) (file-exists? tmp))
+                 (let* ((line (call-with-input-file tmp
+                                (lambda (p) (read-line p))))
+                        (ok (and (string? line) (string-contains line "gpg"))))
+                   (when (file-exists? tmp) (delete-file tmp))
+                   ok)
+                 (begin
+                   (when (file-exists? tmp) (delete-file tmp))
+                   #f))))
          (lambda (key . args) #f))))
 
 ;;; ============================================================
@@ -68,15 +76,25 @@ Tries shasum (macOS) then sha256sum (Linux/FreeBSD)."
       "hash-unavailable")))
 
 (define (try-hash-cmd cmd tmp)
-  "Run CMD on TMP file, extract 64-char hex hash or return #f."
+  "Run CMD on TMP file, extract 64-char hex hash or return #f.
+Uses file redirection instead of pipes (Guile popen crashes on FreeBSD 14.3)."
   (catch #t
     (lambda ()
-      (let* ((port (open-input-pipe (format #f "~a '~a'" cmd tmp)))
-             (line (read-line port)))
-        (close-pipe port)
-        (and (string? line)
-             (>= (string-length line) 64)
-             (substring line 0 64))))
+      (let* ((out-file (format #f "~a.out" tmp))
+             ;; Run hash command with output to file via /bin/sh -c
+             ;; The prov-exec helper uses fork+execlp to avoid shell injection.
+             (rc (prov-exec "/bin/sh" "-c"
+                           (format #f "~a '~a' > '~a' 2>/dev/null" cmd tmp out-file))))
+        (if (and (zero? rc) (file-exists? out-file))
+            (let ((line (call-with-input-file out-file
+                          (lambda (p) (read-line p)))))
+              (when (file-exists? out-file) (delete-file out-file))
+              (and (string? line)
+                   (>= (string-length line) 64)
+                   (substring line 0 64)))
+            (begin
+              (when (file-exists? out-file) (delete-file out-file))
+              #f))))
     (lambda (key . args) #f)))
 
 ;;; ============================================================
