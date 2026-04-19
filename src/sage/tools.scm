@@ -14,6 +14,7 @@
   #:use-module (sage ollama)
   #:use-module (sage telemetry)
   #:use-module (sage provenance)
+  #:use-module (sage scratch)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -48,8 +49,9 @@
 (define *safe-tools* '("read_file" "list_files" "git_status" "git_diff"
                        "git_log" "glob_files" "search_files"
                        "read_logs" "search_logs"
-                       "sage_task_create" "sage_task_complete"
-                       "sage_task_list" "sage_task_status"
+                       "sage_task_create" "sage_task_push"
+                       "sage_task_complete" "sage_task_list" "sage_task_status"
+                       "scratch_get" "scratch_list"
                        "generate_image"))
 (define *workspace* #f)
 
@@ -445,6 +447,13 @@ that care about the exit code (git_push, git_commit) can surface it."
   "guile-sage/0.1 (+https://github.com/dsp-dr/guile-sage; Guile Scheme AI agent)")
 (define *fetch-max-bytes* 1048576)
 (define *fetch-timeout-secs* 10)
+;; Bodies larger than *fetch-inline-threshold* are stored in the
+;; scratch module and fetch_url returns a reference (head preview +
+;; sha). Tunable via env var for stress testing.
+(define *fetch-inline-threshold*
+  (or (and=> (getenv "SAGE_FETCH_INLINE_THRESHOLD") string->number)
+      1024))
+(define *fetch-preview-bytes* 500)
 
 (define (fetch-url-scheme-ok? url)
   (or (string-prefix? "http://" url)
@@ -537,9 +546,18 @@ this is a local replacement that mirrors the curl call pattern."
                        ""))
              (bytes (string-length body))
              (sha (fetch-sha256 body))
-             (ts (fetch-now-iso)))
+             (ts (fetch-now-iso))
+             (inline? (<= bytes *fetch-inline-threshold*)))
         (when (file-exists? body-tmp) (delete-file body-tmp))
         (when (file-exists? hdr-tmp) (delete-file hdr-tmp))
+        ;; Large bodies go to scratch; small ones go inline. Either
+        ;; way the envelope carries the sha so the consumer can
+        ;; scratch_get by sha if the body was stored.
+        (unless inline?
+          (scratch-put! sha body
+                        "source" url
+                        "content-type" content-type
+                        "fetched-at" ts))
         (string-append
          "<fetch-result"
          " source=\"" (fetch-attr-escape url) "\""
@@ -549,8 +567,17 @@ this is a local replacement that mirrors the curl call pattern."
          " sha256=\"" sha "\""
          " fetched-at=\"" ts "\""
          " trust=\"untrusted\""
+         " storage=\"" (if inline? "inline" "scratch") "\""
          " user-agent=\"" (fetch-attr-escape *fetch-ua*) "\">"
-         "<![CDATA[" (fetch-cdata-safe body) "]]>"
+         (if inline?
+             (string-append "<![CDATA[" (fetch-cdata-safe body) "]]>")
+             (string-append
+              "<![CDATA["
+              (fetch-cdata-safe (substring body 0 (min *fetch-preview-bytes* bytes)))
+              "]]><preview-truncated>"
+              "Body stored in scratch. Retrieve more with: "
+              "scratch_get sha=" sha " offset=0 len=2000"
+              "</preview-truncated>"))
          "</fetch-result>"))))))
 
 (define (init-default-tools)
@@ -1145,10 +1172,10 @@ this is a local replacement that mirrors the curl call pattern."
   ;; Agent Task Tools
   ;; ============================================================
 
-  ;; sage_task_create - Create a task for the agent
+  ;; sage_task_create - Append task to the BACK of the queue (FIFO)
   (register-tool
    "sage_task_create"
-   "Create a task for the sage agent to work on. Use this to break down complex requests into manageable steps."
+   "Append a task to the BACK of the queue (FIFO). Use for independent follow-on work. For sub-tasks that must run BEFORE queued siblings, use sage_task_push."
    '(("type" . "object")
      ("properties" . (("title" . (("type" . "string")
                                   ("description" . "Brief task title")))
@@ -1162,6 +1189,62 @@ this is a local replacement that mirrors the curl call pattern."
          (if id
              (format #f "Task created: ~a - ~a" id title)
              "Failed to create task (is beads available?)")))))
+
+  ;; sage_task_push - Push sub-task onto the FRONT of the queue (LIFO)
+  (register-tool
+   "sage_task_push"
+   "Push a sub-task onto the FRONT of the queue (LIFO). Use when decomposing the current work: the new sub-task runs BEFORE anything else already queued. Ideal for 'first extract X, then summarise' patterns."
+   '(("type" . "object")
+     ("properties" . (("title" . (("type" . "string")
+                                  ("description" . "Brief sub-task title")))
+                      ("description" . (("type" . "string")
+                                        ("description" . "What to do; may reference scratch sha from a prior fetch_url result")))))
+     ("required" . #("title" "description")))
+   (lambda (args)
+     (let ((title (assoc-ref args "title"))
+           (desc (assoc-ref args "description")))
+       (let ((id (task-push! title desc)))
+         (if id
+             (format #f "Sub-task pushed: ~a - ~a" id title)
+             "Failed to push sub-task")))))
+
+  ;; scratch_get - Retrieve a window of scratch-stored content by sha
+  (register-tool
+   "scratch_get"
+   "Retrieve a window of content stored in the scratch (e.g. by fetch_url when bytes exceed the inline threshold). Returns up to LEN bytes starting at OFFSET. Use paged retrieval to work through a large body in chunks without blowing the context."
+   '(("type" . "object")
+     ("properties" . (("sha" . (("type" . "string")
+                                ("description" . "sha256 key as reported by fetch_url")))
+                      ("offset" . (("type" . "integer")
+                                   ("description" . "Byte offset (default 0)")))
+                      ("len" . (("type" . "integer")
+                                ("description" . "Byte count to return (default 2000)")))))
+     ("required" . #("sha")))
+   (lambda (args)
+     (let* ((sha (assoc-ref args "sha"))
+            (offset (or (assoc-ref args "offset") 0))
+            (len (or (assoc-ref args "len") 2000))
+            (chunk (scratch-get sha #:offset offset #:len len)))
+       (if chunk
+           chunk
+           (format #f "No scratch entry for sha=~a" sha)))))
+
+  ;; scratch_list - Enumerate stored entries (sha + size)
+  (register-tool
+   "scratch_list"
+   "List scratch entries as 'sha: bytes' lines. Useful for agents to rediscover available stored content across tool calls."
+   '(("type" . "object")
+     ("properties" . ())
+     ("required" . #()))
+   (lambda (args)
+     (let ((entries (scratch-list)))
+       (if (null? entries)
+           "Scratch is empty."
+           (string-join
+            (map (lambda (e)
+                   (format #f "~a: ~a bytes" (car e) (cadr e)))
+                 entries)
+            "\n")))))
 
   ;; sage_task_complete - Mark current task complete
   (register-tool

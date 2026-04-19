@@ -29,6 +29,7 @@
             agent-continue
             agent-increment-iteration!
             task-create
+            task-push!
             task-complete
             task-list
             task-current
@@ -162,11 +163,22 @@
     (irc-log-task task-id (format #f "~a: ~a" event-type message))))
 
 (define (task-create title description)
-  "Create a new task. Returns task ID."
+  "Create a new task appended to the back of the queue (FIFO).
+For sub-tasks that must run BEFORE queued siblings, use task-push!."
   (let ((id (beads-create-task title description)))
     (when id
       (set! *agent-tasks* (append *agent-tasks* (list id)))
       (notify-task-event "created" id title))
+    id))
+
+(define (task-push! title description)
+  "Create a sub-task at the FRONT of the queue (LIFO).
+Use this when decomposing the current work: newly discovered sub-steps
+run before anything else already queued. Returns the task ID."
+  (let ((id (beads-create-task title description)))
+    (when id
+      (set! *agent-tasks* (cons id *agent-tasks*))
+      (notify-task-event "pushed" id title))
     id))
 
 (define (task-complete result-note)
