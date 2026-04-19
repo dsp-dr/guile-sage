@@ -1,0 +1,284 @@
+#+TITLE: guile-sage — Eval Case Schema Contract
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-19
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This document specifies the JSON schema for eval traffic cases
+consumed by =scripts/eval-sage.sh= from =tests/eval/traffic-cases.json=.
+
+The existing schema (TC01-TC20) supports single-tool assertions:
+"given prompt P, expect tool T to fire, and the output to match
+pattern R". The extension defined here (v2 schema) adds assertions
+for *tool chains*: ordered, counted, minimum-repetition requirements
+that test the multi-step pipe introduced in v0.8.0 (fetch_url +
+scratch + sage_task_push).
+
+This contract covers:
+
+- The v1 schema as implemented (fields already honoured by
+  eval-sage.sh)
+- The v2 extension: =expect_tool_min_count=, =expect_tool_order=,
+  =requires_model_tier=
+- Matching rules (how the runner translates a captured pane into a
+  scoring verdict)
+- Backward compatibility (v1 cases remain valid)
+- Invariants (EC01-EC12)
+
+*Status:* v1 live at =tests/eval/traffic-cases.json= and
+=scripts/eval-sage.sh=. v2 is speculative pending the TC21
+chain-planning case.
+
+* 1. Schema (v2)
+
+** 1.1 Case object
+
+Each case is a JSON object. Required fields: =id=, =category=,
+=prompt=, =expect_chain_length=, =max_wait_seconds=. Everything else
+is optional; defaults are documented per-field.
+
+#+BEGIN_SRC json
+{
+  "id": "TC21",
+  "category": "chain_planning",
+  "prompt": "Fetch https://wal.sh/research/guile-sage-inject/ and for each top-level numbered section in its Table of Contents, push a separate sub-task via sage_task_push that will summarise that section. Then call sage_task_list to show me the resulting queue.",
+  "hypothesis": "Decomposes fetched content into 4-6 pushed sub-tasks, then lists the queue",
+
+  "expect_tools":          ["fetch_url", "sage_task_push", "sage_task_list"],
+  "expect_tool_min_count": {"fetch_url": 1, "sage_task_push": 3, "sage_task_list": 1},
+  "expect_tool_order":     ["fetch_url", "sage_task_push", "sage_task_list"],
+  "expect_pattern":        "sage-N",
+  "expect_chain_length":   [5, 15],
+  "expect_error":          false,
+  "expect_guardrail":      false,
+
+  "max_wait_seconds":      90,
+  "requires_model_tier":   "cloud"
+}
+#+END_SRC
+
+** 1.2 Field reference
+
+| Field                   | Required | Since | Type              | Default | Purpose                                                                              |
+|-------------------------+----------+-------+-------------------+---------+--------------------------------------------------------------------------------------|
+| =id=                    | yes      | v1    | string            | —       | Unique case id. =TC01=..=TCnn=. Used in runner output and bead references.           |
+| =category=              | yes      | v1    | string            | —       | Bucket: =tool_call= / =rag= / =guardrail= / =error_handling= / =chain_planning= (v2). |
+| =prompt=                | yes      | v1    | string            | —       | Text sent verbatim to the sage REPL.                                                 |
+| =hypothesis=            | no       | v1    | string            | —       | One-line description of expected behaviour. Informational.                           |
+| =expect_tools=          | no       | v1    | array of string   | =[]=    | Each tool in the list MUST appear at least once in the trace.                        |
+| =expect_tool_min_count= | no       | v2    | object str→int    | ={}=    | Per-tool minimum call count. Superset constraint over =expect_tools=.                |
+| =expect_tool_order=     | no       | v2    | array of string   | =[]=    | First-occurrence order. =[A, B]= requires =A='s first call before =B='s first call.  |
+| =expect_pattern=        | no       | v1    | string (regex)    | ="= "   | Case-insensitive regex; must match somewhere in the final pane text.                 |
+| =expect_chain_length=   | yes      | v1    | [int, int]        | —       | Inclusive [min, max] tool-call count for the whole turn.                             |
+| =expect_error=          | no       | v1    | boolean           | false   | If true, case passes when sage reports a tool error.                                 |
+| =expect_guardrail=      | no       | v1    | boolean           | false   | If true, case passes when LiteLLM/Gemini returns a guardrail refusal.                |
+| =max_wait_seconds=      | yes      | v1    | int               | —       | Pane-poll timeout before case is marked =TIMEOUT=.                                   |
+| =requires_model_tier=   | no       | v2    | enum              | ="any"= | =any= / =local-7b+= / =cloud=. Runner skips case if =SAGE_MODEL= doesn't match.     |
+
+* 2. Matching semantics
+
+** 2.1 Tool extraction
+
+The runner parses =[Tool: <name>]= strings from the captured pane in
+the order they appear. This is how =eval-sage.sh= lines 111-113 extract
+=tools_found= today; no change needed.
+
+** 2.2 =expect_tools= (v1)
+
+Every name in the list MUST appear at least once in =tools_found=.
+Order is not checked; duplicates don't add information. Pass if
+=(subset? expect_tools tools_found)=.
+
+** 2.3 =expect_tool_min_count= (v2)
+
+For each key K with value N in the object, count occurrences of K in
+=tools_found=. The case FAILS if any K's count < N. Zero tolerance: a
+case that declares =sage_task_push: 3= but observes only 2 calls is a
+FAIL even if =expect_tools= was satisfied.
+
+Interaction with =expect_tools=: =expect_tool_min_count= is a strict
+superset. If both are present, the min-count rule applies; the
+=expect_tools= list is informational (and still rendered in =--dry-run=).
+
+** 2.4 =expect_tool_order= (v2)
+
+The runner computes =first-occurrence-idx(tool)= from =tools_found=
+(position of the first call). For the declared order =[A, B, C]=:
+
+  =first-idx(A) < first-idx(B) < first-idx(C)=
+
+Case FAILS if any order is violated. Tools not listed in
+=expect_tool_order= are ignored when checking. This catches
+reorderings (e.g. "list before pushing") without forcing a rigid
+interleaving.
+
+** 2.5 =requires_model_tier= (v2)
+
+Runner checks =SAGE_MODEL= at start and classifies the active model:
+
+| Class       | Matching models (substring)                                      |
+|-------------+------------------------------------------------------------------|
+| =cloud=     | =gemini-=, =claude-=, =gpt-=, =deepseek-coder-v2= via LiteLLM    |
+| =local-7b+= | =qwen2.5-coder:7b=, =deepseek-coder-v2:latest= local, =mistral=  |
+| =local-3b=  | =llama3.2=, =qwen3:0.6b=                                          |
+
+A case with =requires_model_tier: cloud= run against =llama3.2:latest=
+is SKIPPED (not failed). Output shows =SKIP TC21 (requires cloud, got
+local-3b)=. Prevents false-negative noise when a well-designed chain
+case is run against a model known incapable of the chain.
+
+Classification is name-string matching because Ollama doesn't expose
+a size/capability API. Patched via =MODEL_TIER_*= env vars in
+=src/sage/model-tier.scm= if the default classification misfires.
+
+* 3. Examples
+
+** 3.1 v1: Single-tool case (unchanged)
+
+#+BEGIN_SRC json
+{
+  "id": "TC01", "category": "tool_call",
+  "prompt": "What files are in src/sage?",
+  "hypothesis": "Uses list_files tool to enumerate the source directory",
+  "expect_tools": ["list_files"],
+  "expect_pattern": "\\.scm",
+  "expect_chain_length": [1, 1],
+  "expect_error": false, "expect_guardrail": false,
+  "max_wait_seconds": 30
+}
+#+END_SRC
+
+** 3.2 v2: Chain-planning case (new)
+
+#+BEGIN_SRC json
+{
+  "id": "TC21",
+  "category": "chain_planning",
+  "prompt": "Fetch https://wal.sh/research/guile-sage-inject/ and for each top-level numbered section in its Table of Contents, push a separate sub-task via sage_task_push that will summarise that section. Then call sage_task_list to show me the resulting queue.",
+  "hypothesis": "Decomposes fetched content into 4-6 pushed sub-tasks, then lists the queue",
+  "expect_tools": ["fetch_url", "sage_task_push", "sage_task_list"],
+  "expect_tool_min_count": {"fetch_url": 1, "sage_task_push": 3, "sage_task_list": 1},
+  "expect_tool_order": ["fetch_url", "sage_task_push", "sage_task_list"],
+  "expect_pattern": "sage-",
+  "expect_chain_length": [5, 15],
+  "expect_error": false,
+  "expect_guardrail": false,
+  "max_wait_seconds": 90,
+  "requires_model_tier": "cloud"
+}
+#+END_SRC
+
+* 4. Invariants (EC01-EC12)
+
+| ID   | Invariant                                                                                       | Test strategy                                   |
+|------+-------------------------------------------------------------------------------------------------+-------------------------------------------------|
+| EC01 | v1 case (no v2 fields) loads and scores identically under v2 runner                             | Regression test: TC01-TC20 still PASS           |
+| EC02 | Unknown fields in a case are preserved and ignored (forward compat)                             | Add =future_field= to a fixture, verify no-op   |
+| EC03 | =expect_tool_min_count= missing the tool entirely fails the case                                | PBT: random tool, threshold, observed count     |
+| EC04 | =expect_tool_min_count= satisfied even if tool appears MORE than N times                        | Unit test                                       |
+| EC05 | =expect_tool_order= empty or absent = no ordering check (backward compat)                       | Unit test                                       |
+| EC06 | =expect_tool_order= with one tool is trivially true                                             | Unit test                                       |
+| EC07 | =expect_tool_order= reported as FAIL lists the offending pair: "expected A before B, saw B at idx 2, A at idx 5" | Unit test asserts message format |
+| EC08 | =requires_model_tier=: cloud skips on any model classified local-*                              | Unit test: set SAGE_MODEL, run case, expect SKIP |
+| EC09 | =requires_model_tier=: absent = any model (no skip)                                             | Regression: TC01 with local-3b still runs      |
+| EC10 | Runner summary separates SKIP from FAIL; skipped cases don't affect pass rate numerator         | Shell test against fixture with mixed skips    |
+| EC11 | Case JSON schema is validated at load time; malformed entries skip with WARN, don't crash       | Fixture with broken entry                      |
+| EC12 | =expect_chain_length= [min, max] is INCLUSIVE on both ends                                      | Unit test at boundary                          |
+
+* 5. Runner implementation sketch
+
+Two functions to add to =scripts/eval-sage.sh=:
+
+** 5.1 =check_tool_min_count=
+
+#+BEGIN_SRC bash
+check_tool_min_count() {
+  local output="$1"
+  local expect_json="$2"   # {"fetch_url":1,"sage_task_push":3,...}
+  local fail=0
+  for pair in $(echo "$expect_json" | jq -r 'to_entries[] | "\(.key):\(.value)"'); do
+    local tool="${pair%:*}"
+    local min_n="${pair#*:}"
+    local got
+    got=$(echo "$output" | grep -c "\[Tool: $tool\]" || true)
+    if [ "$got" -lt "$min_n" ]; then
+      echo "    MIN-COUNT FAIL: $tool expected >=${min_n}, got ${got}"
+      fail=1
+    fi
+  done
+  return $fail
+}
+#+END_SRC
+
+** 5.2 =check_tool_order=
+
+#+BEGIN_SRC bash
+check_tool_order() {
+  local output="$1"
+  local expect_order="$2"   # JSON array
+  local tools_seq
+  tools_seq=$(echo "$output" | grep -oE '\[Tool: [^]]+' | sed 's/\[Tool: //')
+  local last_idx=-1
+  for tool in $(echo "$expect_order" | jq -r '.[]'); do
+    local idx
+    idx=$(echo "$tools_seq" | grep -nF "$tool" | head -1 | cut -d: -f1 || echo 0)
+    if [ "$idx" -eq 0 ]; then
+      echo "    ORDER FAIL: $tool never called"
+      return 1
+    fi
+    if [ "$idx" -le "$last_idx" ]; then
+      echo "    ORDER FAIL: $tool appeared at line $idx before prior-constraint at $last_idx"
+      return 1
+    fi
+    last_idx="$idx"
+  done
+  return 0
+}
+#+END_SRC
+
+** 5.3 =check_model_tier=
+
+#+BEGIN_SRC bash
+classify_model() {
+  local model="${SAGE_MODEL:-}"
+  case "$model" in
+    gemini-*|claude-*|gpt-*)     echo "cloud" ;;
+    *qwen2.5-coder:7b*|deepseek-coder-v2:latest|mistral:*) echo "local-7b+" ;;
+    llama3.2*|qwen3:0.6b)        echo "local-3b" ;;
+    *)                            echo "any" ;;
+  esac
+}
+
+requires_tier_met() {
+  local required="$1"
+  [ -z "$required" ] || [ "$required" = "any" ] && return 0
+  local got
+  got=$(classify_model)
+  [ "$got" = "$required" ] || {
+    echo "  SKIP $id (requires $required, got $got)"
+    return 1
+  }
+}
+#+END_SRC
+
+* 6. Out of scope
+
+- Turn-by-turn assertions. The runner observes only the final pane;
+  it cannot assert "on turn 3, the model thought X". A future v3
+  could parse per-turn boundaries from the =✓ Response received=
+  markers in the pane, but that is not part of this contract.
+- Parallelism. Cases are scored sequentially. A future runner could
+  fan out non-conflicting cases to separate sage sessions but the
+  case schema stays the same.
+- Cost accounting. Token counts from =[streaming ...|N tokens]=
+  markers are extractable but not currently scored; out of scope
+  for this v2.
+
+* 7. References
+
+- Runner: =scripts/eval-sage.sh=
+- Fixtures: =tests/eval/traffic-cases.json=
+- Related report on model-tier failures: =docs/reports/20260419-small-model-tool-selection.org=
+- Verification bead: =guile-sage-31m= (v0.8.0 scratch + task_push pipe end-to-end with Gemini)
