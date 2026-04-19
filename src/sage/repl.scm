@@ -987,6 +987,23 @@
       (log-info "repl" (format #f "Loaded ~a custom command~a" n
                                 (if (= n 1) "" "s")))))
 
+  ;; Optional demo hook: when SAGE_DEMO_HOOKS=1 is set, pre-register a
+  ;; PreToolUse guard that vetoes git_push and a PostToolUse observer.
+  ;; Used by scripts/demo.sh to showcase the hook pair without depending
+  ;; on the LLM to trigger a veto on its own.
+  (when (getenv "SAGE_DEMO_HOOKS")
+    (hook-register 'PreToolUse "demo-guard"
+                   (lambda (ctx)
+                     (if (equal? (assoc-ref ctx "tool") "git_push")
+                         (cons #f "git_push blocked by demo PreToolUse guard")
+                         #t)))
+    (hook-register 'PostToolUse "demo-observer"
+                   (lambda (ctx)
+                     (format #t "  \x1b[2m[PostToolUse: ~a -> ~a bytes]\x1b[0m~%"
+                             (assoc-ref ctx "tool")
+                             (let ((r (format #f "~a" (assoc-ref ctx "result"))))
+                               (string-length r))))))
+
   ;; Probe available models, configure tiers, and validate that the
   ;; configured model is actually installed locally. For Ollama, fall
   ;; back to the first chat-capable model if the configured one was
