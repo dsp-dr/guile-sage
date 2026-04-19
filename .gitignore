@@ -47,3 +47,6 @@ experiments/
 # Keep .beads/config.yaml and .beads/README.md tracked (safe metadata).
 .beads/issues.jsonl
 .beads/interactions.jsonl
+.beads/backup/
+.beads/embeddeddolt/
+.beads/push-state.json
