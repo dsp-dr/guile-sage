@@ -42,7 +42,7 @@ guile-sage is an AI-powered REPL built in Guile Scheme with tool calling capabil
 *** Q: What are the token limits?
 | Provider | Default Limit |
 |----------+---------------|
-| Local (host.lan) | 8,000 tokens |
+| Local (dev-host) | 8,000 tokens |
 | Cloud | 4,000 tokens |
 | qwen3-coder | 32,000 tokens |
 
@@ -153,7 +153,7 @@ cd guile-sage
 make build install
 
 # Run with local Ollama
-export OLLAMA_HOST=http://host.lan:11434
+export OLLAMA_HOST=http://localhost:11434
 sage --yolo -p "List files in src/"
 
 # Run tests

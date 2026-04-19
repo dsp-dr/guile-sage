@@ -1,7 +1,7 @@
 # Image Generation Log
 
 Model: `x/flux2-klein:4b` (5.7GB, Apache 2.0)
-Host: `host.lan:11434` (Ollama, local network)
+Host: `localhost:11434` (Ollama, local network)
 Date: 2026-01-29
 
 ## Timing Summary

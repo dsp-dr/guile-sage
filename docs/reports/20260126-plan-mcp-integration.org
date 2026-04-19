@@ -43,7 +43,7 @@ Expose sage tools via MCP protocol for Claude Desktop, etc.
  '(("type" . "object")
    ("properties" . (("content" . (("type" . "string"))))))
  (lambda (args)
-   (let ((conn (mcp-connect "npx" "@jwalsh/mcp-server-qrcode")))
+   (let ((conn (mcp-connect "npx" "@example/mcp-server-qrcode")))
      (mcp-call-tool conn "generate-qrcode" args))))
 #+end_src
 
@@ -57,4 +57,4 @@ Expose sage tools via MCP protocol for Claude Desktop, etc.
 * References
 
 - https://modelcontextprotocol.io/
-- https://github.com/jwalsh/mcp-server-qrcode
+- https://github.com/example-user/mcp-server-qrcode

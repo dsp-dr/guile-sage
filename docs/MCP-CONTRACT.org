@@ -43,7 +43,7 @@ System_Boundary(sage_boundary, "guile-sage") {
   System(sage, "sage REPL", "Guile Scheme CLI. Orchestrates prompts, tools, sessions, context window.")
 }
 
-System_Ext(ollama, "Ollama", "Local LLM runtime on nexus. Provides chat completions + native tool_calls.")
+System_Ext(ollama, "Ollama", "Local LLM runtime on dev-host. Provides chat completions + native tool_calls.")
 
 System_Ext(skills_hub, "skills-hub MCP server", "Python/uvicorn MCP server exposing ~35 skills as tools over HTTP+SSE on port 8400.")
 
@@ -97,7 +97,7 @@ System_Boundary(sage, "guile-sage process") {
   }
 }
 
-System_Ext(ollama, "Ollama", "nexus:11434")
+System_Ext(ollama, "Ollama", "dev-host:11434")
 
 System_Boundary(skills_hub, "skills-hub (remote, infra-host:8400)") {
   Container(sse_endpoint, "GET /sse",        "uvicorn", "Opens SSE stream, emits `endpoint` event")
@@ -297,7 +297,7 @@ flowchart TD
     U[User types prompt at sage REPL] --> R[repl.scm handle-input]
     R --> A[agent.scm run-turn]
     A --> OS[ollama.scm ollama-chat<br/>POST /api/chat with tools schema]
-    OS -->|HTTP NDJSON| OL[(Ollama nexus:11434)]
+    OS -->|HTTP NDJSON| OL[(Ollama dev-host:11434)]
     OL -->|streaming chunks| OS
     OS --> OPT[ollama-parse-tool-call<br/>decode message.tool_calls]
     OPT -->|no tool call| FIN[display assistant text] --> U
@@ -734,7 +734,7 @@ exercised by this server; the implementation should still handle
     "content": [
       {
         "type": "text",
-        "text": "# bd (workflow)\nSource: /home/USER/ghq/github.com/aygp-dr/skills-hub/workflow/bd/SKILL.md\n\n---\nname: bd\ndescription: Manage issues via bd (beads)...\n---\n\n# bd — Beads Issue Tracker\n\nWraps the `bd` CLI tool for local-first issue tracking with\ndependency chains...\n"
+        "text": "# bd (workflow)\nSource: /home/user/ghq/github.com/aygp-dr/skills-hub/workflow/bd/SKILL.md\n\n---\nname: bd\ndescription: Manage issues via bd (beads)...\n---\n\n# bd — Beads Issue Tracker\n\nWraps the `bd` CLI tool for local-first issue tracking with\ndependency chains...\n"
       }
     ],
     "isError": false

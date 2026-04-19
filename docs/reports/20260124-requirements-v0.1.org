@@ -149,7 +149,7 @@ Tool constraints:
 ;; Example configuration
 (define *config*
   '((provider . ollama)
-    (ollama-host . "http://host.lan:11434")
+    (ollama-host . "http://localhost:11434")
     (model . "qwen3-coder:latest")
     (workspace . "~/projects")
     (tools

@@ -9,7 +9,7 @@ Green. 74/74 properties pass at seed 42.
 | Field             | Value                                  |
 |-------------------|----------------------------------------|
 | Date              | 2026-04-12                             |
-| Host              | FreeBSD hydra 14.3-RELEASE-p7 amd64    |
+| Host              | FreeBSD infra-host 14.3-RELEASE-p7 amd64 |
 | Guile             | GNU Guile 3.0.10                       |
 | HEAD              | `e55ece7` (post 7a46c87 search_files PBT) |
 | Seed              | 42 (`*pbt-seed*` in `tests/test-pbt.scm`)  |

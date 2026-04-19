@@ -68,10 +68,10 @@ This matches what sage's =ollama-parse-tool-call= sees.
 
 Reported as =tool_calls/N=.
 
-* Locked-in measurements (2026-04-11, mini host, 64 GB RAM)
+* Locked-in measurements (2026-04-11, dev-host, 64 GB RAM)
 
 Captured by =TIMING_BENCH_TRIALS=10 scripts/timing-bench.sh= on
-the macOS development box (mini, Apple Silicon, 64 GB RAM,
+the macOS development box (dev-host, Apple Silicon, 64 GB RAM,
 Ollama 0.18.3).
 
 | model                | load_ms | prompt_tok | prompt_t/s | eval_tok | eval_t/s | total_ms | tool_calls/10 |
@@ -111,7 +111,7 @@ Ollama 0.18.3).
 
 ** Caveats
 
-- Single host (mini), single Ollama version (0.18.3), single run
+- Single host (dev-host), single Ollama version (0.18.3), single run
   per model. Variance unknown. Re-run at least monthly or after
   any =ollama pull= to catch model upgrades.
 - *Non-streaming.* Sage uses streaming for the chat path. Streaming

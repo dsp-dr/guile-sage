@@ -2,7 +2,7 @@
 
 Date: 2026-04-12
 Model: llama3.2:latest on localhost:11434
-Host: mini (macOS, Apple Silicon)
+Host: dev-host (macOS, Apple Silicon)
 Guile: 3.0.11 (/opt/homebrew/bin/guile)
 MCP: skills-hub at infra-host:8400 (36 tools registered)
 OTel: infra-host:4318 (DOWN -- all flushes return code=0)

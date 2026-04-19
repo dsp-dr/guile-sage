@@ -55,8 +55,8 @@
 
 (run-test "parse-otel-resource-attrs splits k=v pairs"
   (lambda ()
-    (let ((attrs (parse-otel-resource-attrs "host.name=mini,team=aygp-dr")))
-      (assert-equal (assoc-ref attrs "host.name") "mini" "host.name parsed")
+    (let ((attrs (parse-otel-resource-attrs "host.name=dev-host,team=aygp-dr")))
+      (assert-equal (assoc-ref attrs "host.name") "dev-host" "host.name parsed")
       (assert-equal (assoc-ref attrs "team") "aygp-dr" "team parsed"))))
 
 (run-test "parse-otel-resource-attrs ignores malformed entries"
