@@ -261,7 +261,7 @@ demo:
 	@sed -i.bak 's/@[^:]*:dsp-dr\/guile-sage/@host:dsp-dr\/guile-sage/g' docs/images/demo.cast
 	@sed -i.bak 's|/Users/[^/]*/ghq/github.com/dsp-dr/guile-sage|/workspace/guile-sage|g' docs/images/demo.cast
 	@rm docs/images/demo.cast.bak
-	@agg --cols 110 --rows 36 --font-size 13 --speed 2 --theme monokai docs/images/demo.cast docs/images/demo.gif
+	@agg --cols 110 --rows 36 --font-size 13 --speed 3 --theme monokai docs/images/demo.cast docs/images/demo.gif
 	@echo "Wrote docs/images/demo.gif"
 
 # Version bumping (semantic versioning)
