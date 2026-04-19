@@ -947,11 +947,18 @@ N chars + a single-line marker showing the elided byte count."
                     (filter (lambda (p) (not (equal? (car p) "model")))
                             *session*)))))
 
-    ;; Auto-compact if approaching context limit
-    (let ((compact-result (session-maybe-compact!
-                           (tier-context-limit tier)
-                           compact-auto
-                           message-tokens)))
+    ;; Auto-compact if approaching context limit. Use the ACTIVE model's
+    ;; token limit (from get-token-limit) rather than the tier's stored
+    ;; limit. The tier defaults fast-model to "llama3.2:latest" (=8K) via
+    ;; MODEL_TIER_FAST; with SAGE_PROVIDER=gemini that misclassifies
+    ;; gemini-2.5-flash (1M window) and triggers compaction at ~6.4K.
+    (let* ((active-model (or (and *session* (assoc-ref *session* "model"))
+                             (provider-model)))
+           (active-limit (get-token-limit active-model))
+           (compact-result (session-maybe-compact!
+                            active-limit
+                            compact-auto
+                            message-tokens)))
       (when compact-result
         (format #t "\x1b[2m[~a]\x1b[0m~%" compact-result))
 
