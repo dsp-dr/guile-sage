@@ -1,0 +1,416 @@
+#+TITLE: guile-sage — Skills Contract
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-19
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This document is a contract specification for =guile-sage= reading and
+using /skills/ in the layout compatible with Anthropic's Claude Code and
+the [[https://agentskills.io][Agent Skills]] open standard.
+
+A skill is a directory containing =SKILL.md= with YAML frontmatter plus
+optional supporting files (templates, reference docs, scripts). Skills
+extend the agent by adding named, composable prompts that either the
+user or the agent can invoke.
+
+This contract captures:
+
+- Directory layout and path lookup order (four scopes, enterprise
+  through plugin)
+- =SKILL.md= frontmatter field schema and validation rules
+- Precedence semantics when the same skill name exists at multiple
+  scopes
+- Progressive disclosure: description stays in context, full body
+  loads on invocation
+- String substitution (=$ARGUMENTS=, =$N=, =${SAGE_SESSION_ID}=,
+  =${SAGE_SKILL_DIR}=)
+- Invocation controls (=user-invocable=, =disable-model-invocation=)
+- Dynamic preprocessing (=!`command`= inline and fenced forms)
+- Interaction with the existing MCP client (=docs/MCP-CONTRACT.org=),
+  the hook system (=docs/HOOKS-CONTRACT.org=), and the safe/unsafe
+  tool model (=docs/adr/0003-security-model.md=)
+
+Authoritative external references:
+
+- Claude Code skills spec: https://code.claude.com/docs/en/skills
+- Agent Skills open standard: https://agentskills.io
+- Reference implementation: the local =skills-hub= repo at
+  =github.com/aygp-dr/skills-hub= (MCP-served, ~35 skills across
+  =factory/=, =infra/=, =workflow/=, =meta/=, =tools/=)
+
+*Status:* N/A --- speculative feature. No implementation exists yet.
+This contract defines the target behavior for =src/sage/skills.scm=.
+
+*Relationship to MCP:* Today the =skills-hub= repo exposes skills via
+an MCP server; sage already consumes them as MCP tools through
+=src/sage/mcp.scm=. This contract covers the /filesystem/ path: reading
+=SKILL.md= files directly from disk, which is what Claude Code does
+natively and what an offline or airgapped sage needs.
+
+* 1. C4 Level 1 --- System Context
+
+#+BEGIN_SRC plantuml :file images/skills-c4-l1.png
+@startuml skills-c4-l1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title guile-sage + Skills --- System Context (C4 L1)
+
+Person(user, "Developer", "Types /skill-name or asks naturally.")
+
+System_Boundary(sage_boundary, "guile-sage") {
+  System(sage, "sage REPL", "Scans skill dirs, parses SKILL.md,\nexposes skills as slash commands + LLM tools.")
+}
+
+System_Ext(enterprise, "Enterprise skills", "Managed-setting skill directory\n(org-wide policies).")
+System_Ext(personal, "Personal skills", "~/.config/sage/skills/\nAll projects, this user.")
+System_Ext(project, "Project skills", ".sage/skills/\nThis repo only.")
+System_Ext(plugin, "Plugin skills", "<plugin>/skills/\nNamespaced as plugin:skill.")
+System_Ext(mcp, "skills-hub MCP", "Alternative ingestion path.\nExisting, see MCP-CONTRACT.")
+
+Rel(user, sage, "/skill-name or prompt", "stdin/tty")
+Rel(sage, enterprise, "read SKILL.md", "filesystem")
+Rel(sage, personal, "read SKILL.md", "filesystem")
+Rel(sage, project, "read SKILL.md", "filesystem")
+Rel(sage, plugin, "read SKILL.md", "filesystem")
+Rel(sage, mcp, "tools/list, tools/call", "HTTP+SSE, JSON-RPC")
+
+SHOW_LEGEND()
+@enduml
+#+END_SRC
+
+* 2. Directory layout and lookup order
+
+Skills live in one of four scopes. At session start (and on live file
+change) sage scans each scope in precedence order and builds a unified
+registry.
+
+** 2.1 Scopes
+
+| Scope      | Path                                                  | Applies to                     | Env override                 |
+|------------+-------------------------------------------------------+--------------------------------+------------------------------|
+| enterprise | =/etc/sage/skills/= (or managed-settings-equivalent)  | All users on this machine      | =SAGE_ENTERPRISE_SKILLS_DIR= |
+| personal   | =$XDG_CONFIG_HOME/sage/skills/= (=~/.config/sage/=)   | All this user's projects       | =SAGE_PERSONAL_SKILLS_DIR=   |
+| project    | =.sage/skills/= relative to =workspace=               | The current repo only          | =SAGE_PROJECT_SKILLS_DIR=    |
+| plugin     | =<plugin-dir>/skills/= for each loaded plugin         | Where plugin is enabled        | discovered via plugin RFC    |
+
+The Claude Code path =~/.claude/skills/= SHOULD ALSO be searched
+(read-only) when =SAGE_CLAUDE_COMPAT=1= is set, so that users who
+already have Claude skills installed get them for free in sage.
+
+** 2.2 Each skill is a directory
+
+#+BEGIN_EXAMPLE
+<scope-dir>/
+  explain-code/
+    SKILL.md                # main entrypoint (required)
+    templates/
+      ascii-diagram.md      # referenced from SKILL.md
+    scripts/
+      check.sh              # executed, not loaded as prose
+    reference.md            # loaded when explicitly linked
+#+END_EXAMPLE
+
+A directory /without/ a =SKILL.md= at its root is ignored. Files next
+to =SKILL.md= are optional --- they load only when =SKILL.md= references
+them or when a script is executed.
+
+** 2.3 Monorepo / nested discovery
+
+When the working directory is deep inside a monorepo, sage walks
+upward from =cwd= and loads =.sage/skills/= from any ancestor up to
+the workspace root. Closer directories win on name collisions.
+
+* 3. =SKILL.md= format
+
+The file is Markdown with a YAML frontmatter block delimited by three
+dashes. Everything between the first and second =---= is YAML; the rest
+is the skill body.
+
+#+BEGIN_SRC markdown
+---
+name: commit
+description: Stage and commit changes with a CPRR-shaped message.
+user-invocable: true
+disable-model-invocation: true
+allowed-tools: Bash(git add *) Bash(git commit *) Bash(git status *)
+paths: ["**/*.scm", "**/*.org"]
+---
+
+# /commit
+
+Steps for a guile-sage commit ...
+#+END_SRC
+
+** 3.1 Frontmatter fields
+
+All fields are optional. Only =description= is /recommended/ so the
+agent knows when to select the skill.
+
+| Field                      | Required | Type               | Description                                                                        |
+|----------------------------+----------+--------------------+------------------------------------------------------------------------------------|
+| =name=                     | no       | string             | Slash-command name. Lowercase, digits, hyphen, max 64 chars. Defaults to dirname.  |
+| =description=              | no (rec) | string             | Short blurb. Claude-compat: combined with =when_to_use= and truncated at 1536.     |
+| =when_to_use=              | no       | string             | Extra trigger phrases, appended to =description= in the listing.                   |
+| =argument-hint=            | no       | string             | Displayed in autocomplete (e.g. =[issue-number]=).                                 |
+| =user-invocable=           | no       | boolean            | If =false=, hide from =/= menu. Default =true=.                                    |
+| =disable-model-invocation= | no       | boolean            | If =true=, only the user can trigger; model never picks it automatically.          |
+| =allowed-tools=            | no       | string or list     | Pre-approve these tools for the duration of the skill.                             |
+| =model=                    | no       | string             | Override the active model while this skill runs.                                   |
+| =effort=                   | no       | enum               | =low | medium | high | xhigh | max=. Overrides session effort.                  |
+| =context=                  | no       | string             | =fork= to run in a forked subagent context (see §6).                               |
+| =agent=                    | no       | string             | Which subagent type when =context: fork= (e.g. =Explore=, =Plan=, =general-purpose=). |
+| =hooks=                    | no       | object             | Skill-scoped lifecycle hooks. See =docs/HOOKS-CONTRACT.org=.                       |
+| =paths=                    | no       | string or list     | Glob patterns that gate automatic invocation (same syntax as path-specific rules). |
+| =shell=                    | no       | enum               | =bash= (default) or =powershell=. Only affects =!`...`= preprocessing.             |
+
+** 3.2 Validation rules (SK01-SK12)
+
+- SK01: File parsed as UTF-8; BOM tolerated.
+- SK02: Frontmatter absent = treat body as plain instructions; =name= defaults to dirname.
+- SK03: =name= MUST match =[a-z0-9-]{1,64}=. Invalid names emit WARN and skip the skill.
+- SK04: Duplicate =name= within the same scope is a load-order tiebreak (lexicographic); WARN once.
+- SK05: =description= + =when_to_use= combined stored-text is truncated at 1536 chars in the listing.
+- SK06: =allowed-tools= accepts ` `-separated string or YAML list; normalized to a list of strings.
+- SK07: =paths= glob follows the same rules sage uses elsewhere; no path may escape the workspace.
+- SK08: Unknown frontmatter keys are preserved but ignored (forward-compat).
+- SK09: Malformed YAML = skill is skipped with a WARN log; the REPL keeps running.
+- SK10: File size >512 KB = WARN and skip (skills are prose, not payload).
+- SK11: Body of the skill is stored verbatim; string substitution (§4) happens at invocation time.
+- SK12: Symlinks that leave the scope root are rejected (consistent with =safe-path?=).
+
+* 4. Progressive disclosure and invocation
+
+** 4.1 What the model sees before invocation
+
+Only the =description= (possibly with =when_to_use= appended, combined-
+truncated at 1536 chars) plus the =name= is exposed to the LLM's system
+prompt. The skill body is NOT loaded until the skill is invoked.
+
+Rationale: 50 skills × 500-line bodies would blow out the context
+window. Descriptions alone fit comfortably.
+
+** 4.2 Invocation paths
+
+Both the user and the model can invoke a skill, subject to the two
+frontmatter flags:
+
+| Frontmatter                      | User =/skill= works? | Model auto-invokes? | Description in context? |
+|----------------------------------+----------------------+---------------------+-------------------------|
+| (default)                        | yes                  | yes                 | yes                     |
+| =disable-model-invocation: true= | yes                  | no                  | no                      |
+| =user-invocable: false=          | no                   | yes                 | yes                     |
+| both flags set                   | no                   | no                  | no (skill is dormant)   |
+
+When a skill is invoked, sage:
+
+1. Reads =SKILL.md=.
+2. Runs preprocessing (§4.3).
+3. Performs string substitution (§4.4).
+4. Activates =allowed-tools=, =model=, =effort= overrides for this turn.
+5. Injects the final text as a single message into the session.
+6. Fires any skill-scoped =hooks=.
+
+The rendered text stays in the session for the rest of the turn;
+compaction treats it like any other message (first 5000 tokens of each
+invoked skill retained after summary, shared budget 25000 across
+skills).
+
+** 4.3 Preprocessing: =!`command`= and fenced =!= blocks
+
+Inline form:
+
+#+BEGIN_EXAMPLE
+- PR diff: !`gh pr diff`
+#+END_EXAMPLE
+
+Fenced form:
+
+#+BEGIN_EXAMPLE
+```!
+node --version
+git status --short
+```
+#+END_EXAMPLE
+
+Each command runs before the skill is sent to the model. Its stdout
+replaces the placeholder. The model sees only the output, not the
+command.
+
+Security posture:
+
+- Preprocessing uses =(system* "/bin/sh" "-c" ...)= with a timeout cap.
+  Never =(system (format ...))= (see PR #11).
+- The shell used is =bash= by default; =shell: powershell= switches to
+  PowerShell on Windows (no-op elsewhere).
+- =SAGE_DISABLE_SKILL_SHELL=1= replaces every =!`...`= output with
+  =[shell command execution disabled by policy]=. This is equivalent
+  to Claude Code's =disableSkillShellExecution= setting.
+- Output is truncated at 64 KB per command and the total substituted
+  text is truncated at 256 KB to bound memory.
+
+** 4.4 String substitution
+
+Supported placeholders (evaluated after preprocessing, before the
+prompt is sent):
+
+| Variable            | Expands to                                                                                |
+|---------------------+-------------------------------------------------------------------------------------------|
+| =$ARGUMENTS=        | Full argument string as typed.                                                            |
+| =$ARGUMENTS[N]=     | Shell-style tokenized N-th argument (0-based).                                            |
+| =$N=                | Shorthand for =$ARGUMENTS[N]=.                                                            |
+| =${SAGE_SESSION_ID}= | Current session ID.                                                                      |
+| =${SAGE_SKILL_DIR}= | Absolute path to this skill's directory (useful for =bash scripts/helper.sh=).            |
+| =${SAGE_WORKSPACE}= | Workspace root.                                                                           |
+
+Compat note: if =SAGE_CLAUDE_COMPAT=1=, =${CLAUDE_SESSION_ID}= and
+=${CLAUDE_SKILL_DIR}= are accepted as aliases.
+
+If arguments are passed but the skill body does not contain
+=$ARGUMENTS=, sage appends =ARGUMENTS: <raw input>= to the end (same
+behavior as Claude Code) so the model still sees them.
+
+* 5. Invariants (SK01-SK24)
+
+SK01-SK12 are in §3.2. The rest:
+
+| ID    | Invariant                                                                                  | Test strategy                               |
+|-------+--------------------------------------------------------------------------------------------+---------------------------------------------|
+| SK13  | Precedence: enterprise > personal > project on same =name=                                 | Integration test with all four scopes populated |
+| SK14  | Plugin skills are namespaced =<plugin>:<name>=; they cannot collide with other scopes       | Unit test                                   |
+| SK15  | =paths= glob restricts automatic invocation but not user =/skill= calls                     | Integration test: skill with =paths: ["*.go"]= only auto-loads when Go file is in cwd |
+| SK16  | File watcher detects add/edit/remove under any scope root without REPL restart              | FS inotify / fswatch test                   |
+| SK17  | Top-level scope directory created mid-session requires restart to be watched                | Manual test, documented, not tested         |
+| SK18  | Rendered skill body is limited to 500 lines (warn above)                                   | Unit test                                   |
+| SK19  | Preprocessing timeout default 10 s; exceeded = replace with =[skill preprocessing timed out]= | Slow-command test                          |
+| SK20  | =allowed-tools= grants only for the turn in which the skill is invoked                     | Integration test                            |
+| SK21  | =context: fork= creates a subagent whose system prompt comes from the agent type, with the rendered SKILL.md as the task prompt | Subagent test |
+| SK22  | Malformed skill = skip, log, do not crash REPL                                              | Fixture with broken YAML                    |
+| SK23  | =description= front-loaded: truncation at 1536 must preserve the first clause              | PBT with random-length descriptions         |
+| SK24  | Character budget for the listing scales at 1% of context window; fallback = 8000 chars; overridable via =SAGE_SKILL_TOOL_CHAR_BUDGET= | Unit test with configured budget |
+
+* 6. Subagent integration (=context: fork=)
+
+When a skill sets =context: fork=:
+
+- A new subagent is spawned with an isolated context.
+- The subagent's system prompt is taken from the named agent type
+  (=Explore=, =Plan=, =general-purpose=, or a custom agent from
+  =.sage/agents/=).
+- The skill body, after preprocessing and substitution, becomes the
+  subagent's initial user-role message (the task).
+- The subagent runs to completion, returns a summary, and the
+  subagent's context is discarded.
+
+This parallels the existing worktree-isolated agent pattern used in
+the =/batch= workflow: the skill becomes the self-contained prompt,
+the subagent does the work without polluting the main session.
+
+=agent: Explore=, =agent: Plan=, or a user-defined agent name are all
+accepted.
+
+* 7. Three-way access
+
+| Operation                 | CLI flag                     | Slash command                | Scheme API                            |
+|---------------------------+------------------------------+------------------------------+---------------------------------------|
+| List skills               | =--skills-list=              | =/skills=                    | =(skills-list)=                       |
+| Show a skill              | =--skill-show NAME=          | =/skill-show NAME=           | =(skill-show NAME)=                   |
+| Invoke a skill            | =--skill NAME [ARGS...]=     | =/NAME [ARGS...]=            | =(skill-invoke NAME ARGS)=            |
+| Reload from disk          | —                            | =/skills reload=             | =(skills-reload!)=                    |
+| Print resolved search path | =--skills-path=              | =/skills path=               | =(skills-paths)=                      |
+| Enable/disable a scope    | env var at startup           | =/skills scope <name> off=   | =(skills-scope-set! scope enabled?)= |
+
+* 8. Observed divergences
+
+N/A --- speculative feature. When implementation lands, this section
+records any differences between the spec above and actual behavior
+(Claude compatibility, skills-hub idiosyncrasies, etc).
+
+Expected divergences from Claude Code:
+
+- =~/.claude/skills/= is read-only by default; sage writes only to
+  =~/.config/sage/skills/=.
+- =allowed-tools= in Claude uses its own permission grammar (e.g.
+  =Bash(git add *)=). Sage's permission grammar is the safe/unsafe
+  bucket in =src/sage/tools.scm=. Mapping: =allowed-tools= entries
+  that don't match sage's tool list WARN and are ignored.
+- =model= and =effort= only apply when the selected provider supports
+  them; otherwise WARN and fall through.
+
+* 9. Implementation notes
+
+Target module: =src/sage/skills.scm= (does not exist yet).
+
+Reuse opportunities:
+
+- XDG path resolution: =src/sage/config.scm=.
+- Safe-path enforcement: =src/sage/tools.scm= =safe-path?=.
+- JSON / Markdown / YAML helpers: =src/sage/util.scm= has JSON; a new
+  lightweight YAML frontmatter parser is needed (10-20 lines; enough
+  to extract the block between =---= markers and parse flat
+  key/value + arrays).
+- Slash command wiring: =src/sage/repl.scm= =*commands*= and
+  =handle-command=. Skills register as dynamic commands at scan time.
+- Live-reload watcher: =src/sage/watcher.scm= using =inotify= on Linux
+  and =fswatch= on macOS (both optional; absence = reload only on
+  explicit =/skills reload=).
+- Hooks: per-skill =hooks= frontmatter wires into the existing
+  =src/sage/hooks.scm= PreToolUse + PostToolUse registry.
+- Subagent =context: fork=: no direct analogue in sage yet. Shortest
+  path is to shell out to =guile -L src= in a subprocess with the
+  rendered prompt piped on stdin, capture stdout, and fold the
+  summary back. A fuller Agent-tool-style subagent is out of scope
+  for the MVP.
+
+Startup sequence:
+
+1. =repl-start= after =init-default-tools=, before =mcp-init=.
+2. =(skills-scan!)= walks the four scope dirs.
+3. Each parsed skill is registered in =*skills*= with its =description=
+   as the listing entry.
+4. Each skill name becomes =/NAME= in =*commands*=; collisions with
+   built-in commands WARN and keep the built-in.
+5. The file watcher is started (best-effort; failures are non-fatal).
+
+* 10. Test strategy
+
+- Unit tests: =tests/test-skills.scm= — frontmatter parser, scope
+  resolution, precedence, name validation, string substitution,
+  truncation at 1536 / 8000 chars.
+- Property-based: fuzz the parser with random markdown; verify that
+  malformed YAML never crashes sage (SK22).
+- Integration tests: =tests/test-skills-integration.scm= — populate a
+  temp directory tree with a skill at each scope level, assert the
+  merged registry has correct precedence and no duplicates. Exercise
+  =$ARGUMENTS= expansion and =!`echo hello`= preprocessing.
+- Live-reload tests: =tests/test-skills-watcher.scm= (gated on
+  =SAGE_WATCHER_ENABLED=1=). Create, edit, delete skills while the
+  REPL is running; assert the registry updates.
+- Cross-compat smoke: with =SAGE_CLAUDE_COMPAT=1= and a copy of the
+  =aygp-dr/skills-hub= repo under =~/.claude/skills/=, verify sage
+  sees all ~35 skills and their descriptions fit the 1% budget.
+
+* 11. Open questions
+
+- Should sage persist an /installed/ marker (=.sage/skills-enabled=
+  alongside, similar to Claude's permission cache) so skills that were
+  loaded in a prior session are pre-authorized for =allowed-tools=?
+  /Proposal: no — always re-validate per session./
+- Should =disable-model-invocation: true= skills appear in the =/=
+  menu? /Yes — they are user-only, not hidden. ~user-invocable: false~
+  is the hide flag./
+- Is live-reload essential for v1? /No. Ship with explicit
+  ~/skills reload~; watcher is a follow-up./
+- How do we handle =hooks= inside a skill that conflicts with a
+  session-scope hook? /Skill-scoped hooks are unregistered after the
+  skill's invocation turn ends. Session-scope hooks persist./
+
+* 12. Out of scope
+
+- Skill publication / package manager (leave to git, plugins, or MCP).
+- Signed skills / provenance (can layer on top of =provenance.scm=
+  later).
+- Cross-machine skill sync (use git or the MCP server).
+- Complete YAML parser (we only need flat key/value + lists; nested
+  mappings beyond =hooks= are rejected with WARN).
