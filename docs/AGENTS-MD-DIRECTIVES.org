@@ -52,13 +52,13 @@ Tables under headings matching =Sage Config= or =Sage Directives=
 (case-insensitive) are parsed as directive tables:
 
 #+BEGIN_SRC markdown
-## Sage Config
+  ## Sage Config
 
-| Directive      | Value                        |
-|----------------|------------------------------|
-| agent-mode     | autonomous                   |
-| max-iterations | 30                           |
-| tool-deny      | eval_scheme, create_tool     |
+  | Directive      | Value                        |
+  |----------------|------------------------------|
+  | agent-mode     | autonomous                   |
+  | max-iterations | 30                           |
+  | tool-deny      | eval_scheme, create_tool     |
 #+END_SRC
 
 Rules:

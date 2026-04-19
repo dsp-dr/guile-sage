@@ -29,14 +29,18 @@ src/sage/
   openai.scm        OpenAI-compat client (LiteLLM, vLLM, etc.)
   gemini.scm        Google AI Gemini client
   mcp.scm           MCP SSE client (skills-hub, tools/list, tools/call)
-  tools.scm         Tool registry (22+ built-in, safe/unsafe split)
-  agent.scm         In-memory task system
+  tools.scm         Tool registry (33+ built-in, safe/unsafe split, fetch_url, edit_file diff)
+  scratch.scm       Content-addressed scratch store for large tool outputs
+  hooks.scm         PreToolUse + PostToolUse lifecycle hooks with veto semantics
+  agent.scm         Task queue (FIFO task-create + LIFO task-push!)
   session.scm       Session persistence (JSON, XDG paths)
   compaction.scm    Context compaction (5 strategies)
   context.scm       Context window management + warnings
-  config.scm        Configuration (XDG, env vars, .env files)
+  config.scm        Configuration (XDG, env vars, .env files, per-model token limits)
   model-tier.scm    Model tier selection (auto by token count)
-  telemetry.scm     OTLP/HTTP JSON metric emission
+  telemetry.scm     OTLP/HTTP JSON metric emission (opt-in)
+  usage-stats.scm   Local JSONL usage ledger for /stats (opt-out via SAGE_STATS_DISABLE)
+  provenance.scm    Ingress provenance (SHA-256, XML trust wrapping, optional GPG)
   logging.scm       Structured JSONL logging
   status.scm        Status display (thinking, streaming, done)
   util.scm          HTTP/JSON utilities, as-list, json-empty-object

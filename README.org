@@ -32,11 +32,26 @@ running =llama3.2:latest=).
 guile-sage is an interactive AI agent REPL written in GNU Guile 3 Scheme. It provides:
 
 - Multi-provider LLM support (Ollama, Gemini, LiteLLM/OpenAI-compat)
-- 22+ built-in tools with safe/unsafe permission model
-- Multi-step tool chain execution with degenerate loop detection
-- MCP client (SSE transport) for external tool servers
+- 33+ built-in tools with safe/unsafe permission model
+- Multi-step tool chain execution with signature-aware loop detection
+- =fetch_url= with content negotiation (markdown preferred), XML envelope
+  (source + SHA-256 + content-type + trust), and automatic scratch-store
+  offloading for large bodies
+- =scratch_get= / =scratch_list= for paged retrieval of large tool outputs
+  without blowing the context window
+- LIFO =sage_task_push= alongside FIFO =sage_task_create= for agents
+  decomposing work into ordered sub-steps
+- MCP client (SSE transport) for external tool servers, with =/mcp=
+  endpoint table and optional health/metrics probing
+- Lifecycle hooks (=PreToolUse= / =PostToolUse=) with veto semantics,
+  error isolation, and a pre-wired observer mode (=SAGE_DEMO_HOOKS=1=)
+- =eval_scheme= sandbox (denylist on shell-out, pipes, filesystem
+  mutation, code loading) that fires even in YOLO mode
 - Session management with persistence and context compaction (5 strategies)
-- OTLP telemetry emission to Prometheus/Grafana
+- Local JSONL usage ledger (=/stats=) at =$XDG_STATE_HOME/sage/usage.jsonl=
+- OTLP telemetry emission to Prometheus/Grafana (opt-in)
+- Readline-coloured prompt with token-budget indicator
+- Unified-diff =edit_file= summaries (model and user see the same change)
 - Image generation via Ollama flux models
 - LiteLLM guardrail integration (EU AI Act compliance)
 
@@ -57,10 +72,17 @@ The default configuration enables most development tools as safe for interactive
 |------+-------------+------|
 | =read_file= | Read file contents | Yes |
 | =list_files= | List directory contents | Yes |
-| =write_file= | Write content to file | Yes |
-| =edit_file= | Search/replace in file | Yes |
+| =write_file= | Write content to file | No (YOLO) |
+| =edit_file= | Search/replace returning a unified diff | No (YOLO) |
 | =glob_files= | Find files by pattern | Yes |
 | =search_files= | Grep for patterns | Yes |
+
+**** Network + Content
+| Tool | Description | Safe |
+|------+-------------+------|
+| =fetch_url= | GET an http(s) URL; returns an XML envelope with source, content-type, SHA-256, trust label, and body (inline under 1 KB, scratch-stored otherwise) | Yes |
+| =scratch_get= | Paged retrieval of scratch-stored content by SHA | Yes |
+| =scratch_list= | Enumerate scratch-stored SHAs with byte counts | Yes |
 
 **** Git Operations
 | Tool | Description | Safe |
@@ -68,33 +90,38 @@ The default configuration enables most development tools as safe for interactive
 | =git_status= | Show git status | Yes |
 | =git_diff= | Show git diff | Yes |
 | =git_log= | Show git history | Yes |
-| =git_commit= | Stage files and commit | Yes |
-| =git_add_note= | Add git notes | Yes |
-| =git_push= | Push to remote | Yes |
+| =git_commit= | Stage files and commit | No (YOLO) |
+| =git_add_note= | Add git notes | No (YOLO) |
+| =git_push= | Push to remote | No (YOLO) |
 
 **** Self-Inspection (Logging)
 | Tool | Description | Safe |
 |------+-------------+------|
 | =read_logs= | Read recent log entries | Yes |
 | =search_logs= | Search logs for patterns | Yes |
+| =log_stats= / =log_errors= / =log_timeline= / =log_search_advanced= | Log aggregation helpers | Yes |
 
 **** Agent Tasks
 | Tool | Description | Safe |
 |------+-------------+------|
-| =sage_task_create= | Create agent task | Yes |
-| =sage_task_complete= | Mark task complete | Yes |
+| =sage_task_create= | Append task (FIFO) | Yes |
+| =sage_task_push= | Push sub-task (LIFO) — runs BEFORE queued siblings | Yes |
 | =sage_task_list= | List pending tasks | Yes |
-| =sage_task_status= | Get agent status | Yes |
+| =sage_task_complete= | Mark current task complete | Yes |
+| =sage_task_status= | Get agent mode + iteration count | Yes |
 
 **** Meta/Unsafe (require YOLO mode)
 | Tool | Description | Safe |
 |------+-------------+------|
 | =run_tests= | Execute test suite | No |
-| =eval_scheme= | Evaluate Scheme code | No |
+| =eval_scheme= | Evaluate Scheme code (denylist-sandboxed even in YOLO — blocks =system=, =open-*-pipe=, filesystem mutation, =load=, nested =eval-string=) | No |
 | =reload_module= | Hot-reload modules | No |
-| =create_tool= | Register new tools | No |
+| =create_tool= | Register new tools at runtime | No |
+| =generate_image= | Generate an image via Ollama flux | No |
 
-Enable YOLO mode for unsafe tools: =SAGE_YOLO_MODE=1 make run= or =make run-yolo=
+Enable YOLO mode for unsafe tools: =SAGE_YOLO_MODE=1 make run=. The
+=eval_scheme= sandbox stays on in YOLO mode by design (NC12 in
+=docs/HOOK-NEGATIVE-CONTRACTS.org=).
 
 *** Session Management
 - Conversation history with token tracking
@@ -109,12 +136,22 @@ shift safety decisions onto the operator:
 
 - =SAGE_YOLO_MODE=1= disables the safe/unsafe tool separation documented
   in =docs/adr/0003-security-model.md=. In YOLO mode the agent can
-  write files, commit, push to remotes, and evaluate arbitrary Scheme.
-- The =eval_scheme= tool evaluates arbitrary expressions with the REPL's
-  process privileges. There is no sandbox — it can read =.env=,
-  shell out, or exfiltrate data if an attacker controls the prompt.
+  write files, commit, push to remotes, and (subject to the sandbox
+  below) evaluate Scheme.
+- The =eval_scheme= tool runs in a *denylist sandbox* that rejects
+  =system=, =open-input-pipe=, =open-output-pipe=, =delete-file=,
+  =rename-file=, =chmod=, =primitive-load=, =load=, nested =eval-string=,
+  and other shell-out or filesystem-mutation primitives. The sandbox
+  fires even in YOLO mode (NC12 in =docs/HOOK-NEGATIVE-CONTRACTS.org=).
+  Safe arithmetic / string / list operations still work. This is a
+  denylist, not a hermetic jail — treat it as defence-in-depth, not
+  isolation.
 - Autonomous modes (=agent-mode= interactive/autonomous/yolo) allow
   long-running multi-step actions without human confirmation per step.
+- Tool results are framed with a =<tool-result>= role-boundary wrapper
+  and a system-prompt clause telling the model to treat the contents
+  as DATA, not instructions. This mitigates (does not eliminate)
+  prompt-injection via file contents or fetched pages.
 
 *You, the operator, are responsible for:*
 - Running sage on systems whose blast radius you accept
@@ -246,54 +283,61 @@ guile3 -L src -c '(use-modules (sage repl)) (repl-start)'
 | =/exit=, =/quit= | Exit the REPL |
 | =/clear= | Clear screen |
 | =/reset= | Clear conversation history |
-| =/status=, =/stats= | Show session statistics |
+| =/status= | Show session statistics (tokens, messages, context %) |
+| =/stats= | Show local usage ledger aggregates (top tools by count + duration) |
 | =/compact [n]= | Compact history, keep last n messages |
 | =/context= | Show conversation context |
 | =/model [name]= | Show or set model |
 | =/models= | List available models |
-| =/save [name]= | Save session |
-| =/load <name>= | Load session |
-| =/sessions= | List saved sessions |
+| =/save [name]=, =/load <name>=, =/sessions= | Session persistence |
 | =/tools= | List available tools |
+| =/mcp= | Show registered MCP servers + endpoints (=SAGE_MCP_PROBE=1= for /health + /metrics) |
+| =/hooks= | List registered lifecycle hooks |
+| =/tasks= | Show pending agent task queue |
+| =/agent [mode]= | Show or set agent mode (=interactive= / =autonomous= / =yolo=) |
+| =/pause=, =/continue= | Control the autonomous agent loop |
+| =/tier= | Show model tier resolution state |
+| =/stream= | Toggle streaming response mode |
 | =/workspace= | Show workspace directory |
-| =/debug= | Toggle debug mode |
+| =/debug= | Toggle debug logging |
+| =/doctor= | Check dependencies + provider + MCP connectivity |
+| =/reload=, =/refresh= | Hot-reload sage modules |
+| =/logs [n] [lvl]= | Show recent log entries |
+| =/commands=, =/define-command=, =/undefine-command= | Custom slash-command registry |
 | =/version= | Show version info |
 
 *** Example Session
 
 #+begin_example
 ╔════════════════════════════════════════════╗
-║             guile-sage v0.7.0              ║
+║             guile-sage v0.9.0              ║
 ║   Type /help for commands, /exit to quit   ║
 ╚════════════════════════════════════════════╝
-Model: glm-4.7:cloud
-Host: https://api.ollama.com
+Provider: gemini
+Model: gemini-2.5-flash
+Host: https://generativelanguage.googleapis.com
+Mode: YOLO (all tools enabled)
 
-sage> What files are in the src directory?
+user@host:org/guile-sage sage[gemini-2.5-flash@cloud|653]> what files are in src/sage?
 
-I'll list the files in the src directory for you.
+  [Tool: list_files]
+  agent.scm
+  commands.scm
+  compaction.scm
+  config.scm
+  ...
 
-[Tool: list_files]
-sage
-config.scm
-main.scm
-ollama.scm
-repl.scm
-session.scm
-tools.scm
-util.scm
+The src/sage directory contains 22 core modules...
 
-The src/sage directory contains the core modules...
+user@host:org/guile-sage sage[gemini-2.5-flash@cloud|2.1k]> /stats
+Pending tasks:
+  sage-6: Summarize "1. Overview"
+  ...
+Total tool calls: 8
+Top by count:   fetch_url (1), sage_task_push (6), sage_task_list (1)
+Top by duration: fetch_url (2100ms), sage_task_push (180ms total)
 
-sage> /status
-Session: session-1769297211
-Model: qwen3-coder:latest
-Messages: 3
-Tokens: 245 (in: 52, out: 193)
-Requests: 1
-Tool calls: 1
-
-sage> /exit
+user@host:org/guile-sage sage[gemini-2.5-flash@cloud|2.1k]> /exit
 Goodbye!
 #+end_example
 
@@ -304,36 +348,52 @@ Goodbye!
 #+begin_example
 guile-sage/
 ├── src/sage/
-│   ├── config.scm      # Configuration, XDG paths, .env loading
-│   ├── util.scm        # HTTP/JSON utilities
-│   ├── ollama.scm      # Ollama API client
-│   ├── tools.scm       # Tool registration and execution
-│   ├── session.scm     # Session management
-│   ├── repl.scm        # Interactive REPL
-│   ├── main.scm        # CLI entry point
-│   ├── version.scm     # Version info
-│   ├── status.scm      # Status reporting
-│   ├── context.scm     # Context/AGENTS.md loading
-│   ├── logging.scm     # Structured logging
-│   ├── compaction.scm  # Context compaction strategies
-│   └── agent.scm       # Agent task management
-├── tests/
-│   ├── test-session.scm
-│   ├── test-tools.scm
-│   ├── test-ollama.scm
-│   ├── test-security.scm
-│   ├── test-compaction.scm
-│   └── test-compaction-security.scm
-├── scripts/
-│   ├── init.sh
-│   ├── check-config.sh
-│   ├── pre-commit
-│   └── bump-version.sh
+│   ├── main.scm         # CLI entry point
+│   ├── repl.scm         # Interactive REPL, coloured prompt, command dispatch
+│   ├── provider.scm     # Multi-provider routing (ollama|openai|gemini)
+│   ├── ollama.scm       # Ollama API client (streaming, tool_calls)
+│   ├── openai.scm       # OpenAI-compat client (LiteLLM, vLLM)
+│   ├── gemini.scm       # Google AI Gemini client
+│   ├── mcp.scm          # MCP SSE client + registry
+│   ├── tools.scm        # Tool registry + execute-tool + fetch_url + edit_file diff
+│   ├── scratch.scm      # Content-addressed scratch store for large tool outputs
+│   ├── hooks.scm        # PreToolUse + PostToolUse lifecycle hooks
+│   ├── usage-stats.scm  # Local JSONL usage ledger (/stats)
+│   ├── agent.scm        # Task queue (FIFO task-create + LIFO task-push!)
+│   ├── session.scm      # Session persistence + auto-compact trigger
+│   ├── compaction.scm   # 5 strategies: truncate, token-limit, importance, summarize, intent
+│   ├── context.scm      # Context-window tracking + threshold warnings
+│   ├── config.scm       # XDG paths, .env loading, model-specific token limits
+│   ├── model-tier.scm   # Tier-based model auto-selection
+│   ├── commands.scm     # Custom /command registry (persisted)
+│   ├── telemetry.scm    # OTLP/HTTP counters (opt-in)
+│   ├── logging.scm      # Structured JSONL logging
+│   ├── provenance.scm   # Ingress provenance (SHA-256, XML trust wrapping)
+│   ├── status.scm       # Streaming status display
+│   ├── util.scm         # HTTP client, JSON, argv-based subprocess helpers
+│   ├── irc.scm          # Optional IRC integration
+│   └── version.scm      # Semver constants
+├── tests/               # 27+ test files; SRFI-64 harness in test-harness.scm
 ├── docs/
-│   └── *.org           # Documentation (org-mode)
-├── .env.template
-├── Makefile
-└── AGENTS.md           # Project conventions
+│   ├── ARCHITECTURE.org          # C4 + module map
+│   ├── TELEMETRY.org             # OTLP setup + verification
+│   ├── MCP-CONTRACT.org          # 23 numbered invariants (I01-I23)
+│   ├── HOOKS-CONTRACT.org        # Lifecycle hook invariants (H01-H16)
+│   ├── HOOK-NEGATIVE-CONTRACTS.org  # Safety-guard catalog (NC01-NC12)
+│   ├── LSP-CONTRACT.org          # Speculative: sage-as-LSP-server
+│   ├── LSP-CLIENT-CONTRACT.org   # Speculative: sage consuming LSPs
+│   ├── SKILLS-CONTRACT.org       # Anthropic-compatible skills layout
+│   ├── EVAL-CASE-SCHEMA.org      # Eval traffic case schema (v1 + v2 draft)
+│   ├── AGENTS-MD-CONTRACT.org    # AGENTS.md discovery + directives
+│   ├── adr/0003-security-model.md  # Safe/unsafe tool separation
+│   ├── reports/                  # Dated, point-in-time findings
+│   └── ...
+├── examples/petstore/   # Demo Python project for README GIF + UATs
+├── scripts/
+│   ├── demo.sh          # Scripted asciinema demo with sanitised tmux pane
+│   ├── eval-sage.sh     # Drive eval traffic at a running sage session
+│   └── ...
+├── .env.template, Makefile, CLAUDE.md, AGENTS.md, LICENSE, SECURITY.md, CODE_OF_CONDUCT.md, CONTRIBUTING.org
 #+end_example
 
 *** Running Tests
@@ -387,11 +447,27 @@ guile-sage can modify itself through its tool system:
 
 ** Platform Notes
 
+*** macOS (primary dev target)
+
+- Homebrew Guile 3.0.11. HTTPS via =(web client)= requires
+  =brew install guile-gnutls= (sets =GUILE_TLS_CERTIFICATE_DIRECTORY=).
+- =system*= and =open-input-pipe= fail with "Bad file descriptor" under
+  Guile 3.0.11 on macOS (Darwin spawn bug). sage uses a custom
+  =capture-argv-in-dir= helper (primitive-fork + execlp) for all
+  subprocess spawns; no =/bin/sh= is involved.
+- Tested on Darwin 25.x (Tahoe). arm64 only; x86_64 untested.
+
 *** FreeBSD
 
-Developed and tested on FreeBSD 14.3. Known workarounds:
-- Uses =curl= with temp files instead of =open-input-pipe= (segfault issue)
-- Custom JSON parser (guile-json not available)
+Known to run on FreeBSD 14.3. The argv-based subprocess path is also
+used here (no platform-specific workaround needed). =guile-json= is
+intentionally not used — the project ships a small parser in
+=src/sage/util.scm=.
+
+*** Linux
+
+Expected to work on any distro with Guile 3.0 + curl. Not routinely
+tested; report issues.
 
 ** License
 
