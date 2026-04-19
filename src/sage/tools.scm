@@ -180,26 +180,40 @@
 ;;;   args - Alist of arguments
 ;;; Returns: Result string or error
 (define (execute-tool name args)
-  (let ((tool (get-tool name)))
+  (let ((tool (get-tool name))
+        (hook-mod (false-if-exception (resolve-module '(sage hooks) #:ensure #f))))
     (if tool
         (if (check-permission name args)
-            (begin
-              (log-tool-call name args)
-              (inc-counter! "guile_sage.code_edit.tool_decision"
-                            `(("tool_name" . ,name) ("decision" . "accept")) 1)
-              (let ((start-time (get-internal-real-time)))
-                (catch #t
-                  (lambda ()
-                    (let* ((result ((assoc-ref tool "execute") args))
-                           (end-time (get-internal-real-time))
-                           (duration-ms (/ (- end-time start-time)
-                                           (/ internal-time-units-per-second 1000))))
-                      (log-tool-call name args #:result result #:duration duration-ms)
-                      result))
-                  (lambda (key . rest)
-                    (log-error "tools" (format #f "Tool execution failed: ~a" name)
-                               `(("error" . ,(format #f "~a ~a" key rest))))
-                    (format #f "Tool error: ~a ~a" key rest)))))
+            (let* ((pre (if hook-mod
+                            ((module-ref hook-mod 'hook-fire-pre-tool) name args)
+                            #t))
+                   (vetoed? (or (not pre) (and (pair? pre) (not (car pre))))))
+              (if vetoed?
+                  (let ((reason (if (pair? pre) (cdr pre) "hook veto")))
+                    (log-warn "tools" (format #f "PreToolUse vetoed ~a: ~a" name reason)
+                              `(("tool" . ,name) ("reason" . ,reason)))
+                    (inc-counter! "guile_sage.code_edit.tool_decision"
+                                  `(("tool_name" . ,name) ("decision" . "veto")) 1)
+                    (format #f "Hook vetoed: ~a" reason))
+                  (begin
+                    (log-tool-call name args)
+                    (inc-counter! "guile_sage.code_edit.tool_decision"
+                                  `(("tool_name" . ,name) ("decision" . "accept")) 1)
+                    (let ((start-time (get-internal-real-time)))
+                      (catch #t
+                        (lambda ()
+                          (let* ((result ((assoc-ref tool "execute") args))
+                                 (end-time (get-internal-real-time))
+                                 (duration-ms (/ (- end-time start-time)
+                                                 (/ internal-time-units-per-second 1000))))
+                            (log-tool-call name args #:result result #:duration duration-ms)
+                            (when hook-mod
+                              ((module-ref hook-mod 'hook-fire-post-tool) name args result))
+                            result))
+                        (lambda (key . rest)
+                          (log-error "tools" (format #f "Tool execution failed: ~a" name)
+                                     `(("error" . ,(format #f "~a ~a" key rest))))
+                          (format #f "Tool error: ~a ~a" key rest)))))))
             (begin
               (log-warn "tools" (format #f "Permission denied: ~a" name)
                         `(("tool" . ,name)))
