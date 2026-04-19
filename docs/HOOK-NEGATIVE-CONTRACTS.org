@@ -1,0 +1,358 @@
+#+TITLE: guile-sage --- Negative Contract Enforcement via Lifecycle Hooks
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-18
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This document is a contract specification for negative contracts ---
+things the agent MUST NOT do --- implemented as PreToolUse and
+PostToolUse hooks in guile-sage. It bridges the gap identified in
+=docs/reports/20260414-contract-driven-agents.org= between prose
+contracts and runtime enforcement.
+
+The survey established a three-layer model:
+
+1. *Prose contracts* set intent (CLAUDE.md rules, system prompts).
+2. *Runtime enforcement* guarantees compliance (hooks, guards).
+3. *Drift scores* measure adherence over time.
+
+guile-sage currently sits between layers 1 and 2. This contract
+formalizes layer 2 by defining a library of built-in guards that fire
+as PreToolUse/PostToolUse hooks. Each guard can veto a tool call
+before execution or flag a violation after execution.
+
+Critical design principle: *guards fire even in YOLO mode*. YOLO
+bypasses the permission check in =check-permission= (ADR-0003), but
+negative contracts are safety invariants, not permission checks. A
+guard veto overrides YOLO.
+
+** Scope
+
+This contract covers five guards and their drift scoring:
+
+| Guard | Layer | Prevents |
+|-------------------+-------------+------------------------------------------------|
+| Self-modification | PreToolUse | Writes to =src/sage/*.scm= without explicit opt-in |
+| Secrets | PreToolUse | Reads of =.env=, =.ssh/=, =.gnupg/=, =credentials.*= |
+| Runaway | PostToolUse | N iterations without human input |
+| Scope | PreToolUse | Writes outside workspace + =/tmp/= |
+| Test deletion | PreToolUse | Removal of =assert-*/test-*= calls via =edit_file= |
+
+** Related work
+
+- =src/sage/tools.scm= --- =safe-path?= already blocks =.env=, =.ssh=,
+  =.gnupg= for path safety; the secrets guard extends this to
+  =credentials.*= and makes it a hook-level veto with descriptive errors
+- =docs/adr/0003-security-model.md= --- defines the safe/unsafe tool
+  split and YOLO override; guards sit above this layer
+- =docs/rfc/001-plugin-contract.org= --- self-modification triggers and
+  adversarial review architecture; guards implement the "trigger"
+  column from the operation classification table
+
+* Guard catalog
+
+| Guard | Hook event | Tool match | Match pattern | Veto? | Description |
+|-------------------+-------------+-----------------------------+-------------------------------------+-------+----------------------------------------------------|
+| =self-mod-guard= | PreToolUse | =edit_file=, =write_file= | path matches =src/sage/*.scm= | Yes | Prevents self-modification of agent source |
+| =secrets-guard= | PreToolUse | =read_file=, =edit_file=, =write_file= | path matches =.env=, =.ssh/=, =.gnupg/=, =credentials.*= | Yes | Prevents access to sensitive files |
+| =runaway-guard= | PostToolUse | any | iteration counter >= threshold | Yes | Halts runaway loops without human input |
+| =scope-guard= | PreToolUse | =write_file=, =edit_file= | resolved path outside workspace and =/tmp/= | Yes | Prevents writes outside allowed directories |
+| =test-del-guard= | PreToolUse | =edit_file= | replacement removes =assert-*= / =test-*= calls | Yes | Prevents deletion of test assertions |
+
+* Sequence diagrams
+
+** PreToolUse veto flow
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant A as Agent Loop
+    participant H as Hook Registry
+    participant G as Guard (e.g. self-mod)
+    participant T as tools.scm execute-tool
+    participant D as Drift Score
+
+    A->>H: pre-tool-use(tool-name, args)
+    H->>G: check(tool-name, args)
+    alt guard fires
+        G->>D: increment trigger count
+        G->>G: build descriptive error string
+        G-->>H: (veto . "Cannot write src/sage/repl.scm: self-modification guard active. Use (allow-self-mod!) to override.")
+        H-->>A: veto-error returned to LLM as tool result
+        Note over A: Tool is NOT executed
+    else guard passes
+        G-->>H: (allow)
+        H->>T: execute-tool(name, args)
+        T-->>A: tool result
+    end
+#+END_SRC
+
+** Drift score accumulation
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant G1 as secrets-guard
+    participant G2 as self-mod-guard
+    participant G3 as scope-guard
+    participant DS as Drift Score Table
+    participant R as /hooks stats
+
+    G1->>DS: inc! "secrets" (attempt to read .env)
+    G2->>DS: inc! "self-mod" (attempt to edit tools.scm)
+    G3->>DS: inc! "scope" (write to /etc/passwd)
+
+    R->>DS: query all
+    DS-->>R: ((secrets . 3) (self-mod . 1) (scope . 1) (runaway . 0) (test-del . 0))
+    Note over R: Total drift = 5, displayed via /hooks stats
+#+END_SRC
+
+* Invariants
+
+| Code | Invariant | Hard/Soft |
+|------+-------------------------------------------------------------------+-----------|
+| NC01 | Self-modification guard fires for any write to =src/sage/*.scm= | Hard |
+| NC02 | Self-modification guard bypass requires explicit =(allow-self-mod!)= in current session | Hard |
+| NC03 | Secrets guard fires for =.env= paths even when =YOLO_MODE= is set | Hard |
+| NC04 | Runaway guard threshold is configurable (default 20 iterations) | Soft |
+| NC05 | Scope guard allows =/tmp/= writes (matching current =safe-path?=) | Hard |
+| NC06 | Test deletion guard detects removal of =assert-*/test-*= calls via =edit_file= | Hard |
+| NC07 | All guards log to JSONL at info level when triggered | Soft |
+| NC08 | Guard veto returns descriptive error string to LLM (not just "denied") | Hard |
+| NC09 | Drift score incremented atomically per trigger | Soft |
+| NC10 | Guards individually disableable via config (=SAGE_NC_DISABLE=self-mod,secrets=) | Soft |
+| NC11 | Guard ordering: secrets before self-mod before scope before test-del | Hard |
+| NC12 | Guards fire even in YOLO mode | Hard |
+
+* Implementation notes
+
+** Integration with existing modules
+
+*** =src/sage/tools.scm= --- =safe-path?=
+
+The secrets guard extends =safe-path?= semantics. Currently =safe-path?=
+rejects paths matching =(\\.env|\\.git/|\\.ssh|\\.gnupg)= at the path
+level. The secrets guard adds:
+
+- =credentials.*= pattern (any file starting with "credentials")
+- Hook-level veto with descriptive error (NC08) instead of generic
+  "Unsafe path" string
+- Firing regardless of YOLO mode (NC12), whereas =safe-path?= is
+  called after =check-permission= in the current flow
+
+The guard does NOT replace =safe-path?=. Both layers remain active:
+=safe-path?= as the in-tool check, the guard as the pre-tool hook.
+Defense in depth.
+
+*** =docs/adr/0003-security-model.md=
+
+ADR-0003 defines the safe/unsafe split and states that "YOLO is a
+permission override, not a path override." Negative contract guards
+add a third layer: *safety invariants that override even YOLO*. This
+is consistent with ADR-0003's intent --- YOLO bypasses the "is this tool
+allowed?" question, but guards answer "is this specific invocation
+safe?" which is a different question.
+
+*** =docs/rfc/001-plugin-contract.org= --- self-modification section
+
+RFC-001's "Adversarial Review Triggers" table classifies =edit_file= on
+=src/sage/*.scm= as a "full review" trigger. The self-modification
+guard implements the "trigger" half --- it fires and vetoes the call.
+The "review" half (challenger agent) is out of scope for this contract
+but can be wired as a follow-on hook.
+
+RFC-001 also proposes =*immutable-paths*= for core modules. The
+self-modification guard is the runtime enforcement of that concept.
+
+** Guard implementation shape
+
+Each guard is a procedure with signature:
+
+#+BEGIN_SRC scheme
+(define (guard-name tool-name args)
+  "Return '(allow) or '(veto . reason-string)."
+  ...)
+#+END_SRC
+
+Guards are registered in a global ordered list. The hook dispatcher
+calls each guard in order (NC11) and stops at the first veto.
+
+#+BEGIN_SRC scheme
+(define *nc-guards*
+  (list secrets-guard      ; NC11: secrets first
+        self-mod-guard     ; then self-mod
+        scope-guard        ; then scope
+        test-del-guard))   ; then test-del
+
+;; runaway-guard is PostToolUse, not in this list
+#+END_SRC
+
+** Self-modification bypass
+
+=(allow-self-mod!)= sets a session-scoped flag. It is intentionally
+NOT persisted across sessions --- each session starts with the guard
+active. This prevents a compromised session from permanently disabling
+the guard.
+
+#+BEGIN_SRC scheme
+(define *self-mod-allowed* #f)
+
+(define (allow-self-mod!)
+  "Temporarily allow self-modification in this session."
+  (set! *self-mod-allowed* #t)
+  (log-info "negative-contracts"
+            "Self-modification guard bypassed for this session"))
+#+END_SRC
+
+** Guard disable via config
+
+Guards can be individually disabled via =SAGE_NC_DISABLE=:
+
+#+BEGIN_SRC scheme
+;; SAGE_NC_DISABLE=self-mod,secrets
+(define (guard-disabled? guard-name)
+  (let ((disabled (config-get "SAGE_NC_DISABLE")))
+    (and disabled
+         (member guard-name
+                 (string-split disabled #\,)))))
+#+END_SRC
+
+This is for development/testing only. Production deployments should
+not disable guards.
+
+* Drift scoring design
+
+Each guard maintains an atomic counter. The counters are exported
+via the =/hooks stats= REPL command and emitted as OTLP metrics.
+
+** Data structure
+
+#+BEGIN_SRC scheme
+(define *drift-scores*
+  (make-hash-table))  ; guard-name -> integer
+
+(define (drift-inc! guard-name)
+  "Atomically increment drift score for guard."
+  (let ((current (or (hash-ref *drift-scores* guard-name) 0)))
+    (hash-set! *drift-scores* guard-name (+ current 1))))
+
+(define (drift-stats)
+  "Return alist of (guard-name . count) pairs."
+  (hash-map->list cons *drift-scores*))
+#+END_SRC
+
+** OTLP emission
+
+Drift scores are emitted as gauge metrics via =src/sage/telemetry.scm=:
+
+- Metric name: =guile_sage.nc_guard.trigger_count=
+- Labels: =guard_name=, =session_id=
+
+** =/hooks stats= output format
+
+#+BEGIN_SRC text
+=== Negative Contract Guard Stats ===
+self-mod:   1 triggers
+secrets:    3 triggers
+scope:      0 triggers
+runaway:    0 triggers
+test-del:   0 triggers
+---
+Total drift: 4
+#+END_SRC
+
+* Test strategy
+
+** Unit tests (=tests/test-negative-contracts.scm=)
+
+Each invariant NC01--NC12 has a dedicated test case. Tests use SRFI-64
+via =test-harness.scm=.
+
+** Property-based testing
+
+Fuzz file paths against guards:
+
+- Generate random paths (workspace-relative, absolute, with =..=,
+  with sensitive prefixes) and verify guard behavior matches the
+  invariant table.
+- Generate random =edit_file= replacements and verify the test deletion
+  guard correctly detects removal of =assert-*/test-*= patterns.
+
+** Integration with existing test suites
+
+The guard system should NOT break existing tests. Specifically:
+
+- =test-security.scm= already unsets =YOLO_MODE= at the top; guard
+  behavior under non-YOLO is a superset of existing denials.
+- =test-tools.scm= tests =execute-tool= with YOLO enabled; guards
+  should not interfere with normal workspace writes.
+
+* Appendix: guard pseudo-code
+
+** Self-modification guard
+
+#+BEGIN_SRC scheme
+(define (self-mod-guard tool-name args)
+  (if (guard-disabled? "self-mod")
+      '(allow)
+      (let ((path (assoc-ref args "path")))
+        (if (and (member tool-name '("edit_file" "write_file"))
+                 path
+                 (string-match "^src/sage/.*\\.scm$" (resolve-path path))
+                 (not *self-mod-allowed*))
+            (begin
+              (drift-inc! "self-mod")
+              (log-info "negative-contracts"
+                        (format #f "Self-mod guard fired: ~a" path))
+              `(veto . ,(format #f "Cannot write ~a: self-modification guard active. Use (allow-self-mod!) to override." path)))
+            '(allow)))))
+#+END_SRC
+
+** Secrets guard
+
+#+BEGIN_SRC scheme
+(define (secrets-guard tool-name args)
+  (if (guard-disabled? "secrets")
+      '(allow)
+      (let ((path (assoc-ref args "path")))
+        (if (and (member tool-name '("read_file" "edit_file" "write_file"))
+                 path
+                 (or (string-contains path ".env")
+                     (string-contains path ".ssh/")
+                     (string-contains path ".gnupg/")
+                     (string-match "credentials\\." path)))
+            (begin
+              (drift-inc! "secrets")
+              (log-info "negative-contracts"
+                        (format #f "Secrets guard fired: ~a" path))
+              `(veto . ,(format #f "Cannot access ~a: secrets guard active. This file matches a sensitive pattern." path)))
+            '(allow)))))
+#+END_SRC
+
+** Test deletion guard
+
+#+BEGIN_SRC scheme
+(define (test-del-guard tool-name args)
+  (if (guard-disabled? "test-del")
+      '(allow)
+      (if (and (equal? tool-name "edit_file")
+               (assoc-ref args "search")
+               (let ((search (assoc-ref args "search")))
+                 (and (or (string-contains search "assert-")
+                          (string-contains search "test-assert")
+                          (string-contains search "test-equal")
+                          (string-contains search "(test "))
+                      (let ((replace (or (assoc-ref args "replace") "")))
+                        (not (or (string-contains replace "assert-")
+                                 (string-contains replace "test-assert")
+                                 (string-contains replace "test-equal")
+                                 (string-contains replace "(test ")))))))
+          (begin
+            (drift-inc! "test-del")
+            (log-info "negative-contracts"
+                      "Test deletion guard fired: edit removes test assertions")
+            '(veto . "Cannot remove test assertions via edit_file: test deletion guard active. Assertions must not be deleted."))
+          '(allow))))
+#+END_SRC

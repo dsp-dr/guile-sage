@@ -1,0 +1,347 @@
+#+TITLE: guile-sage — LSP Server Mode Contract
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-18
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This document is a contract specification for sage operating as a
+Language Server Protocol (LSP) server. It captures:
+
+- System architecture (C4 L1) showing editor <-> sage LSP server <-> LLM
+- Sequence diagrams for initialization, code actions, diagnostics, shutdown
+- Numbered invariants (L01-L14) to be enforced in the implementation
+- Transport: JSON-RPC 2.0 over stdio with Content-Length headers
+- Mapping of sage tools to LSP code action kinds
+- Integration with the safe/unsafe permission model (ADR-0003)
+- Session isolation between LSP and REPL modes
+
+The authoritative spec is LSP 3.17:
+https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/
+
+*Status:* N/A --- speculative feature. No implementation exists yet.
+This contract defines the target behavior for =src/sage/lsp.scm=.
+
+*Relationship to MCP:* Both MCP (SSE+HTTP) and LSP (stdio) use
+JSON-RPC 2.0 envelopes. They differ in framing: MCP uses SSE event
+streams with HTTP POST for requests; LSP uses Content-Length-delimited
+messages on stdin/stdout. The =mcp-make-request= / =mcp-make-notification=
+helpers in =src/sage/mcp.scm:88-110= produce valid JSON-RPC envelopes
+that can be reused for LSP with different framing.
+
+* 1. C4 Level 1 --- System Context
+
+#+BEGIN_SRC plantuml :file images/lsp-c4-l1.png
+@startuml lsp-c4-l1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title guile-sage LSP Mode --- System Context (C4 L1)
+
+Person(dev, "Developer", "Writes code in an editor with LSP support.")
+
+System_Boundary(editor_boundary, "Editor") {
+  System(editor, "Editor (Emacs/VSCode)", "Emacs via eglot, VSCode via extension, or any LSP client.")
+}
+
+System_Boundary(sage_boundary, "guile-sage") {
+  System(lsp, "sage LSP server", "Guile Scheme process. Listens on stdio for JSON-RPC 2.0 LSP messages.")
+}
+
+System_Ext(ollama, "Ollama", "Local LLM runtime. Provides chat completions for code analysis.")
+System_Ext(litellm, "LiteLLM / OpenAI", "Optional remote LLM backend with guardrails.")
+
+Rel(dev, editor, "Edits code, triggers actions")
+Rel(editor, lsp, "JSON-RPC 2.0 over stdio", "Content-Length framed")
+Rel(lsp, ollama, "POST /api/chat", "HTTP, tool_calls")
+Rel(lsp, litellm, "POST /v1/chat/completions", "HTTP, optional")
+
+SHOW_LEGEND()
+@enduml
+#+END_SRC
+
+Key relationships:
+
+- The editor is the LSP *client*; sage is the LSP *server*.
+- Communication is over stdio (stdin/stdout), not HTTP.
+- sage uses its existing provider abstraction (=src/sage/provider.scm=)
+  to dispatch LLM calls to Ollama, OpenAI/LiteLLM, or Gemini.
+- The LSP server does NOT connect to MCP servers. LSP mode exposes
+  sage's *local* tool registry as code actions; MCP tools are out of
+  scope for the initial implementation.
+
+* 2. Sequence diagrams
+
+** 2.1 Initialization handshake
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant E as Editor<br/>(LSP client)
+    participant S as sage LSP server<br/>(src/sage/lsp.scm)
+
+    E->>S: initialize (id=1)<br/>{capabilities, rootUri, clientInfo}
+    Note over S: Parse Content-Length header,<br/>read JSON-RPC body from stdin
+    S->>S: Negotiate capabilities<br/>(codeAction, diagnostic, completion, executeCommand)
+    S-->>E: initialize response (id=1)<br/>{capabilities, serverInfo: {name:"guile-sage", version:"0.7.0"}}
+
+    E->>S: initialized notification<br/>(no id, no response expected)
+    Note over S: Server is now ready<br/>to accept document events
+
+    E->>S: textDocument/didOpen<br/>{uri, languageId, text}
+    Note over S: Buffer tracked in memory
+#+END_SRC
+
+** 2.2 Code action request
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant E as Editor
+    participant S as sage LSP server
+    participant O as Ollama / LLM
+
+    E->>S: textDocument/codeAction (id=5)<br/>{uri, range, context}
+    S->>S: Extract code at range from tracked buffer
+    S->>O: POST /api/chat<br/>"Suggest refactors/tests/docs for this code"
+    O-->>S: Response with suggestions
+    S->>S: Map suggestions to CodeAction[]<br/>kind: refactor, quickfix, source
+
+    alt Safe tool actions (read_file, search_files, etc.)
+        S-->>E: CodeAction[]{title, kind, command}<br/>No confirmation needed
+    else Unsafe tool actions (write_file, edit_file, etc.)
+        S-->>E: CodeAction[]{title, kind, command, isPreferred:false}<br/>Editor shows confirmation dialog
+    end
+
+    E->>S: workspace/executeCommand (id=6)<br/>{command: "sage.applyEdit", arguments}
+    S->>S: check-permission (ADR-0003)
+    S-->>E: workspace/applyEdit request<br/>{edit: {documentChanges: [...]}}
+    E-->>S: workspace/applyEdit response<br/>{applied: true}
+    S-->>E: executeCommand response (id=6)
+#+END_SRC
+
+** 2.3 Diagnostic push (didSave)
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant E as Editor
+    participant S as sage LSP server
+    participant O as Ollama / LLM
+
+    E->>S: textDocument/didSave<br/>{uri}
+
+    alt Diagnostics enabled in workspace config
+        S->>S: Rate limit check<br/>(max 1 analysis per file per 30s)
+
+        alt Within rate limit
+            S->>O: POST /api/chat<br/>"Analyze this Scheme file for issues"
+            O-->>S: Response with findings
+            S-->>E: textDocument/publishDiagnostics<br/>{uri, diagnostics: [{range, message, severity}]}
+        else Rate limited
+            Note over S: Skip analysis, log at DEBUG
+        end
+    else Diagnostics disabled
+        Note over S: No action
+    end
+#+END_SRC
+
+** 2.4 Shutdown / exit
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant E as Editor
+    participant S as sage LSP server
+
+    E->>S: shutdown (id=99)
+    S->>S: Release resources<br/>(close provider connections,<br/>flush telemetry, clear buffers)
+    S-->>E: shutdown response (id=99, result: null)
+
+    E->>S: exit notification
+    S->>S: Exit process with code 0
+    Note over S: Process terminates cleanly
+#+END_SRC
+
+* 3. Contracts and invariants
+
+The implementation and its tests MUST enforce each invariant. Each has
+a short code (L##) for test references.
+
+** Transport layer (L01--L03)
+
+| Code | Invariant |
+|------+-----------|
+| *L01* | Every message on stdin and stdout MUST be framed with a =Content-Length: <N>\r\n\r\n= header followed by exactly =<N>= bytes of UTF-8 JSON-RPC 2.0 body. No other headers are required. |
+| *L02* | The JSON-RPC body MUST be encoded as UTF-8. The Content-Length value is the *byte* count, not the character count. |
+| *L03* | sage MUST read from stdin and write to stdout. Diagnostic/log output MUST go to stderr, never stdout. Mixing non-LSP output into stdout will corrupt the protocol stream. |
+
+** Initialization handshake (L04--L06)
+
+| Code | Invariant |
+|------+-----------|
+| *L04* | The server MUST respond to =initialize= with =serverInfo.name= set to ="guile-sage"= and =serverInfo.version= set to the current version string from =src/sage/version.scm=. Declared capabilities MUST include =codeActionProvider=, =executeCommandProvider=, and =textDocumentSync= (open/close/save). =diagnosticProvider= is optional, gated on workspace config. |
+| *L05* | The server MUST NOT send any requests or notifications to the client before receiving the =initialized= notification. Messages received before =initialize= completes (other than =initialize= itself) MUST be rejected with JSON-RPC error code =-32002= (=ServerNotInitialized=). |
+| *L06* | After receiving =initialized=, the server transitions to the "ready" state and begins processing =textDocument/*= notifications. |
+
+** Code action dispatch (L07--L08)
+
+| Code | Invariant |
+|------+-----------|
+| *L07* | Each sage tool MUST map to an LSP code action kind. Safe tools (per =*safe-tools*= in =src/sage/tools.scm= and ADR-0003) produce code actions that can execute without additional confirmation. Unsafe tools produce code actions flagged for editor confirmation via the =command= field of =workspace/executeCommand=. |
+| *L08* | The permission model from ADR-0003 applies: =check-permission= in =src/sage/tools.scm= is the single enforcement point. If =SAGE_YOLO_MODE= is not set and the tool is not in =*safe-tools*=, the LSP server MUST either (a) omit the code action entirely, or (b) include it but require =workspace/executeCommand= confirmation. The server MUST NOT silently execute unsafe tools. |
+
+** Diagnostic push (L09--L10)
+
+| Code | Invariant |
+|------+-----------|
+| *L09* | Diagnostic analysis on =didOpen= / =didSave= MUST be rate-limited to at most one LLM call per file per 30 seconds (configurable via =SAGE_LSP_DIAG_INTERVAL=). Exceeding the rate limit silently skips analysis. This prevents LLM cost explosion on rapid saves. |
+| *L10* | Diagnostic push is opt-in. The server MUST NOT perform LLM-based diagnostics unless the workspace configuration or initialization params explicitly enable it (=sage.diagnostics.enabled= in =initializationOptions= or =SAGE_LSP_DIAGNOSTICS=1= env var). When disabled, the server advertises no =diagnosticProvider= capability. |
+
+** Shutdown / exit lifecycle (L11)
+
+| Code | Invariant |
+|------+-----------|
+| *L11* | On =shutdown=, the server MUST release all resources (LLM connections, open file buffers, telemetry flush). On the subsequent =exit= notification, the server MUST exit with code 0. If =exit= arrives without a preceding =shutdown=, the server MUST exit with code 1. No orphan processes (curl, LLM inference) may survive the exit. |
+
+** Error handling (L12)
+
+| Code | Invariant |
+|------+-----------|
+| *L12* | Unimplemented LSP methods MUST return JSON-RPC error code =-32601= (=MethodNotFound=). Parse errors in incoming messages MUST return =-32700= (=ParseError=). Invalid JSON-RPC structure MUST return =-32600= (=InvalidRequest=). LLM failures (timeouts, network errors) MUST be surfaced as diagnostic messages or logged to stderr, never as JSON-RPC errors to the client (the LLM is not part of the protocol). |
+
+** Concurrent request handling (L13)
+
+| Code | Invariant |
+|------+-----------|
+| *L13* | The server processes requests sequentially from a single-threaded read loop with an internal queue. Requests are dequeued and processed in order. Long-running LLM calls (code action generation, diagnostics) MUST NOT block the read loop --- they are dispatched to a worker thread. The read loop continues accepting =$/cancelRequest= and =textDocument/did*= notifications while LLM work is in flight. |
+
+** Session isolation (L14)
+
+| Code | Invariant |
+|------+-----------|
+| *L14* | An LSP session (started via =sage --lsp=) MUST NOT share mutable state with a concurrent REPL session. Specifically: the tool registry =*tools*= is initialized independently, =*mcp-servers*= is not populated (LSP mode does not connect to MCP), session history (=src/sage/session.scm=) uses a separate namespace (="lsp-<pid>"=), and the context window (=src/sage/context.scm=) is per-LSP-session. Configuration (=src/sage/config.scm=) is read-only and may be shared. |
+
+* 4. Code action kind mapping
+
+Sage tools map to LSP =CodeActionKind= values:
+
+| Sage tool category | LSP CodeActionKind | Example tools | Permission |
+|--------------------+--------------------+---------------+------------|
+| Read / inspect | =source= | =read_file=, =search_files=, =git_log= | Safe |
+| Diagnostics | =quickfix= | LLM-suggested fixes | Unsafe |
+| Refactoring | =refactor= | =edit_file= (via LLM suggestion) | Unsafe |
+| Test generation | =source.organizeImports= | LLM-generated tests | Unsafe |
+| Documentation | =source= | LLM-generated docstrings | Unsafe |
+
+The server registers these commands with =executeCommandProvider=:
+
+| Command | Description | Maps to |
+|---------+-------------+---------|
+| =sage.applyEdit= | Apply an LLM-suggested edit | =workspace/applyEdit= |
+| =sage.runTool= | Execute a sage tool by name | =execute-tool= dispatch |
+| =sage.analyzeDiagnostics= | Force diagnostic analysis | LLM call + =publishDiagnostics= |
+
+* 5. Three-way access
+
+| Access method | How | When |
+|---------------+-----+------|
+| CLI flag | =sage --lsp= | Primary entry point. Editor launches sage as a subprocess. |
+| Scheme API | =(lsp-server-start)= | Programmatic start from Guile code or test harness. |
+| Slash command | N/A | LSP *replaces* the REPL; no =/lsp= command inside the REPL. |
+
+*CLI integration:* =sage --lsp= is a new flag in =src/sage/main.scm=
+(alongside =-p=, =-m=, =-y=, =--plan=). When set, sage skips REPL
+initialization (=src/sage/repl.scm=) and enters the LSP read loop
+instead.
+
+*Emacs:* =(add-to-list 'eglot-server-programs '(scheme-mode . ("sage" "--lsp")))=
+
+*VSCode:* Set =sage.lsp.command= to =["sage", "--lsp"]= in settings.
+
+* 6. Implementation notes
+
+** 6.1 New module: =src/sage/lsp.scm=
+
+The LSP server is a single new module. Target exports:
+
+- =(lsp-server-start)= --- enter the stdio read loop
+- =(lsp-read-message port)= --- read Content-Length framed message
+- =(lsp-write-message port obj)= --- write Content-Length framed message
+- =(lsp-handle-request method id params)= --- dispatch table
+- =(lsp-handle-notification method params)= --- dispatch table
+
+** 6.2 Reuse from existing modules
+
+| What to reuse | Source | Notes |
+|---------------+--------+-------|
+| JSON-RPC envelope construction | =src/sage/mcp.scm:88-110= | =mcp-make-request=, =mcp-make-notification= produce valid JSON-RPC 2.0. Extract to shared helper or duplicate in =lsp.scm=. |
+| JSON read/write | =src/sage/util.scm= | =json-read-string= (line 126), =json-write-string= (line 187). The =as-list= helper handles vector/list ambiguity. |
+| Provider dispatch | =src/sage/provider.scm= | LLM calls for code actions and diagnostics go through the existing provider abstraction. |
+| Tool registry | =src/sage/tools.scm= | =*tools*=, =*safe-tools*=, =check-permission=, =execute-tool=. LSP mode calls =init-default-tools= independently. |
+| Configuration | =src/sage/config.scm= | =config-get= for env var lookup. |
+| Telemetry | =src/sage/telemetry.scm= | =inc-counter!= for =guile_sage.lsp.request= metrics. |
+| Logging | =src/sage/logging.scm= | All log output goes to JSONL file and stderr, never stdout (L03). |
+| =json-empty-object= | =src/sage/util.scm= | Sentinel for serializing ={}\= in JSON. |
+
+** 6.3 Content-Length framing
+
+The LSP base protocol differs from MCP's SSE framing.
+=lsp-read-message= reads headers line-by-line until a blank line,
+extracts =Content-Length=, then reads exactly that many bytes as a
+UTF-8 JSON body. =lsp-write-message= serializes JSON, computes byte
+length, writes =Content-Length: N\r\n\r\n= followed by the body.
+
+** 6.4 JSON-RPC shared with MCP
+
+Both MCP and LSP use identical JSON-RPC 2.0 envelopes (=jsonrpc=,
+=id=, =method=, =params=, =result=, =error=). The framing differs:
+MCP uses SSE =event: message\ndata: <json>\n\n=; LSP uses
+=Content-Length: N\r\n\r\n<json>=. The envelope builder can be
+shared; the framing layer is transport-specific.
+
+* 7. Observed divergences
+
+N/A --- speculative feature. No implementation or live server exists.
+
+All invariants are forward-looking contracts. Divergences will be
+captured here once an implementation is tested against real editors.
+
+* 8. Test strategy
+
+** 8.1 Unit tests (=tests/test-lsp.scm=)
+
+| Test group | Invariants | Method |
+|------------+------------+--------|
+| Content-Length framing | L01, L02 | Round-trip: write message, read it back from a string port. Test multi-byte UTF-8 (byte count != char count). |
+| Initialization state machine | L04, L05, L06 | Send =initialize=, verify capabilities. Send request before =initialized=, expect =-32002=. |
+| Code action dispatch | L07, L08 | Verify safe tools produce actions without confirmation. Verify unsafe tools are gated on YOLO. |
+| Diagnostic rate limiting | L09, L10 | Simulate rapid =didSave= events, assert only one LLM call per interval. Assert no diagnostics when disabled. |
+| Shutdown lifecycle | L11 | Send =shutdown= + =exit=, verify clean exit. Send =exit= without =shutdown=, verify exit code 1. |
+| Error codes | L12 | Send unknown method, expect =-32601=. Send malformed JSON, expect =-32700=. |
+| Session isolation | L14 | Start LSP session, verify =*mcp-servers*= is empty. Verify session namespace is ="lsp-<pid>"=. |
+
+** 8.2 Integration tests
+
+Spawn =sage --lsp= as subprocess, write LSP messages to stdin, read
+from stdout. Validates Content-Length framing and initialization
+without a real editor. Manual smoke tests: Emacs 29+ with eglot,
+VSCode with generic LSP extension.
+
+* 9. Related beads
+
+| Bead | Relevance |
+|------+-----------|
+| =guile-sage-w9p= | CLI/REPL command synergy --- LSP is a third access mode |
+| =guile-sage-grv= | Agent Modes epic --- LSP is a new agent mode alongside REPL |
+
+* 10. Open questions
+
+1. *Inline completions:* =textDocument/completion= is high-latency
+   (LLM round-trip). Defer to post-v1; focus on code actions first.
+2. *Multi-root workspaces:* sage is single-root. Reject
+   =workspace/workspaceFolders= with multiple roots for now.
+3. *Streaming responses:* Use =$/progress= for LLM thinking indicator.
+4. *MCP tool exposure:* Deferred --- MCP SSE + LSP stdio in same
+   process adds complexity for unclear UX benefit.
+5. *File watching:* =workspace/didChangeWatchedFiles= deferred to post-v1.
