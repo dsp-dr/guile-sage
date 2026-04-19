@@ -1,6 +1,21 @@
 #+TITLE: Contributing to guile-sage
 #+AUTHOR: dsp-dr
 
+* License and contributions
+
+By opening a pull request or otherwise contributing to this repository,
+you agree that your contribution is offered under the terms of the MIT
+License (see =LICENSE=). This is the /inbound = outbound/ model — your
+contribution is licensed to the project under the same terms the project
+releases to the public.
+
+** Developer Certificate of Origin (optional)
+
+Contributors are encouraged (but not required) to sign off each commit
+using =git commit -s= to certify authorship per the Developer Certificate
+of Origin (https://developercertificate.org/). This adds a
+=Signed-off-by: Name <email>= trailer.
+
 * Development Setup
 
 1. Clone the repository
