@@ -1,0 +1,216 @@
+#+TITLE: Plugin System Specification
+#+AUTHOR: guile-sage
+#+DATE: 2026-04-18
+
+* Overview
+
+Plugins bundle commands, skills, hooks, and MCP servers into a single
+distributable unit. This spec defines the contract for plugin discovery,
+loading, and lifecycle management.
+
+* CLI Interface
+
+#+begin_src
+sage plugin list                     # List installed plugins
+sage plugin install <name>           # Install from registry
+sage plugin install ./path           # Install from local path
+sage --plugin-dir ./local-plugins    # Ephemeral, session-only
+#+end_src
+
+* Plugin Directory Structure
+
+#+begin_src
+my-plugin/
+├── manifest.json        # Required: plugin metadata
+├── skills/              # Optional: skill definitions
+│   └── my-skill/
+│       └── SKILL.md
+├── hooks/               # Optional: lifecycle hooks
+│   └── pre-tool.sh
+├── agents/              # Optional: agent definitions
+│   └── specialist.json
+└── mcp.json             # Optional: MCP server config
+#+end_src
+
+* manifest.json Schema
+
+#+begin_src json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "What this plugin does",
+  "author": "Author Name",
+  "license": "MIT",
+  "engines": {
+    "sage": ">=0.7.0"
+  },
+  "surfaces": {
+    "skills": ["skills/*/SKILL.md"],
+    "hooks": ["hooks/*.sh"],
+    "agents": ["agents/*.json"],
+    "mcp": "mcp.json"
+  },
+  "dependencies": []
+}
+#+end_src
+
+** Required Fields
+
+| Field       | Type   | Description                      |
+|-------------|--------|----------------------------------|
+| name        | string | Unique plugin identifier         |
+| version     | string | Semver version                   |
+| description | string | Human-readable description       |
+
+** Optional Fields
+
+| Field        | Type   | Description                           |
+|--------------|--------|---------------------------------------|
+| author       | string | Plugin author                         |
+| license      | string | SPDX license identifier               |
+| engines.sage | string | Minimum sage version requirement      |
+| surfaces     | object | Glob patterns for discoverable assets |
+| dependencies | array  | Other plugins this depends on         |
+
+* Discovery Order (Cross-Harness Portable)
+
+Walk up from pwd, checking each directory for:
+
+1. =.claude/skills/= — Claude Code native
+2. =.opencode/= — opencode.ai compatible
+3. =.agents/= — Generic agent definitions
+4. =plugins/= — Plugin bundles
+
+Stop at git root or filesystem root.
+
+For plugins specifically:
+#+begin_src
+$XDG_DATA_HOME/sage/plugins/     # User-installed
+$PROJECT_ROOT/plugins/           # Project-local
+--plugin-dir <path>              # Session ephemeral (highest priority)
+#+end_src
+
+* Surface Registration
+
+When a plugin loads, each surface type registers:
+
+** Skills
+
+Skills in =skills/*/SKILL.md= are registered as slash commands:
+- =/my-skill= invokes =skills/my-skill/SKILL.md=
+- YAML frontmatter defines name, description, tools
+
+** Hooks
+
+Shell scripts in =hooks/= are registered by lifecycle event:
+- =pre-tool.sh= → PreToolUse hook
+- =post-tool.sh= → PostToolUse hook
+- =session-start.sh= → SessionStart hook
+- =session-end.sh= → SessionEnd hook
+
+Hook scripts receive JSON on stdin, output JSON decision on stdout.
+
+** Agents
+
+JSON files in =agents/= define specialist agents:
+#+begin_src json
+{
+  "name": "specialist",
+  "description": "Domain-specific agent",
+  "system_prompt": "You are...",
+  "tools": ["Read", "Bash(git:*)"],
+  "model": "auto"
+}
+#+end_src
+
+** MCP Servers
+
+=mcp.json= defines MCP server connections:
+#+begin_src json
+{
+  "servers": {
+    "my-server": {
+      "command": "npx",
+      "args": ["-y", "@my/mcp-server"],
+      "env": {}
+    }
+  }
+}
+#+end_src
+
+* Lifecycle
+
+** Installation
+
+1. Validate manifest.json exists and is valid
+2. Check engine compatibility
+3. Resolve dependencies
+4. Copy to =$XDG_DATA_HOME/sage/plugins/<name>/=
+5. Register all surfaces
+
+** Loading (Session Start)
+
+1. Discover plugins from all paths
+2. Build dependency graph
+3. Load in topological order
+4. Register surfaces in namespace
+
+** Unloading (Session End)
+
+1. Unregister surfaces
+2. Run cleanup hooks if defined
+
+* Namespacing
+
+Plugin surfaces are namespaced to avoid collisions:
+- Skill =/foo= from plugin =bar= → =/bar:foo= or =/foo= if unambiguous
+- Hook priority by load order (later plugins override)
+
+* Security Considerations
+
+** Sandboxing
+
+- Hooks run in restricted shell (no network by default)
+- MCP servers inherit plugin permissions
+- Skills declare required tools in frontmatter
+
+** Verification
+
+- Optional signature verification for registry plugins
+- Hash verification for installed plugins
+- Audit log of plugin installations
+
+* Environment Variables
+
+| Variable               | Description                          |
+|------------------------|--------------------------------------|
+| SAGE_PLUGIN_PATH       | Additional plugin search paths       |
+| SAGE_PLUGIN_DISABLE    | Comma-separated plugins to skip      |
+| SAGE_PLUGIN_STRICT     | Fail on any plugin load error        |
+
+* Implementation Phases
+
+** Phase 1: Local Skills (v0.7)
+
+- [X] Skill discovery in =.claude/skills/=
+- [ ] Slash command registration
+- [ ] Tool scoping from frontmatter
+
+** Phase 2: Hooks (v0.8)
+
+- [ ] Hook discovery and registration
+- [ ] JSON input/output protocol
+- [ ] Hook chaining
+
+** Phase 3: Full Plugins (v0.9)
+
+- [ ] manifest.json parsing
+- [ ] Dependency resolution
+- [ ] MCP server integration
+- [ ] Plugin registry
+
+* References
+
+- opencode.ai Skills Spec: Cross-harness portable skill discovery
+- Claude Code Hooks: Lifecycle hook system
+- MCP Specification: Model Context Protocol
