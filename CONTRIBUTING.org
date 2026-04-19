@@ -22,6 +22,12 @@ By participating in this project, you agree to abide by our
 [[file:CODE_OF_CONDUCT.md][Code of Conduct]] (Contributor Covenant v2.1).
 Report unacceptable behavior to =conduct@defrecord.com=.
 
+* Reporting Security Issues
+
+*Do NOT file public GitHub issues or PRs for security vulnerabilities.*
+See [[file:SECURITY.md][SECURITY.md]] for the private disclosure channel
+(=security@defrecord.com=), response SLA, and scope.
+
 * Development Setup
 
 1. Clone the repository

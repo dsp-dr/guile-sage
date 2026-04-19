@@ -392,6 +392,12 @@ Developed and tested on FreeBSD 14.3. Known workarounds:
 
 MIT License - see LICENSE file for details.
 
+** Security
+
+To report a security vulnerability, see [[file:SECURITY.md][SECURITY.md]].
+Please do *not* file public GitHub issues for security findings — email
+=security@defrecord.com= instead.
+
 ** Contributing
 
 See [[file:CONTRIBUTING.org][CONTRIBUTING.org]] for guidelines. By participating, you
