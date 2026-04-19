@@ -419,7 +419,75 @@ that care about the exit code (git_push, git_commit) can surface it."
 ;;; Built-in Tools
 ;;; ============================================================
 
+;;; Wrapper + sanitizer for fetch_url (classified safe).
+;;; Contract: https://wal.sh/research/guile-sage-inject.html
+;;;   - GET only, UA "guile-sage/0.1"
+;;;   - Wraps body with "<!-- wrapped by guile-sage ... -->" markers
+;;;   - Strips <script>...</script> blocks (case-insensitive)
+;;;   - Only http:// and https:// schemes
+;;;   - Capped at 1 MB body, 10 s timeout
+(define *fetch-ua*
+  "guile-sage/0.1 (+https://github.com/dsp-dr/guile-sage; Guile Scheme AI agent)")
+(define *fetch-max-bytes* 1048576)
+(define *fetch-timeout-secs* 10)
+
+(define (fetch-url-scheme-ok? url)
+  (or (string-prefix? "http://" url)
+      (string-prefix? "https://" url)))
+
+(define (strip-script-tags body)
+  "Remove <script>...</script> blocks (case-insensitive, non-greedy).
+Naive but sufficient for the wal.sh test contract."
+  (let loop ((s body))
+    (let ((lower (string-downcase s)))
+      (let ((open (string-contains lower "<script")))
+        (if (not open)
+            s
+            (let* ((close-tag (string-contains lower "</script>" open)))
+              (if (not close-tag)
+                  ;; Unclosed — drop from <script onwards to be safe
+                  (substring s 0 open)
+                  (loop (string-append
+                         (substring s 0 open)
+                         (substring s (+ close-tag (string-length "</script>"))))))))))))
+
+(define (fetch-url-execute args)
+  (let ((url (assoc-ref args "url")))
+    (cond
+     ((or (not url) (not (string? url)) (string-null? url))
+      "Error: url argument is required")
+     ((not (fetch-url-scheme-ok? url))
+      (format #f "Error: only http:// and https:// URLs are permitted (got: ~a)" url))
+     (else
+      ;; Use capture-argv-in-dir (primitive-fork + execlp) to dodge the
+      ;; macOS Guile 3.0.11 system*/open-pipe* Bad-FD bug. See the big
+      ;; comment block above capture-argv-in-dir.
+      (let ((body (capture-argv-in-dir
+                   "/tmp"
+                   "curl" "-sSL"
+                   "-A" *fetch-ua*
+                   "-H" "Accept: text/html, text/plain, */*"
+                   "--max-time" (number->string *fetch-timeout-secs*)
+                   "--max-filesize" (number->string *fetch-max-bytes*)
+                   url)))
+        (string-append
+         "<!-- wrapped by guile-sage " *fetch-ua* " -->\n"
+         "<!-- source: " url " -->\n"
+         (strip-script-tags body)
+         "\n<!-- end wrapped by guile-sage -->\n"))))))
+
 (define (init-default-tools)
+  ;; fetch_url (safe: read-only GET, URL scheme + size/time caps)
+  (register-tool
+   "fetch_url"
+   "Fetch an http(s) URL via GET and return the body wrapped with guile-sage markers. <script> tags are stripped. Capped at 1 MB / 10 s."
+   '(("type" . "object")
+     ("properties" . (("url" . (("type" . "string")
+                                ("description" . "http:// or https:// URL to fetch")))))
+     ("required" . #("url")))
+   fetch-url-execute
+   #:safe #t)
+
   ;; read_file
   (register-tool
    "read_file"
