@@ -1,0 +1,253 @@
+#+TITLE: guile-sage — AGENTS.md Discovery and Behavioral Configuration Contract
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-18
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This document is a contract specification for how =guile-sage= discovers,
+parses, and applies =AGENTS.md= files from project directories. =AGENTS.md=
+is the sage equivalent of Claude Code's =CLAUDE.md= — a project-local
+configuration file that shapes agent behavior, tool permissions, and
+operating conventions without modifying source code.
+
+It captures:
+
+- Discovery order across five candidate locations
+- Merge semantics when multiple =AGENTS.md= files are found
+- Structured section parsing (headings that map to runtime behavior)
+- Tool permission extraction and enforcement
+- Three-way access: CLI flag, slash command, Scheme API
+- Numbered invariants to be enforced in tests
+
+The existing implementation lives in =src/sage/config.scm:256-282=
+(=find-agents-md= and =load-agents-md=). The context module at
+=src/sage/context.scm:66-73= loads =SAGE.md= but never calls
+=load-agents-md=, representing a gap this contract addresses.
+
+Related beads issues: =guile-sage-grv= (Agent Modes), =guile-sage-w9p=
+(CLI/REPL command synergy), =guile-sage-51k= (Custom slash commands).
+
+* 1. C4 Level 1 — System Context
+
+#+BEGIN_SRC plantuml :file images/agents-md-c4-l1.png
+@startuml agents-md-c4-l1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title AGENTS.md Discovery — System Context (C4 L1)
+
+Person(user, "Developer", "Authors AGENTS.md files in project directories.")
+
+System_Boundary(sage_boundary, "guile-sage") {
+  System(sage, "sage REPL", "Discovers, parses, and applies AGENTS.md behavioral config at startup and on /agents reload.")
+}
+
+System_Ext(fs, "File System", "Workspace, XDG dirs, ~/.sage/ — candidate AGENTS.md locations.")
+System_Ext(ollama, "Ollama / LLM", "Receives tool schemas shaped by AGENTS.md permissions.")
+
+Rel(user, sage, "CLI flags, slash commands", "stdin/tty")
+Rel(user, fs, "Creates/edits AGENTS.md", "editor")
+Rel(sage, fs, "Reads AGENTS.md files", "file I/O")
+Rel(sage, ollama, "POST /api/chat with filtered tools schema", "HTTP")
+
+SHOW_LEGEND()
+@enduml
+#+END_SRC
+
+Key relationships:
+
+- =AGENTS.md= files are authored by the developer and read by sage.
+- Discovery is file-system based — no network, no database.
+- The parsed configuration affects which tools are exposed to the LLM
+  and which operating mode sage uses.
+
+* 2. Sequence diagrams
+
+** 2.1 Discovery at startup
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant M as main.scm
+    participant C as config.scm
+    participant FS as File System
+
+    U->>M: sage --workspace /project
+    M->>C: find-agents-md()
+    C->>FS: file-exists? /project/AGENTS.md
+    C->>FS: file-exists? $XDG_DATA_HOME/sage/projects/<id>/AGENTS.md
+    C->>FS: file-exists? $XDG_CONFIG_HOME/sage/AGENTS.md
+    C->>FS: file-exists? $XDG_DATA_HOME/sage/AGENTS.md
+    C->>FS: file-exists? ~/.sage/AGENTS.md
+    FS-->>C: [list of existing paths]
+    C->>C: filter file-exists?
+    C-->>M: ordered list of paths
+
+    M->>C: load-agents-md()
+    C->>FS: read each file
+    C->>C: concatenate with "# From: <path>" headers
+    C-->>M: combined content string (or #f)
+#+END_SRC
+
+** 2.2 Structured section parsing (proposed)
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant R as repl.scm
+    participant P as agents-md parser
+    participant T as tools.scm
+
+    R->>P: parse-agents-md(content-string)
+    P->>P: split on "## " headings
+    P->>P: extract "## Tool Permissions" section
+    P->>P: extract "## Mode" section
+    P->>P: extract "## Conventions" section
+    P-->>R: parsed agents-md record
+
+    R->>T: apply tool permissions (safe-list, unsafe-list)
+    Note over T: Restrictions applied BEFORE first chat turn
+#+END_SRC
+
+** 2.3 Reload via /agents
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant R as repl.scm
+    participant C as config.scm
+    participant T as tools.scm
+
+    U->>R: /agents reload
+    R->>C: load-agents-md()
+    C-->>R: new content string
+    R->>R: parse-agents-md(content)
+    R->>T: replace tool permissions atomically
+    R-->>U: "Reloaded AGENTS.md from 2 sources"
+#+END_SRC
+
+* 3. Contracts and invariants
+
+The implementation and its tests MUST enforce each invariant below.
+Each has a short code (A##) so tests can reference it.
+
+** Discovery
+
+| ID  | Description                                                    | Test strategy          |
+|-----+----------------------------------------------------------------+------------------------|
+| A01 | =find-agents-md= checks exactly 5 locations in this order:    | Unit: mock filesystem  |
+|     | workspace, XDG project, XDG config, XDG data, ~/.sage/        |                        |
+| A02 | Only files that pass =file-exists?= are returned              | Unit: temp dir fixture |
+| A03 | If no AGENTS.md exists anywhere, =find-agents-md= returns =()= | Unit: empty temp dir  |
+
+** Merge semantics
+
+| ID  | Description                                                    | Test strategy          |
+|-----+----------------------------------------------------------------+------------------------|
+| A04 | Multiple files are concatenated in discovery order             | Unit: 2-file fixture   |
+| A05 | Each file's content is prefixed with =# From: <path>=         | Unit: check prefix     |
+
+** Structured section parsing
+
+| ID  | Description                                                    | Test strategy          |
+|-----+----------------------------------------------------------------+------------------------|
+| A06 | =## Tool Permissions= heading maps to safe/unsafe tool lists  | Unit: parse mock file  |
+| A07 | =## Mode= heading maps to operating mode (yolo, plan, normal) | Unit: parse mock file  |
+| A08 | =## Conventions= heading is passed through as system context   | Unit: parse mock file  |
+
+** Application
+
+| ID  | Description                                                    | Test strategy          |
+|-----+----------------------------------------------------------------+------------------------|
+| A09 | Tool permission restrictions from AGENTS.md are applied        | Integration: verify    |
+|     | BEFORE the first chat turn                                     | tool list after load   |
+| A10 | Malformed AGENTS.md degrades gracefully: log WARN, skip the    | Unit: garbage input    |
+|     | malformed section, continue with remaining sections            |                        |
+| A11 | =/agents reload= replaces prior AGENTS.md config atomically   | Unit: load, reload,    |
+|     | (no partial state between old and new config)                  | verify no interleave   |
+| A12 | Nested AGENTS.md in subdirectories are NOT traversed;          | Unit: place file in    |
+|     | only the 5 explicit search locations are checked               | subdir, verify missed  |
+
+* 4. Observed divergences
+
+N/A: speculative feature. The structured section parsing (A06-A09) and
+the =/agents= slash command (A11) are not yet implemented. The current
+code in =config.scm:256-282= handles only discovery (A01-A03) and
+concatenation (A04-A05).
+
+The context module (=context.scm:66-73=) loads =SAGE.md= via
+=load-agents-context= but never calls =load-agents-md= from
+=config.scm=. Wiring this is a prerequisite for any AGENTS.md
+functionality to take effect at runtime.
+
+* 5. Implementation notes
+
+** Existing code
+
+- =src/sage/config.scm:256-268= — =find-agents-md=: builds a list of 5
+  candidate paths and filters by =file-exists?=. Uses =getcwd= for
+  workspace (not the =--workspace= CLI flag).
+- =src/sage/config.scm:272-282= — =load-agents-md=: maps over found
+  files, reads each with =get-string-all=, prefixes with
+  =# From: <path>=, joins with =\n\n=. Returns =#f= if none found.
+- =src/sage/context.scm:66-73= — =load-agents-context=: loads =SAGE.md=
+  from the workspace directory. This is the function called during REPL
+  startup (=repl.scm:371= and =repl.scm:1037=). It does NOT call
+  =load-agents-md=.
+- =src/sage/config.scm:28-41= — exports =find-agents-md= and
+  =load-agents-md= but no consumer currently calls them at startup.
+
+** Gaps to close
+
+1. Wire =load-agents-md= into the REPL startup path (after
+   =load-agents-context=).
+2. Parse structured sections from the merged content string.
+3. Extract tool permissions and apply them to =tools.scm= safe/unsafe
+   lists before the first chat turn.
+4. Add =--agents-md PATH= CLI flag to =main.scm= option-spec.
+5. Add =/agents= slash command family to =repl.scm=.
+
+* 6. Three-way access
+
+| Access method       | Interface                    | Status       |
+|---------------------+------------------------------+--------------|
+| CLI flag            | =--agents-md PATH=           | Not yet impl |
+| Slash command       | =/agents=, =/agents reload=  | Not yet impl |
+| Scheme API          | =(agents-md-load)=,          | Partial:     |
+|                     | =(find-agents-md)=,          | find/load in |
+|                     | =(load-agents-md)=           | config.scm   |
+
+The CLI flag should override discovery and load only the specified file.
+The slash command should support:
+
+- =/agents= — show current AGENTS.md sources and parsed config
+- =/agents reload= — re-read and re-apply all AGENTS.md files
+- =/agents show= — display the merged content
+
+* 7. Test strategy
+
+** Unit tests (=tests/test-agents-md.scm=)
+
+Stub test file with SRFI-64 harness. Each invariant (A01-A12) has a
+named =test-assert= placeholder. Tests will be filled in when the
+structured parsing is implemented.
+
+** Integration tests
+
+Once the =/agents= command and structured parsing are implemented:
+
+- Verify that a workspace =AGENTS.md= with =## Tool Permissions= section
+  restricts the tool list visible to the LLM.
+- Verify that =/agents reload= picks up changes to an =AGENTS.md= file
+  modified after startup.
+- Verify that =--agents-md /path/to/custom.md= overrides the discovery
+  order.
+
+** Property-based tests
+
+- Fuzz the section parser with random markdown to confirm A10 (graceful
+  degradation).
+- Verify that discovery order is deterministic across repeated calls.

@@ -1,0 +1,239 @@
+#+TITLE: guile-sage --- AGENTS.md Structured Directive Parsing Contract
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-18
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This document specifies how =guile-sage= extracts and applies structured
+directives from AGENTS.md content. It is independent of discovery and
+loading (handled by =config.scm:find-agents-md= / =load-agents-md=) ---
+this contract covers WHAT to do with the content once loaded.
+
+Directives are configuration fragments embedded in AGENTS.md files using
+a mini-language of fenced code blocks and markdown tables. They let
+project authors customize sage behavior (tool permissions, agent modes,
+safety caps) without modifying environment variables or =.env= files.
+
+Related beads: =guile-sage-grv= (Agent Modes), =guile-sage-523=
+(Negative contracts / tool-deny), =guile-sage-7w7= (Contract-driven
+development).
+
+* Directive syntax
+
+Directives appear in two formats within AGENTS.md content.
+
+** Fenced code blocks
+
+Blocks with the =sage-config= language tag contain key-value directives:
+
+#+BEGIN_SRC markdown
+```sage-config
+tool-allow: read_file, list_files, glob_files
+tool-deny: eval_scheme, run_tests
+agent-mode: interactive
+max-iterations: 25
+workspace: /home/dev/project
+system-prompt: You are a careful code reviewer. Never modify files.
+```
+#+END_SRC
+
+Rules:
+- One directive per line, =key: value= format.
+- Keys are lowercase, hyphen-separated identifiers.
+- Values are trimmed of leading/trailing whitespace.
+- List values (=tool-allow=, =tool-deny=) are comma-separated.
+- Lines beginning with =#= inside the block are comments, ignored.
+
+** Markdown tables
+
+Tables under headings matching =Sage Config= or =Sage Directives=
+(case-insensitive) are parsed as directive tables:
+
+#+BEGIN_SRC markdown
+## Sage Config
+
+| Directive      | Value                        |
+|----------------|------------------------------|
+| agent-mode     | autonomous                   |
+| max-iterations | 30                           |
+| tool-deny      | eval_scheme, create_tool     |
+#+END_SRC
+
+Rules:
+- First column is directive key, second column is value.
+- Header row and separator row are skipped.
+- Same key/value semantics as fenced block format.
+
+** Pre-tool-hook (inline)
+
+Hook definitions use a nested fenced block inside the =sage-config= block:
+
+#+BEGIN_SRC markdown
+```sage-config
+pre-tool-hook: |
+  (lambda (tool-name args)
+    (if (string=? tool-name "write_file")
+        (log-warn "write_file invoked" tool-name)
+        #t))
+```
+#+END_SRC
+
+The =|= after the colon signals a multi-line value continuing until the
+closing fence. The value is stored as a string; evaluation is deferred
+to the hook execution layer.
+
+* Directive types
+
+| Type             | Value shape           | Default       | Description                              |
+|------------------+-----------------------+---------------+------------------------------------------|
+| =tool-allow=     | Comma-separated names | =(all)=       | Whitelist of permitted tool names         |
+| =tool-deny=      | Comma-separated names | =(none)=      | Blacklist of denied tool names            |
+| =agent-mode=     | Symbol                | =interactive= | Default agent mode                        |
+| =max-iterations= | Integer               | =50=          | Safety cap on tool-chain iterations       |
+| =workspace=      | Path string           | =(getcwd)=    | Override workspace root                   |
+| =system-prompt=  | Free-form string      | =(none)=      | Additional system message prepended       |
+| =pre-tool-hook=  | Scheme lambda string  | =(none)=      | Hook called before each tool invocation   |
+
+* Sequence diagram
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant L as config.scm<br/>load-agents-md
+    participant P as directives.scm<br/>parse-directives
+    participant V as directives.scm<br/>validate-directive
+    participant C as config.scm<br/>apply-directives
+
+    L->>P: raw AGENTS.md content (string)
+    P->>P: scan for ```sage-config fences
+    P->>P: scan for ## Sage Config tables
+    P->>P: merge extracted key-value pairs (document order)
+
+    loop each directive
+        P->>V: (key . value) pair
+        V->>V: lookup type schema
+        alt known type, valid value
+            V-->>P: validated directive
+        else unknown type
+            V-->>P: WARN log, skip
+        else known type, invalid value
+            V-->>P: WARN log, skip
+        end
+    end
+
+    P-->>C: alist of validated directives
+    C->>C: check escalation (AD05)
+    C->>C: apply tool-deny over tool-allow (AD06)
+    C->>C: clamp max-iterations to ceiling (AD08)
+    C->>C: merge into running config
+#+END_SRC
+
+* Invariants
+
+| Code | Invariant                                                                                          |
+|------+----------------------------------------------------------------------------------------------------|
+| AD01 | Fenced code blocks with =sage-config= language tag are detected and their content extracted        |
+| AD02 | Markdown tables under =Sage Config= / =Sage Directives= headings are detected and rows extracted  |
+| AD03 | Known directive types (=tool-allow=, =tool-deny=, =agent-mode=, =max-iterations=, =workspace=, =system-prompt=, =pre-tool-hook=) are accepted |
+| AD04 | Unknown directive types are logged at WARN level and skipped (fail-open); parsing does not abort    |
+| AD05 | Project-level directives CANNOT escalate beyond user-level config: =agent-mode: yolo= in workspace AGENTS.md does NOT enable YOLO unless =SAGE_YOLO_MODE= env var is set |
+| AD06 | When both =tool-allow= and =tool-deny= specify the same tool name, =tool-deny= wins               |
+| AD07 | =agent-mode= only accepts valid mode symbols: =interactive=, =autonomous=, =yolo=                  |
+| AD08 | =max-iterations= is clamped to a configurable ceiling (default 50); values above are reduced       |
+| AD09 | Empty or missing directive block produces default configuration (no-op); never an error             |
+| AD10 | Multiple directive blocks in a single document are merged in document order: later scalar values win, set values (tool lists) are unioned |
+
+* Implementation notes
+
+** Module placement
+
+The directive parser should live in =src/sage/directives.scm= (new module).
+It is a pure function layer: string in, alist out. No I/O, no side effects.
+
+** Integration points
+
+- =config.scm= (lines 256-282): =load-agents-md= returns the raw content
+  string. After loading, call =parse-directives= and =apply-directives=
+  to fold the result into the running configuration.
+- =tools.scm=: The =*safe-tools*= list and =check-permission= function
+  are the enforcement points for =tool-allow= / =tool-deny=. Directives
+  produce a filter that wraps =check-permission=, they do not mutate the
+  static list.
+- =adr/0003-security-model.md=: The security model establishes that YOLO
+  is the single escalation switch. Directive parsing must respect this ---
+  AD05 is the contract boundary.
+
+** Data representation
+
+Parsed directives are an alist:
+
+#+BEGIN_SRC scheme
+'(("tool-allow"    . ("read_file" "list_files"))
+  ("tool-deny"     . ("eval_scheme"))
+  ("agent-mode"    . interactive)
+  ("max-iterations" . 25)
+  ("workspace"     . "/home/dev/project")
+  ("system-prompt" . "You are a careful code reviewer.")
+  ("pre-tool-hook" . "(lambda (tool-name args) #t)"))
+#+END_SRC
+
+* Security model
+
+** Escalation prevention (AD05)
+
+The trust hierarchy is: environment > user-level AGENTS.md > project-level
+AGENTS.md. A project-level directive can restrict but never expand
+permissions beyond what the environment grants.
+
+Concrete rules:
+- =agent-mode: yolo= in any AGENTS.md is silently downgraded to
+  =autonomous= unless =SAGE_YOLO_MODE= is set in the process environment.
+- =tool-allow= in project-level AGENTS.md cannot add tools that are in
+  the user-level =tool-deny= list.
+- =workspace= in project-level AGENTS.md cannot escape the current
+  =safe-path?= boundaries (=tools.scm= path safety still applies).
+
+** Deny-over-allow (AD06)
+
+When merging, the effective tool set is:
+
+#+BEGIN_SRC
+effective = (tool-allow MINUS tool-deny) INTERSECT existing-permissions
+#+END_SRC
+
+This means =tool-deny= is a negative contract: any tool named in
+=tool-deny= is removed regardless of its presence in =tool-allow=.
+
+* Test strategy
+
+** Unit tests (=tests/test-agents-md-directives.scm=)
+
+SRFI-64 tests covering AD01-AD10. Each invariant maps to at least one
+test case.
+
+** Property-based testing (PBT)
+
+Fuzz the directive parser with randomly generated markdown:
+- Random fenced blocks with and without =sage-config= tag
+- Random table content under matching/non-matching headings
+- Random key names (known and unknown)
+- Random value shapes (empty, whitespace, special characters)
+
+Verify the parser never crashes (returns either a valid alist or the
+empty alist). This ensures AD04 and AD09 hold under adversarial input.
+
+** Integration tests
+
+Verify the full pipeline: =load-agents-md= -> =parse-directives= ->
+=apply-directives= -> observable config changes. These use a temp
+directory with crafted AGENTS.md files.
+
+* Appendix: relation to other contracts
+
+| Contract              | Relationship                                                    |
+|-----------------------+-----------------------------------------------------------------|
+| MCP-CONTRACT.org      | MCP tools appear in =tool-allow= / =tool-deny= by namespaced name |
+| ADR-0003              | Security model is the floor; directives cannot go below it       |
+| TOOLS.org             | Tool names used in directives must match the registered names    |

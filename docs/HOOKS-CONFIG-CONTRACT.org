@@ -1,0 +1,233 @@
+#+TITLE: guile-sage — Hook Configuration and Persistence Contract
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-18
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This document is a contract specification for hook *configuration*,
+*persistence*, and *settings integration* in guile-sage.  It is separate
+from the hook runtime dispatch contract (which covers event firing,
+result handling, and the PreToolUse/PostToolUse lifecycle).
+
+The design mirrors Claude Code's =settings.json= hook configuration and
+reuses the persistence pattern established by =src/sage/commands.scm=
+(=save-custom-commands!=, =load-custom-commands!=).
+
+Related beads: =guile-sage-523= (convert negative contracts to hooks),
+=guile-sage-w9p= (CLI/REPL command synergy), =guile-sage-51k= (custom
+slash commands --- same persistence pattern).
+
+* Configuration schema
+
+** File locations
+
+| Scope   | Path                              | Precedence |
+|---------+-----------------------------------+------------|
+| System  | =/etc/sage/hooks.scm=             | Lowest     |
+| User    | =~/.config/sage/hooks.scm= (XDG) | Middle     |
+| Project | =.sage/hooks.scm= (cwd-relative) | Highest    |
+
+All files use the same serialized Scheme alist format as
+=commands.scm=.  Each file contains one top-level list whose elements
+are hook definition alists.
+
+** Hook definition schema
+
+Each hook is an alist with the following keys:
+
+| Key       | Type   | Required | Description                                    |
+|-----------+--------+----------+------------------------------------------------|
+| =name=    | string | yes      | Unique identifier within scope                 |
+| =event=   | string | yes      | Event name: PreToolUse, PostToolUse, etc.       |
+| =match=   | string | no       | Tool name filter (glob).  Missing = fire for all |
+| =command= | string | yes      | Shell command or Scheme expression to execute   |
+| =type=    | string | yes      | ="shell"= or ="scheme"=                        |
+| =timeout= | number | no       | Seconds before kill (shell only, default 5)     |
+
+** Example config file
+
+#+BEGIN_SRC scheme
+;;; Hook definitions — managed by sage
+(
+  (("name" . "block-eval")
+   ("event" . "PreToolUse")
+   ("match" . "eval_scheme")
+   ("command" . "echo blocked && exit 1")
+   ("type" . "shell"))
+
+  (("name" . "log-all-tools")
+   ("event" . "PostToolUse")
+   ("command" . "(format #t \"tool done: ~a~%\" tool-name)")
+   ("type" . "scheme"))
+
+  (("name" . "audit-write")
+   ("event" . "PreToolUse")
+   ("match" . "write_file")
+   ("command" . "(when (string-contains path \"/etc\") (error \"blocked\"))")
+   ("type" . "scheme")
+   ("timeout" . 10))
+)
+#+END_SRC
+
+* Sequence diagram: config load and scope merge
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant M as sage main.scm
+    participant HC as hooks-config
+    participant FS as Filesystem
+    participant HR as hook-registry (runtime)
+
+    M->>HC: (hooks-config-load)
+    HC->>FS: read /etc/sage/hooks.scm
+    FS-->>HC: system-hooks (or empty)
+    HC->>FS: read ~/.config/sage/hooks.scm
+    FS-->>HC: user-hooks (or empty)
+    HC->>FS: read .sage/hooks.scm
+    FS-->>HC: project-hooks (or empty)
+
+    HC->>HC: validate each hook (type, required keys)
+    Note over HC: Reject unknown types with WARN<br/>Skip malformed entries (fail-open)
+
+    HC->>HC: merge: system < user < project<br/>Same-name in higher scope overrides<br/>EXCEPT: system security hooks preserved (HC02)
+
+    HC-->>HR: register merged hook set atomically
+    HR-->>M: hook count
+#+END_SRC
+
+* Invariants
+
+The implementation and its tests MUST enforce each invariant.  Each has
+a short code (HC##) for test cross-referencing.
+
+| Code | Invariant                                                                                        |
+|------+--------------------------------------------------------------------------------------------------|
+| HC01 | Config file parsed without crashing on malformed input (fail-open with WARN log)                  |
+| HC02 | User scope does not override system scope for security hooks (escalation prevention)              |
+| HC03 | Project scope hooks only loaded from =.sage/hooks.scm=, not arbitrary paths                      |
+| HC04 | Hook name uniqueness enforced within each scope level (last-wins on duplicate within file)        |
+| HC05 | Hot reload atomically replaces the full hook set (no partial state visible between old and new)   |
+| HC06 | =type= must be ="shell"= or ="scheme"= --- unknown types rejected with WARN, hook skipped        |
+| HC07 | Shell commands have configurable timeout (default 5s); killed with SIGTERM on expiry              |
+| HC08 | Scheme hooks evaluated in a restricted sandbox (no file I/O, no network, no =system=)             |
+| HC09 | Config file written atomically: write to temp file, =rename= into place (following =save-custom-commands!= pattern) |
+| HC10 | Empty or missing config file produces zero hooks (no crash, no default hooks injected)            |
+
+** HC02 detail: security hook escalation prevention
+
+A hook in the system scope may be tagged with =("security" . #t)=.
+When present, a user-scope or project-scope hook with the same =name=
+MUST NOT replace it.  The system hook is preserved and a WARN is
+logged indicating the override attempt was blocked.
+
+This prevents a project-level =.sage/hooks.scm= from disabling an
+admin-installed safety hook.
+
+* Implementation notes
+
+** Persistence pattern (mirror commands.scm)
+
+=src/sage/commands.scm= lines 43--72 establish the load/save pattern:
+
+- *Load*: =call-with-input-file path read=, guard with =catch #t=,
+  validate =(list? data)=, fall back to empty on any error.
+- *Save*: =call-with-output-file path= + =write= + =newline=.  For
+  atomicity (HC09), write to =path.tmp= then =(rename-file)=.
+
+The hooks module should export:
+
+#+BEGIN_SRC scheme
+(define (hooks-config-file scope)
+  (case scope
+    ((system)  "/etc/sage/hooks.scm")
+    ((user)    (string-append (sage-config-dir) "/hooks.scm"))
+    ((project) ".sage/hooks.scm")))
+#+END_SRC
+
+** XDG paths (config.scm)
+
+=src/sage/config.scm= exports =sage-config-dir=, =sage-data-dir=,
+etc.  The user-scope hooks file lives under =(sage-config-dir)=,
+following the same convention as =custom-commands-file=.
+
+** Validation
+
+Each hook alist must pass:
+
+1. Has keys =name=, =event=, =command=, =type= (all strings).
+2. =type= is ="shell"= or ="scheme"= (HC06).
+3. =name= is non-empty and unique within its scope (HC04).
+4. =timeout=, if present, is a positive number (default 5 for shell).
+
+Invalid hooks are skipped with a WARN log, not fatal (HC01).
+
+* Three-way access
+
+| Access method           | Entry point                           | Use case                       |
+|-------------------------+---------------------------------------+--------------------------------|
+| CLI flag                | =--hooks-config PATH=                 | Override config file at launch |
+| Slash commands          | =/hooks list=, =/hooks reload=,       | Interactive management         |
+|                         | =/hooks add NAME EVENT CMD TYPE=,     |                                |
+|                         | =/hooks remove NAME=                  |                                |
+| Scheme API              | =(hooks-config-load)=,                | Programmatic access            |
+|                         | =(hooks-config-save! scope)=,         |                                |
+|                         | =(hooks-config-list)=,                |                                |
+|                         | =(hooks-config-add! scope hook)=,     |                                |
+|                         | =(hooks-config-remove! scope name)=   |                                |
+
+** Slash command details
+
+- =/hooks list= --- print all registered hooks with scope, event, match.
+- =/hooks reload= --- re-read all config files and atomically replace
+  the active hook set (HC05).
+- =/hooks add NAME EVENT COMMAND TYPE= --- add a hook to user scope,
+  persist immediately.
+- =/hooks remove NAME= --- remove from user scope, persist immediately.
+
+** CLI flag
+
+=--hooks-config PATH= overrides the user-scope path.  System and
+project scope files are still loaded.  This is useful for testing
+alternate configurations without modifying =~/.config/sage/hooks.scm=.
+
+* Test strategy
+
+** Unit tests (=tests/test-hooks-config.scm=)
+
+Placeholder tests for each invariant HC01--HC10 using SRFI-64.  Each
+test exercises one invariant against the config load/save API.
+
+| Test name                    | Invariant | What it verifies                              |
+|------------------------------+-----------+-----------------------------------------------|
+| HC01: malformed config       | HC01      | Malformed file returns zero hooks, no crash   |
+| HC02: security escalation    | HC02      | System security hook survives user override   |
+| HC03: project path locked    | HC03      | Only =.sage/hooks.scm= accepted              |
+| HC04: name uniqueness        | HC04      | Duplicate names within scope: last wins       |
+| HC05: atomic reload          | HC05      | Reload replaces entire set, not partial       |
+| HC06: unknown type rejected  | HC06      | Hook with type "python" skipped with WARN     |
+| HC07: shell timeout default  | HC07      | Shell hook gets 5s timeout when unspecified    |
+| HC08: scheme sandbox         | HC08      | Scheme hook cannot call =system=              |
+| HC09: atomic write           | HC09      | Write-then-rename pattern verified            |
+| HC10: empty config           | HC10      | Missing file produces zero hooks              |
+
+** Integration tests
+
+- =/hooks add= + =/hooks list= round-trip through the REPL.
+- =/hooks reload= picks up external file edits.
+
+** Property-based tests
+
+- Fuzz hook names with unicode, whitespace, empty strings.
+- Fuzz =type= field with random strings to confirm HC06 rejection.
+
+* Open questions
+
+1. Should =security= tag be a reserved boolean key on any hook, or a
+   separate system-only concept?
+2. Should =/hooks add= support project scope (writes to =.sage/hooks.scm=
+   in cwd), or only user scope for safety?
+3. Glob semantics for =match=: shell-style (=*=, =?=) or regex?
+   Shell glob is simpler and matches Claude Code's pattern.

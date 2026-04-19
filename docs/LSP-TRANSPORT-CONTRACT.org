@@ -1,0 +1,379 @@
+#+TITLE: guile-sage --- LSP Base Protocol Transport Contract
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-18
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* 1. Purpose and scope
+
+This document is a contract specification for the LSP base protocol
+transport layer as guile-sage will implement it. It covers:
+
+- Content-Length framing over stdio (the wire protocol)
+- JSON-RPC 2.0 envelope structure (shared with MCP, see =docs/MCP-CONTRACT.org=)
+- Error code ranges (LSP-standard and JSON-RPC-standard)
+- Stdio semantics (stdin/stdout for protocol traffic, stderr for logging)
+- Byte-level samples of the =initialize= handshake
+
+The authoritative spec is the Language Server Protocol Specification 3.17:
+
+- Base protocol: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#baseProtocol
+- Header part:   https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#headerPart
+- Content part:  https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#contentPart
+
+This contract is separated from the full LSP capability specification
+(Unit 3) and focuses exclusively on the transport layer --- the framing,
+envelope, and error semantics that must be correct before any LSP method
+can be dispatched. It directly parallels MCP transport invariants I01--I07
+from =docs/MCP-CONTRACT.org=, but for stdio+Content-Length framing instead
+of HTTP+SSE.
+
+* 2. Wire format
+
+** 2.1 Message structure
+
+Every LSP message consists of a header part and a content part, separated
+by =\r\n\r\n=:
+
+#+BEGIN_SRC text
+Content-Length: <byte-count>\r\n
+\r\n
+<JSON-RPC content of exactly byte-count UTF-8 bytes>
+#+END_SRC
+
+The header part consists of one or more header fields, each terminated by
+=\r\n=. Currently the spec defines two headers:
+
+| Header             | Required | Value                       |
+|--------------------+----------+-----------------------------|
+| =Content-Length=   | yes      | Decimal byte count of body  |
+| =Content-Type=    | no       | Default: =application/vscode-jsonrpc; charset=utf-8= |
+
+guile-sage MUST emit =Content-Length= on every outgoing message and MUST
+parse it from every incoming message. =Content-Type= MAY be ignored on
+input (default assumed) and SHOULD be omitted on output for brevity.
+
+** 2.2 Framing diagram
+
+#+BEGIN_SRC text
+  ┌──────────────────────────────────────────────┐
+  │  Header Part                                 │
+  │  "Content-Length: 52\r\n"                    │
+  │  "\r\n"                                      │
+  ├──────────────────────────────────────────────┤
+  │  Content Part (exactly 52 UTF-8 bytes)       │
+  │  {"jsonrpc":"2.0","id":1,"method":"shutdown"} │
+  └──────────────────────────────────────────────┘
+#+END_SRC
+
+Multiple messages are concatenated on the stream with no delimiter
+between them; the =Content-Length= header of the next message immediately
+follows the last byte of the previous message's body.
+
+** 2.3 Partial reads
+
+The underlying =read()= system call may return fewer bytes than
+=Content-Length= specifies. The transport layer MUST buffer partial reads
+and only dispatch the message once exactly N bytes have been accumulated.
+This is the stdio equivalent of TCP framing --- bytes arrive in chunks
+determined by pipe buffering, not by message boundaries.
+
+* 3. JSON-RPC 2.0 envelope
+
+LSP uses JSON-RPC 2.0 as the envelope format, identical to MCP. The
+envelope rules from =docs/MCP-CONTRACT.org= invariants I08--I11 apply
+here as well:
+
+- Every message MUST contain =jsonrpc: "2.0"=.
+- Requests have =id=, =method=, and optional =params=.
+- Responses have =id= and exactly one of =result= or =error=.
+- Notifications have =method= (and optional =params=) but NO =id=.
+- Notifications MUST NOT receive responses.
+
+Reuse =json-read-string= / =json-write-string= from =src/sage/util.scm=
+for serialization. Reuse JSON-RPC construction patterns from
+=src/sage/mcp.scm:88-100= (=mcp-make-request=, =mcp-make-notification=).
+
+* 4. Error codes
+
+LSP defines these standard error codes (JSON-RPC + LSP extensions):
+
+| Code   | Name                  | Origin   | When                                |
+|--------+-----------------------+----------+-------------------------------------|
+| -32700 | ParseError            | JSON-RPC | Invalid JSON received               |
+| -32600 | InvalidRequest        | JSON-RPC | JSON valid but not a valid request  |
+| -32601 | MethodNotFound        | JSON-RPC | Method does not exist               |
+| -32602 | InvalidParams         | JSON-RPC | Invalid method parameters           |
+| -32603 | InternalError         | JSON-RPC | Internal JSON-RPC error             |
+| -32002 | ServerNotInitialized  | LSP      | Request before initialize handshake |
+| -32001 | UnknownErrorCode      | LSP      | Catch-all for unclassified errors   |
+| -32800 | RequestCancelled      | LSP      | Client cancelled via =$/cancelRequest= |
+| -32801 | ContentModified       | LSP      | Content changed, result invalid     |
+| -32803 | ServerCancelled       | LSP      | Server cancelled the request        |
+
+The reserved range for JSON-RPC is =-32099= to =-32000=. The reserved
+range for LSP is =-32899= to =-32800=.
+
+* 5. Stdio semantics
+
+| Stream   | Purpose                                        |
+|----------+------------------------------------------------|
+| =stdin=  | Read incoming LSP messages (Content-Length framed) |
+| =stdout= | Write outgoing LSP messages (Content-Length framed) |
+| =stderr= | Logging, diagnostics, debug output             |
+
+*Critical rule*: NOTHING may be written to =stdout= except properly
+Content-Length-framed JSON-RPC messages. Any stray output (debug prints,
+warnings, REPL prompts) will corrupt the protocol stream and crash the
+client editor. All logging MUST go to =stderr= or to a file.
+
+In Guile terms:
+- Read from =(current-input-port)= (stdin)
+- Write to =(current-output-port)= (stdout), flushing after each message
+- Log to =(current-error-port)= (stderr) or a file descriptor
+
+* 6. Comparison: MCP transport vs LSP transport
+
+| Aspect                 | MCP (SSE + HTTP)                          | LSP (stdio)                            |
+|------------------------+-------------------------------------------+----------------------------------------|
+| Framing                | SSE =event:/data:= lines + blank-line     | =Content-Length: N\r\n\r\n= + N bytes  |
+| Request channel        | HTTP POST to =/messages/?session_id==      | Write to stdout                        |
+| Response channel       | SSE stream (separate HTTP GET)             | Read from stdin (same pipe)            |
+| Correlation            | JSON-RPC =id= across two HTTP connections | JSON-RPC =id= on single bidirectional pipe |
+| Session identity       | =session_id= from SSE endpoint event      | Process lifetime = session             |
+| Keep-alive             | SSE comment lines (=: ping=)              | None needed (pipe stays open)          |
+| Reconnect              | New SSE GET, new session_id               | Process restart                        |
+| Shared JSON-RPC layer  | =jsonrpc: "2.0"=, =id=, =method=, =params= | Identical                           |
+
+The JSON-RPC envelope is identical between MCP and LSP. The transport
+module (=src/sage/lsp/transport.scm=) handles only framing and I/O; the
+JSON-RPC construction functions from =mcp.scm= can be reused directly or
+factored into a shared =src/sage/jsonrpc.scm= module.
+
+* 7. Byte-level samples
+
+** 7.1 =initialize= request (client to server)
+
+#+BEGIN_SRC text
+Content-Length: 220\r\n
+\r\n
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":12345,"capabilities":{},"clientInfo":{"name":"guile-sage","version":"0.7.0"},"rootUri":"file:///home/user/project","workspaceFolders":null}}
+#+END_SRC
+
+Byte-level breakdown:
+- Header: =Content-Length: 220\r\n\r\n= (22 bytes)
+- Body: 220 UTF-8 bytes of JSON
+
+** 7.2 =initialize= response (server to client)
+
+#+BEGIN_SRC text
+Content-Length: 177\r\n
+\r\n
+{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"textDocumentSync":1,"completionProvider":{"triggerCharacters":[".","/"]}},"serverInfo":{"name":"sage-lsp","version":"0.7.0"}}}
+#+END_SRC
+
+** 7.3 =initialized= notification (client to server)
+
+#+BEGIN_SRC text
+Content-Length: 52\r\n
+\r\n
+{"jsonrpc":"2.0","method":"initialized","params":{}}
+#+END_SRC
+
+No response is sent for notifications --- fire and forget, same as MCP's
+=notifications/initialized=.
+
+** 7.4 Error response (parse error)
+
+When the server receives invalid JSON:
+
+#+BEGIN_SRC text
+Content-Length: 75\r\n
+\r\n
+{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}
+#+END_SRC
+
+Note: =id= is =null= because the server could not determine the request
+id from the malformed input.
+
+** 7.5 =shutdown= request / response
+
+#+BEGIN_SRC text
+Content-Length: 51\r\n
+\r\n
+{"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}
+#+END_SRC
+
+Response:
+
+#+BEGIN_SRC text
+Content-Length: 38\r\n
+\r\n
+{"jsonrpc":"2.0","id":2,"result":null}
+#+END_SRC
+
+** 7.6 =exit= notification
+
+#+BEGIN_SRC text
+Content-Length: 35\r\n
+\r\n
+{"jsonrpc":"2.0","method":"exit"}
+#+END_SRC
+
+After =exit=, the server process terminates. The client should have sent
+=shutdown= first; if =exit= arrives without a prior =shutdown=, the
+server exits with code 1 instead of 0.
+
+* 8. Invariants (LT01--LT12)
+
+The transport implementation and its tests MUST enforce each of these.
+
+| Code | Invariant                                                                  |
+|------+----------------------------------------------------------------------------|
+| LT01 | Content-Length header parsed correctly for messages 1 byte to 10 MB        |
+| LT02 | Partial read buffering: message reassembled from multiple =read()= calls  |
+| LT03 | No data written to stdout except Content-Length framed JSON-RPC            |
+| LT04 | Logging goes to stderr or file, never stdout                               |
+| LT05 | =jsonrpc: "2.0"= required in every envelope                               |
+| LT06 | Notifications (no =id=) do not receive responses                          |
+| LT07 | Batch requests (JSON array at top level) not supported --- return -32600   |
+| LT08 | Invalid JSON returns -32700 ParseError                                     |
+| LT09 | Missing =method= field returns -32600 InvalidRequest                      |
+| LT10 | Unknown =method= returns -32601 MethodNotFound                            |
+| LT11 | Concurrent requests queued and processed sequentially (single-threaded)    |
+| LT12 | EOF on stdin triggers clean shutdown (release resources, exit 0)           |
+
+** Invariant detail
+
+*** LT01 --- Content-Length range
+
+The parser MUST handle:
+- Minimum: =Content-Length: 1= (degenerate but valid)
+- Typical: =Content-Length: 50= to =Content-Length: 50000=
+- Maximum: =Content-Length: 10485760= (10 MB, practical upper bound)
+
+Negative or non-numeric values MUST be rejected as protocol errors.
+
+*** LT02 --- Partial read buffering
+
+When reading from stdin, the transport MUST NOT assume a single
+=read()= / =get-bytevector-n= returns all N bytes. It must loop:
+
+#+BEGIN_SRC scheme
+(define (read-exactly port n)
+  "Read exactly N bytes from PORT, blocking until available or EOF."
+  (let loop ((remaining n) (acc '()))
+    (if (<= remaining 0)
+        (apply string-append (reverse acc))
+        (let ((chunk (get-string-n port remaining)))
+          (if (eof-object? chunk)
+              (error 'lsp-transport-eof "unexpected EOF during read")
+              (loop (- remaining (string-length chunk))
+                    (cons chunk acc)))))))
+#+END_SRC
+
+*** LT03 / LT04 --- Stdout purity
+
+Any =format=, =display=, =write=, or =newline= call to
+=(current-output-port)= that is not part of an LSP message frame will
+corrupt the stream. The transport module MUST parameterize or redirect
+=(current-output-port)= for non-protocol code, or ensure all logging
+uses =(current-error-port)=.
+
+*** LT07 --- Batch rejection
+
+JSON-RPC 2.0 allows batch requests (top-level JSON array). LSP 3.17
+does NOT support batching. If the parsed content is a JSON array, the
+server MUST respond with error code -32600 (InvalidRequest).
+
+*** LT11 --- Sequential processing
+
+The stdio transport is inherently single-connection. Messages are read
+and dispatched one at a time. If the server receives a second request
+while processing the first, it queues the second and processes it after
+the first completes. No concurrent dispatch.
+
+*** LT12 --- EOF shutdown
+
+When =read-line= or =get-bytevector-n= on stdin returns EOF, the
+transport MUST:
+1. Cancel any in-progress request processing
+2. Release resources (close log files, flush buffers)
+3. Exit with status 0
+
+This handles the case where the editor process exits or the pipe is
+closed.
+
+* 9. Implementation notes
+
+** 9.1 Module location
+
+The new transport module lives at =src/sage/lsp/transport.scm=.
+
+Key exports:
+- =lsp-read-message= --- read one Content-Length-framed message from stdin
+- =lsp-write-message= --- write one Content-Length-framed message to stdout
+- =lsp-main-loop= --- blocking read loop: read message, dispatch, write response
+- =lsp-make-response= --- build a JSON-RPC response envelope
+- =lsp-make-error= --- build a JSON-RPC error response
+- =lsp-make-notification= --- build an outgoing notification (no id)
+
+** 9.2 Reusable infrastructure
+
+From =src/sage/util.scm=:
+- =json-read-string= / =json-write-string= --- JSON codec
+- =json-empty-object= --- sentinel for serializing ={}=
+- =as-list= --- coerce vector/list shapes
+
+From =src/sage/mcp.scm= lines 88--100:
+- JSON-RPC envelope construction pattern (=mcp-make-request=,
+  =mcp-make-notification=) --- same structure, different transport
+
+The JSON-RPC envelope code is transport-agnostic. A future refactoring
+could extract =src/sage/jsonrpc.scm= shared by both MCP and LSP.
+
+** 9.3 Content-Length computation
+
+Content-Length counts UTF-8 bytes, not characters. For ASCII-only
+payloads (which JSON-RPC largely is), byte count = character count. But
+if any string value contains non-ASCII characters:
+
+#+BEGIN_SRC scheme
+(define (utf8-byte-length str)
+  (bytevector-length (string->utf8 str)))
+#+END_SRC
+
+Always use =utf8-byte-length= when computing Content-Length, never
+=string-length=.
+
+* 10. Test strategy
+
+** 10.1 Unit tests (=tests/test-lsp-transport.scm=)
+
+Stub tests for each invariant LT01--LT12 using SRFI-64. Each test
+constructs synthetic input (Content-Length framed bytes) and verifies
+the parser/writer produces correct output.
+
+** 10.2 Property-based testing
+
+For LT01 and LT02, fuzz Content-Length with:
+- Random byte lengths from 1 to 100000
+- Random split points for partial reads (simulate pipe buffering)
+- Verify: bytes read = bytes expected, no data loss
+
+For LT05 and LT08, fuzz the JSON body:
+- Random valid JSON with =jsonrpc: "2.0"= --- must parse
+- Random invalid JSON --- must produce -32700
+- Valid JSON missing =jsonrpc= field --- must reject
+
+** 10.3 Integration test
+
+Spawn the LSP server as a subprocess, pipe Content-Length-framed
+=initialize= request to stdin, read Content-Length-framed response
+from stdout. Verify the handshake completes and the =result.capabilities=
+object is well-formed.
+
+* 11. Related beads
+
+- =guile-sage-00g= --- MCP Protocol epic (shares JSON-RPC infrastructure)
+- =guile-sage-w9p= --- CLI/REPL command synergy

@@ -1,0 +1,413 @@
+#+TITLE: guile-sage --- Lifecycle Hook System Contract
+#+AUTHOR: guile-sage research
+#+DATE: 2026-04-18
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+This document is a contract specification for the lifecycle hook system
+in =guile-sage=.  Hooks allow shell commands or Scheme expressions to
+run at lifecycle boundaries --- session start, tool use, and prompt
+submission --- and can block, modify, or observe operations.
+
+The design is modeled on Claude Code's =settings.json= hooks, adapted
+to Guile idioms:
+
+- Shell hooks: a string executed via =system*= with timeout
+- Scheme hooks: a thunk evaluated in a restricted sandbox
+- Three access paths: CLI flags, slash commands, and programmatic API
+
+This contract captures:
+
+- The four lifecycle events and their emission semantics
+- Hook registration, priority, and ordering
+- Execution model for shell and Scheme hooks
+- Veto (blocking) and transformation semantics
+- Error isolation guarantees
+- Numbered invariants (H01--H16) to be enforced by tests
+
+Motivation: the negative-contract survey in
+=docs/reports/20260414-contract-driven-agents.org= identified that
+tested lifecycle hooks are the natural enforcement point for both
+positive and negative contracts.  Hooks convert prose-level
+"must/must-not" rules into runtime-checked code.
+
+Related beads: guile-sage-523 (convert negative contracts to hooks),
+guile-sage-7w7 (contract-driven development research),
+guile-sage-8v3 (wire contract-check into eval harness).
+
+Related RFC: =docs/rfc/001-plugin-contract.org= defines plugin
+lifecycle callbacks (=init=, =cleanup=).  Hooks generalize this to
+user-defined, event-driven callbacks that are not tied to a plugin
+module.
+
+* 1. C4 Level 1 --- System Context with Hook Dispatch
+
+#+BEGIN_SRC plantuml :file images/hooks-c4-l1.png
+@startuml hooks-c4-l1
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title guile-sage + Hooks --- System Context (C4 L1)
+
+Person(user, "Developer", "Interacts with sage REPL at a terminal.")
+
+System_Boundary(sage_boundary, "guile-sage") {
+  System(repl, "sage REPL", "Guile Scheme CLI.\nOrchestrates prompts, tools, sessions.")
+  System(hooks, "Hook Dispatcher", "Fires registered hooks at lifecycle events.\nCan veto, observe, or transform.")
+}
+
+System_Ext(ollama, "LLM Provider", "Ollama / Gemini / LiteLLM.\nProvides chat completions + tool_calls.")
+System_Ext(shell, "Shell / OS", "Executes shell hook commands via system*.")
+
+Rel(user, repl, "Prompts, slash commands", "stdin/tty")
+Rel(repl, hooks, "fire! at SessionStart, PreToolUse,\nPostToolUse, UserPromptSubmit")
+Rel(hooks, shell, "system* with timeout", "shell command")
+Rel(repl, ollama, "Chat completions", "HTTP")
+
+SHOW_LEGEND()
+@enduml
+#+END_SRC
+
+Key relationships:
+
+- The hook dispatcher is an in-process component, not a separate service.
+- Shell hooks fork a child process via =system*=; the dispatcher waits
+  for completion (with timeout).
+- Scheme hooks run in-process inside a restricted sandbox (no
+  =(sage tools)= access, no self-modifying the hook registry).
+- The REPL calls =hook-fire!= at four well-defined points.  Hooks
+  never fire spontaneously.
+
+* 2. Lifecycle events
+
+There are exactly four lifecycle events.  Each has a defined emission
+point in existing sage code:
+
+| Event              | Emission point                         | Source module     | Fires |
+|--------------------+----------------------------------------+-------------------+-------|
+| =SessionStart=     | After =repl-start= init, before main loop | =src/sage/repl.scm= L1082 | Exactly once per REPL session |
+| =PreToolUse=       | After =check-permission=, before tool execution | =src/sage/tools.scm= L186 | Before every =execute-tool= call |
+| =PostToolUse=      | After tool returns, before result fed to LLM | =src/sage/tools.scm= L197 | After every =execute-tool= call |
+| =UserPromptSubmit= | After =readline=, before =repl-eval=   | =src/sage/repl.scm= L1098 | On every non-EOF user input |
+
+** 2.1 SessionStart
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant R as repl-start
+    participant H as hook-fire!
+    participant K as Hook (shell/scheme)
+
+    R->>R: config-load, init-tools,<br/>telemetry-init, mcp-init,<br/>session-create, welcome message
+    R->>H: (hook-fire! 'SessionStart context)
+    loop for each registered SessionStart hook
+        H->>K: execute hook
+        K-->>H: result (ignored)
+    end
+    H-->>R: done
+    R->>R: enter main loop (while *running* ...)
+#+END_SRC
+
+- Context passed: session name, provider, model, workspace path.
+- Return value: ignored.  SessionStart hooks are observation-only.
+- A failing hook is logged at WARN and skipped; the REPL starts normally.
+
+** 2.2 PreToolUse
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant T as execute-tool
+    participant H as hook-fire!
+    participant K as Hook (shell/scheme)
+    participant X as Tool executor
+
+    T->>T: check-permission(name, args)
+    T->>H: (hook-fire! 'PreToolUse<br/>`((tool . ,name) (args . ,args)))
+    loop for each registered PreToolUse hook
+        H->>K: execute hook
+        alt hook returns #f or non-zero exit
+            K-->>H: VETO
+            H-->>T: 'vetoed
+        else hook returns #t or zero exit
+            K-->>H: ok
+        end
+    end
+    alt any hook vetoed
+        T-->>T: return "Hook vetoed tool: <name>"
+    else all hooks passed
+        T->>X: ((assoc-ref tool "execute") args)
+        X-->>T: result
+    end
+#+END_SRC
+
+- Context passed: tool name, arguments alist.
+- Veto semantics: if ANY PreToolUse hook returns =#f= (Scheme) or exits
+  non-zero (shell), the tool is NOT executed.  The string
+  ="Hook vetoed tool: <name>"= is returned as the tool result.
+- First-veto-wins: once a hook vetoes, remaining hooks for this event
+  are skipped.
+
+** 2.3 PostToolUse
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant T as execute-tool
+    participant H as hook-fire!
+    participant K as Hook (shell/scheme)
+
+    T->>T: tool execution completes with result
+    T->>H: (hook-fire! 'PostToolUse<br/>`((tool . ,name) (args . ,args)<br/>  (result . ,result) (duration . ,ms)))
+    loop for each registered PostToolUse hook
+        H->>K: execute hook
+        K-->>H: return value (IGNORED)
+    end
+    H-->>T: done (original result unchanged)
+    T-->>T: return original result to caller
+#+END_SRC
+
+- Context passed: tool name, arguments, result string, duration in ms.
+- Return value: ignored.  PostToolUse hooks CANNOT modify the tool result.
+- Use case: logging, telemetry, audit trail, cost tracking.
+
+** 2.4 UserPromptSubmit
+
+#+BEGIN_SRC mermaid
+sequenceDiagram
+    autonumber
+    participant R as main loop
+    participant H as hook-fire!
+    participant K as Hook (shell/scheme)
+
+    R->>R: input = (readline prompt)
+    R->>H: (hook-fire! 'UserPromptSubmit<br/>`((input . ,input)))
+    loop for each registered UserPromptSubmit hook
+        H->>K: execute hook with input
+        alt hook returns a string
+            K-->>H: replacement string
+            H->>H: input = replacement
+        else hook returns #t
+            K-->>H: pass-through
+        end
+    end
+    H-->>R: final input (original or transformed)
+    R->>R: (repl-eval final-input)
+#+END_SRC
+
+- Context passed: the raw user input string.
+- Transformation: if a hook returns a string, that string REPLACES the
+  input for subsequent hooks and for =repl-eval=.  Returning =#t= means
+  pass-through (do not transform).
+- Use case: input normalization, macro expansion, safety filters,
+  prompt injection detection.
+
+* 3. Contracts and invariants
+
+The implementation and its tests MUST enforce each of these.  Each
+invariant has a short code (H##) so tests can reference it.
+
+** Event emission
+
+| ID  | Description | Test strategy |
+|-----+-------------+---------------|
+| H01 | =SessionStart= fires exactly once per REPL session, after all init and before the main loop. | Unit: mock =hook-fire!=, assert called once with ='SessionStart=. |
+| H02 | =PreToolUse= fires before every =execute-tool= invocation, after =check-permission= succeeds. | Unit: register counting hook, call =execute-tool= N times, assert count = N. |
+| H03 | =PostToolUse= fires after every successful =execute-tool=, before the result is returned to the caller. | Unit: register hook capturing result, assert it matches =execute-tool= return. |
+| H04 | =UserPromptSubmit= fires on every non-empty, non-EOF input from =readline=, before =repl-eval=. | Integration: simulate input, assert hook fires before eval. |
+
+** Hook registration
+
+| ID  | Description | Test strategy |
+|-----+-------------+---------------|
+| H05 | Hooks are scoped: user-level (=~/.config/sage/hooks.scm=) < project-level (=.sage/hooks.scm=). Project hooks take priority (fire after user hooks, can override). | Unit: register user hook then project hook for same event, assert project fires last. |
+| H06 | Registering a hook with a name that already exists for the same event REPLACES the old hook (no duplicates). | Unit: register "audit" twice, assert only one fires. |
+| H07 | =hook-unregister= removes a hook by name and event.  Unregistering a non-existent hook is a no-op (no error). | Unit: register, unregister, fire, assert hook does not run.  Unregister again, assert no error. |
+
+** Shell hook execution
+
+| ID  | Description | Test strategy |
+|-----+-------------+---------------|
+| H08 | Shell hooks have a configurable timeout (default 10s).  If the process exceeds the timeout, it is killed (SIGTERM then SIGKILL) and treated as a failure (non-zero exit). | Unit: register =sleep 60= hook with 1s timeout, assert veto and completion < 2s. |
+| H09 | For =PreToolUse=, a non-zero exit code vetoes the tool call.  For =PostToolUse= and =SessionStart=, exit code is logged but ignored. | Unit: register =exit 1= shell hook for each event.  Assert PreToolUse vetoes, others continue. |
+
+** Scheme hook execution
+
+| ID  | Description | Test strategy |
+|-----+-------------+---------------|
+| H10 | Scheme hooks execute in a restricted sandbox.  They MUST NOT have access to =(sage tools)= exports (no calling =execute-tool= from a hook). | Unit: register hook that calls =execute-tool=, assert sandbox error, REPL unaffected. |
+| H11 | Scheme hooks MUST NOT modify the hook registry (no calling =hook-register= or =hook-unregister= from within a hook). | Unit: register hook that calls =hook-register=, assert sandbox error. |
+
+** Veto and transformation semantics
+
+| ID  | Description | Test strategy |
+|-----+-------------+---------------|
+| H12 | When a =PreToolUse= hook vetoes, the tool is NOT executed.  The string ="Hook vetoed tool: <name>"= is returned as the tool result.  The telemetry counter =code_edit.tool_decision= records ="reject"=. | Unit: register vetoing hook, call =execute-tool=, assert tool body never runs, result matches. |
+| H13 | =PostToolUse= hook return values are ignored.  The tool result passed to the LLM is always the original, unmodified result from =execute-tool=. | Unit: register hook returning "modified", assert =execute-tool= return is the original. |
+| H14 | Any exception thrown by a hook MUST be caught, logged at WARN level, and swallowed.  The REPL MUST NOT crash.  For =PreToolUse=, a failing hook is treated as pass-through (not a veto). | Unit: register hook that raises an error, assert REPL continues, log contains WARN. |
+
+** Ordering and prompt transformation
+
+| ID  | Description | Test strategy |
+|-----+-------------+---------------|
+| H15 | Within the same event, hooks fire in registration order (FIFO).  User-scope hooks are registered before project-scope hooks. | Unit: register hooks A, B, C; capture fire order; assert A, B, C. |
+| H16 | =UserPromptSubmit= hooks can transform input: returning a string replaces the input for subsequent hooks and for =repl-eval=.  Returning =#t= means pass-through (input unchanged). | Unit: register hook returning "replaced", assert =repl-eval= receives "replaced".  Register =#t= hook, assert input unchanged. |
+
+* 4. Observed divergences
+
+N/A: speculative feature.  The hook system does not exist in the
+current codebase.  This contract is a design specification for
+implementation.  Divergences will be tracked here once the
+implementation lands.
+
+* 5. Three-way access
+
+Hooks can be registered through three paths:
+
+| Access path | Syntax | Scope | Persistence |
+|-------------+--------+-------+-------------|
+| CLI flag | =--hook PreToolUse:"echo veto && exit 1"= | Session | Transient (current session only) |
+| Slash command | =/hooks add PreToolUse audit "echo $TOOL $ARGS"= | Session | Transient unless =/hooks save= |
+| Scheme API | =(hook-register 'PreToolUse "audit" (lambda (ctx) ...))= | Module | Persistent if in hooks.scm config file |
+
+Slash command reference:
+
+| Command | Description |
+|---------+-------------|
+| =/hooks= | List all registered hooks |
+| =/hooks add EVENT NAME COMMAND= | Register a shell hook |
+| =/hooks remove EVENT NAME= | Unregister a hook |
+| =/hooks save= | Persist current hooks to project =.sage/hooks.scm= |
+| =/hooks test EVENT= | Dry-run all hooks for EVENT with synthetic context |
+
+* 6. Implementation notes
+
+** Module layout
+
+The hook system will be implemented in a new module:
+
+- =src/sage/hooks.scm= --- hook registry, =hook-register=, =hook-unregister=,
+  =hook-fire!=, sandbox, shell execution with timeout.
+
+** Integration points in existing modules
+
+*** =src/sage/repl.scm=
+
+- =repl-start= (line ~1082): insert =(hook-fire! 'SessionStart ...)=
+  after welcome message, before the =while *running*= loop.
+- Main loop (line ~1098): insert =(hook-fire! 'UserPromptSubmit ...)=
+  after =readline=, before =repl-eval=.  The returned (possibly
+  transformed) input replaces the original.
+
+*** =src/sage/tools.scm=
+
+- =execute-tool= (line ~186): insert =(hook-fire! 'PreToolUse ...)=
+  after =check-permission= succeeds, before calling the tool's execute
+  function.  If the result is ='vetoed=, return the veto message without
+  executing.
+- =execute-tool= (line ~197): insert =(hook-fire! 'PostToolUse ...)=
+  after the tool returns, before returning the result to the caller.
+
+*** =docs/rfc/001-plugin-contract.org=
+
+Plugins already declare =init= and =cleanup= callbacks in their
+manifest.  The hook system generalizes this: a plugin's =init= can
+call =(hook-register ...)= to wire into lifecycle events.  This is
+additive --- the plugin contract is not changed.
+
+** API surface
+
+#+BEGIN_SRC scheme
+;; Registration
+(hook-register event name handler #:scope 'user)
+;; event: symbol — 'SessionStart | 'PreToolUse | 'PostToolUse | 'UserPromptSubmit
+;; name: string — unique within (event, scope)
+;; handler: string (shell command) or thunk (lambda (ctx) ...)
+;; scope: 'user | 'project (default 'user)
+
+;; Unregistration
+(hook-unregister event name)
+
+;; Firing
+(hook-fire! event context)
+;; context: alist of event-specific data
+;; Returns: depends on event:
+;;   SessionStart    → (void)
+;;   PreToolUse      → 'ok | 'vetoed
+;;   PostToolUse     → (void)
+;;   UserPromptSubmit → string (possibly transformed input)
+
+;; Introspection
+(hook-list)          ;; → list of (event name scope type)
+(hook-list event)    ;; → list of hooks for a specific event
+#+END_SRC
+
+** Shell hook environment variables
+
+When a shell hook fires, the following environment variables are set:
+
+| Variable | Event | Value |
+|----------+-------+-------|
+| =SAGE_HOOK_EVENT= | all | Event name (e.g., "PreToolUse") |
+| =SAGE_HOOK_TOOL= | PreToolUse, PostToolUse | Tool name |
+| =SAGE_HOOK_ARGS= | PreToolUse, PostToolUse | JSON-encoded arguments |
+| =SAGE_HOOK_RESULT= | PostToolUse | Tool result (truncated to 4096 bytes) |
+| =SAGE_HOOK_DURATION_MS= | PostToolUse | Execution duration in milliseconds |
+| =SAGE_HOOK_INPUT= | UserPromptSubmit | User input text |
+| =SAGE_HOOK_SESSION= | SessionStart | Session name |
+| =SAGE_HOOK_PROVIDER= | SessionStart | Provider name |
+| =SAGE_HOOK_MODEL= | SessionStart | Model name |
+
+Shell hook stdout is captured.  For =UserPromptSubmit=, non-empty
+stdout replaces the input (same as returning a string from a Scheme
+hook).  For other events, stdout is logged at DEBUG level.
+
+** Sandbox restrictions for Scheme hooks
+
+Scheme hooks run in a sandbox created with =(make-sandbox-module)= that
+provides:
+
+- Basic Scheme: =define=, =let=, =if=, =cond=, =lambda=, =map=,
+  =filter=, =string-*=, =number->string=, etc.
+- =(ice-9 format)= for string formatting.
+- Context access: the =ctx= alist passed to the hook.
+
+The sandbox explicitly EXCLUDES:
+
+- =(sage tools)= --- no =execute-tool=, =register-tool=, etc.
+- =(sage hooks)= --- no =hook-register=, =hook-unregister=, =hook-fire!=
+- =(sage config)= --- no =config-set!=
+- File I/O: no =open-file=, =call-with-output-file=, etc.
+- Process execution: no =system=, =system*=, =open-pipe=
+- Module system: no =use-modules=, =resolve-module=
+
+* 7. Test strategy
+
+** Unit tests (=tests/test-hooks.scm=)
+
+Stub test file with SRFI-64 harness.  Each invariant H01--H16 has a
+named =test-assert= placeholder.  Implementation tests will replace
+the =#t= bodies with real assertions against =hook-register=,
+=hook-fire!=, and integration with =execute-tool= / =repl-eval=.
+
+** Integration tests
+
+Once the hook module is implemented:
+
+1. Register a =PreToolUse= shell hook that vetoes =write_file=.
+2. Attempt =(execute-tool "write_file" ...)= and assert the file is
+   NOT written.
+3. Register a =UserPromptSubmit= Scheme hook that prepends "DEBUG: "
+   to all input.
+4. Submit input via the REPL and assert the transformed input reaches
+   =repl-eval=.
+
+** Property-based tests
+
+- Fuzz hook names with random strings; assert no crash on register/fire.
+- Random interleaving of register/unregister/fire; assert no REPL crash
+  (error isolation, H14).
+- Random shell commands with short timeout; assert timeout enforcement
+  (H08).
