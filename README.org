@@ -12,6 +12,12 @@
 
 *Multi-provider AI REPL with tool calling for Guile Scheme*
 
+[[file:docs/images/demo.gif]]
+
+Short recording: REPL startup, =/status=, =/tools=, one model turn, =/exit=.
+Rebuild with =make demo= (requires =asciinema=, =agg=, a local Ollama running
+=qwen3:0.6b=).
+
 ** Overview
 
 guile-sage is an interactive AI agent REPL written in GNU Guile 3 Scheme. It provides:

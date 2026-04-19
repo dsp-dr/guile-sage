@@ -26,7 +26,7 @@ GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench presentation eval tmux-session tmux-kill eval-provenance
+.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench presentation eval tmux-session tmux-kill eval-provenance demo
 
 all: $(OBJECTS)
 
@@ -250,6 +250,17 @@ test-guardrails:
 
 timing-bench:
 	@scripts/timing-bench.sh
+
+# Record a fresh demo GIF. Requires asciinema + agg + local Ollama with qwen3:0.6b.
+# Strips host-specific details (username, hostname) from the asciicast before
+# rendering the GIF so the output is safe to publish.
+demo:
+	@command -v asciinema >/dev/null 2>&1 || { echo "asciinema required: brew install asciinema"; exit 1; }
+	@command -v agg >/dev/null 2>&1 || { echo "agg required: brew install agg"; exit 1; }
+	@asciinema rec -c scripts/demo.sh --rows 30 --cols 100 --overwrite docs/images/demo.cast
+	@sed -i.bak 's/@[^:]*:dsp-dr\/guile-sage/@host:dsp-dr\/guile-sage/g' docs/images/demo.cast && rm docs/images/demo.cast.bak
+	@agg --cols 100 --rows 30 --font-size 14 --theme monokai docs/images/demo.cast docs/images/demo.gif
+	@echo "Wrote docs/images/demo.gif"
 
 # Version bumping (semantic versioning)
 patch:
