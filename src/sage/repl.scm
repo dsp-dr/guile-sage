@@ -695,6 +695,27 @@ Format:
 
 (define *max-same-tool-repeats* 3)  ;; degenerate loop detection
 
+;; Cap how much of a tool's stdout we render in the REPL. The MODEL
+;; still receives the full body via session-add-message; this only
+;; affects the pane display so a 15 KB fetch_url body doesn't scroll
+;; the terminal past useful context. Tunable via env var.
+(define *repl-tool-display-max*
+  (or (and=> (getenv "SAGE_TOOL_DISPLAY_MAX") string->number)
+      500))
+
+(define (repl-truncate-for-display s)
+  "Shorten S for display if it exceeds *repl-tool-display-max*.
+Returns S unchanged when under the cap; otherwise returns the first
+N chars + a single-line marker showing the elided byte count."
+  (let ((n (string-length s))
+        (cap *repl-tool-display-max*))
+    (if (<= n cap)
+        s
+        (string-append
+         (substring s 0 cap)
+         (format #f "~%  \x1b[2m... [~a more bytes; model sees the full result]\x1b[0m"
+                 (- n cap))))))
+
 (define (execute-tool-chain model message content tokens)
   (let ((tools (tools-to-schema))
         (last-tool-name #f)
@@ -744,7 +765,7 @@ Format:
                      (format #t "[DEBUG] Tool: ~a~%" (or tool-name "?"))
                      (format #t "[DEBUG] Args: ~a~%" tool-args))
                    (format #t "~%  \x1b[2m[Tool: ~a]\x1b[0m~%" (or tool-name "?"))
-                   (format #t "  ~a~%~%" result)
+                   (format #t "  ~a~%~%" (repl-truncate-for-display result))
                    ;; Guard + wrap with role boundary delimiters + add to session.
                    ;; See bd guile-sage-7jg/i9s: untrusted tool output must be
                    ;; demarcated so the model cannot confuse it with user input.
