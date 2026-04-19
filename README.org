@@ -394,7 +394,8 @@ MIT License - see LICENSE file for details.
 
 ** Contributing
 
-See [[file:CONTRIBUTING.org][CONTRIBUTING.org]] for guidelines.
+See [[file:CONTRIBUTING.org][CONTRIBUTING.org]] for guidelines. By participating, you
+agree to abide by our [[file:CODE_OF_CONDUCT.md][Code of Conduct]] (Contributor Covenant v2.1).
 
 ** Related Projects
 
