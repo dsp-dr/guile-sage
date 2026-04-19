@@ -9,8 +9,9 @@
 
 (add-to-load-path (string-append (dirname (current-filename)) "/../src"))
 
-(load (string-append (dirname (current-filename)) "/test-harness.scm"))
+(use-modules (srfi srfi-64))
 
+(include "test-harness.scm")
 (test-begin "agents-md-directives")
 
 ;;; ============================================================
