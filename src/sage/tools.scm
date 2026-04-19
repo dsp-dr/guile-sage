@@ -13,6 +13,7 @@
   #:use-module (sage irc)
   #:use-module (sage ollama)
   #:use-module (sage telemetry)
+  #:use-module (sage usage-stats)
   #:use-module (sage provenance)
   #:use-module (sage scratch)
   #:use-module (srfi srfi-1)
@@ -360,6 +361,19 @@ that care about the exit code (git_push, git_commit) can surface it."
       ;; rather the sandbox message be clear.
       (cons 'veto (format #f "parse error: ~a ~a" key rest)))))
 
+;;; args-digest-for: Short human-readable summary of a tool-call args
+;;; alist. Used by usage-stats for privacy + size (we deliberately do
+;;; NOT log the full args alist). We take the first kv pair, render
+;;; as "key=value", and let usage-put! truncate to 80 chars.
+(define (args-digest-for args)
+  (cond
+   ((null? args) "")
+   ((and (pair? args) (pair? (car args)))
+    (let ((k (caar args))
+          (v (cdar args)))
+      (format #f "~a=~a" k v)))
+   (else (format #f "~a" args))))
+
 ;;; execute-tool: Execute a tool by name
 ;;; Arguments:
 ;;;   name - Tool name
@@ -395,6 +409,15 @@ that care about the exit code (git_push, git_commit) can surface it."
                             (log-tool-call name args #:result result #:duration duration-ms)
                             (when hook-mod
                               ((module-ref hook-mod 'hook-fire-post-tool) name args result))
+                            ;; Append to local usage ledger (opt-out via
+                            ;; SAGE_STATS_DISABLE). Errors are swallowed
+                            ;; inside usage-put! — never blocks the caller.
+                            (usage-put! name
+                                        (args-digest-for args)
+                                        (inexact->exact (round duration-ms))
+                                        (if (string? result)
+                                            (string-length result)
+                                            0))
                             result))
                         (lambda (key . rest)
                           (log-error "tools" (format #f "Tool execution failed: ~a" name)

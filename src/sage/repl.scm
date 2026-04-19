@@ -22,6 +22,7 @@
   #:use-module (sage commands)
   #:use-module (sage hooks)
   #:use-module (sage telemetry)
+  #:use-module (sage usage-stats)
   #:use-module (sage mcp)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-19)
@@ -159,7 +160,8 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
   (display "  /exit, /quit    - Exit the REPL\n")
   (display "  /clear          - Clear screen\n")
   (display "  /reset          - Clear conversation history\n")
-  (display "  /status, /stats - Show session statistics\n")
+  (display "  /status         - Show session status + context window\n")
+  (display "  /stats          - Show aggregated tool-usage from local ledger\n")
   (display "  /compact [n]    - Compact history, keep last n messages\n")
   (display "  /context        - Show conversation context\n")
   (display "  /model [name]   - Show or set model\n")
@@ -217,6 +219,49 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
   (let ((model (and *session* (assoc-ref *session* "model"))))
     (display (context-window-status model))
     (newline))
+  #t)
+
+;;; cmd-stats: Show aggregated tool-usage counts from
+;;; $XDG_STATE_HOME/sage/usage.jsonl. Top 10 tools by count and top 5
+;;; by total duration, plus totals + first/last seen.
+(define (cmd-stats args)
+  (let* ((summary (usage-summary))
+         (total (assoc-ref summary "total_calls"))
+         (by-tool (assoc-ref summary "by_tool"))
+         (by-duration (assoc-ref summary "by_duration"))
+         (first-seen (assoc-ref summary "first_seen"))
+         (last-seen (assoc-ref summary "last_seen")))
+    (format #t "Tool usage (from ~a)~%" (usage-log-file))
+    (format #t "  total calls: ~a~%" total)
+    (if (and first-seen last-seen)
+        (format #t "  session range: ~a → ~a~%" first-seen last-seen)
+        (format #t "  session range: (empty)~%"))
+    (newline)
+    (cond
+     ((zero? total)
+      (display "No tool-call events recorded yet.")
+      (newline)
+      (when (usage-disabled?)
+        (display "(SAGE_STATS_DISABLE is set — stats are opt-out.)")
+        (newline)))
+     (else
+      (display "Top 10 tools by count:\n")
+      (let loop ((items by-tool) (n 0))
+        (cond
+         ((or (null? items) (>= n 10)) #t)
+         (else
+          (format #t "  ~3d. ~a  (~a)~%"
+                  (+ n 1) (caar items) (cdar items))
+          (loop (cdr items) (+ n 1)))))
+      (newline)
+      (display "Top 5 tools by total duration (ms):\n")
+      (let loop ((items by-duration) (n 0))
+        (cond
+         ((or (null? items) (>= n 5)) #t)
+         (else
+          (format #t "  ~3d. ~a  (~a ms)~%"
+                  (+ n 1) (caar items) (cdar items))
+          (loop (cdr items) (+ n 1))))))))
   #t)
 
 (define (cmd-compact args)
@@ -596,7 +641,7 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
     ("/clear"     . ,cmd-clear)
     ("/reset"     . ,cmd-reset)
     ("/status"    . ,cmd-status)
-    ("/stats"     . ,cmd-status)
+    ("/stats"     . ,cmd-stats)
     ("/compact"   . ,cmd-compact)
     ("/context"   . ,cmd-context)
     ("/hooks"     . ,cmd-hooks)

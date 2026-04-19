@@ -72,12 +72,14 @@
       (assert-true (eq? exit-handler quit-handler)
                    "/exit and /quit should use same handler"))))
 
-(run-test "/status and /stats use same handler"
+(run-test "/stats has its own handler (usage ledger, not session status)"
   (lambda ()
     (let ((status-handler (assoc-ref *commands* "/status"))
           (stats-handler (assoc-ref *commands* "/stats")))
-      (assert-true (eq? status-handler stats-handler)
-                   "/status and /stats should use same handler"))))
+      (assert-true (procedure? stats-handler)
+                   "/stats should dispatch to a procedure")
+      (assert-true (not (eq? status-handler stats-handler))
+                   "/stats should be distinct from /status (bd: guile-sage-b5c)"))))
 
 (run-test "/reload and /refresh use same handler"
   (lambda ()
