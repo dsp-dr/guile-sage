@@ -11,6 +11,7 @@
 
 (use-modules (sage commands)
              (sage config)
+             (sage mcp)
              (sage repl)
              (sage session)
              (srfi srfi-1)
@@ -155,6 +156,29 @@
   (lambda ()
     (assert-true (assoc "/commands" *commands*)
                  "/commands should be in commands")))
+
+(run-test "*commands* contains /mcp"
+  (lambda ()
+    (assert-true (assoc "/mcp" *commands*)
+                 "/mcp should be in commands")))
+
+(run-test "/mcp with empty *mcp-servers* prints config hint"
+  (lambda ()
+    ;; Save + clear *mcp-servers* so we exercise the empty path
+    ;; without depending on the host's ~/.claude.json state.
+    (let ((saved *mcp-servers*))
+      (dynamic-wind
+        (lambda () (set! *mcp-servers* '()))
+        (lambda ()
+          (let* ((port (open-output-string))
+                 (result (with-output-to-port port
+                           (lambda () (handle-command "/mcp")))))
+            (assert-true result
+                         "/mcp should return #t when handled")
+            (let ((out (get-output-string port)))
+              (assert-true (string-contains out "No MCP servers configured")
+                           "empty servers path should print config hint"))))
+        (lambda () (set! *mcp-servers* saved))))))
 
 (run-test "handle-command dispatches custom commands"
   (lambda ()

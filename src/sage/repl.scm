@@ -168,6 +168,7 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
   (display "  /load <name>    - Load session\n")
   (display "  /sessions       - List saved sessions\n")
   (display "  /tools          - List available tools\n")
+  (display "  /mcp            - Show registered MCP servers\n")
   (display "  /workspace      - Show workspace directory\n")
   (display "  /debug          - Toggle debug mode\n")
   (display "  /version        - Show version info\n")
@@ -323,6 +324,80 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
                (if (assoc-ref t 'safe) "[safe]" "[unsafe]")
                (or (assoc-ref t 'description) "")))
      tools))
+  #t)
+
+;;; /mcp — registered MCP servers (bd: guile-sage-wf8)
+;;;
+;;; SAGE_MCP_PROBE=1 enables GET probes of /health and /metrics.
+;;; Off by default so /mcp never hammers the network.
+
+(define *mcp-row-fmt* "  ~12a  ~36a  ~6a  ~12a~%")
+
+(define (mcp-derive-base-url url)
+  "Strip a trailing /sse (or /sse/) suffix from URL."
+  (cond
+   ((not (string? url)) "")
+   ((string-suffix? "/sse/" url) (string-drop-right url 5))
+   ((string-suffix? "/sse" url)  (string-drop-right url 4))
+   (else url)))
+
+(define (mcp-probe-url url)
+  "Fetch URL and return a short reachability status string."
+  (catch #t
+    (lambda ()
+      (let* ((result (http-get url))
+             (code (if (pair? result) (car result) 0)))
+        (cond
+         ((and (>= code 200) (< code 300)) (format #f "~a ok" code))
+         ((zero? code) "unreachable")
+         (else (number->string code)))))
+    (lambda args "error")))
+
+(define (mcp-server-skill-count server-name)
+  "Count tools registered under the namespace SERVER-NAME (prefix '<name>.').
+Reflects what was bridged into sage's registry at init time."
+  (let ((prefix (string-append server-name ".")))
+    (length (filter (lambda (t)
+                      (let ((n (assoc-ref t 'name)))
+                        (and (string? n) (string-prefix? prefix n))))
+                    (list-tools)))))
+
+(define (mcp-server-status state)
+  (cond
+   ((not (list? state)) "unknown")
+   ((eq? (assoc-ref state "connected") #t) "connected")
+   (else "disconnected")))
+
+(define (cmd-mcp args)
+  "Show registered MCP servers in a formatted table."
+  (cond
+   ((null? *mcp-servers*)
+    (display "No MCP servers configured. Set up ~/.claude.json and restart.\n"))
+   (else
+    (let ((probe? (equal? "1" (or (getenv "SAGE_MCP_PROBE") ""))))
+      (format #t *mcp-row-fmt* "Name" "Base URL" "Skills" "Status")
+      (format #t *mcp-row-fmt*
+              "------------" "------------------------------------"
+              "------" "------------")
+      (for-each
+       (lambda (entry)
+         (let* ((name (car entry))
+                (state (cdr entry))
+                (url (or (and (list? state) (assoc-ref state "url")) "")))
+           (format #t *mcp-row-fmt*
+                   (or name "?") url
+                   (mcp-server-skill-count name)
+                   (mcp-server-status state))
+           (when probe?
+             (let ((base (mcp-derive-base-url url)))
+               (for-each
+                (lambda (path)
+                  (let ((u (string-append base path)))
+                    (format #t *mcp-row-fmt*
+                            (string-append "  " path) u "-"
+                            (mcp-probe-url u))))
+                '("/health" "/metrics"))))))
+       *mcp-servers*))))
   #t)
 
 (define (cmd-workspace args)
@@ -606,6 +681,7 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
     ("/load"      . ,cmd-load)
     ("/sessions"  . ,cmd-sessions)
     ("/tools"     . ,cmd-tools)
+    ("/mcp"       . ,cmd-mcp)
     ("/workspace" . ,cmd-workspace)
     ("/debug"     . ,cmd-debug)
     ("/stream"    . ,cmd-stream)
