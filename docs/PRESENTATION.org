@@ -192,7 +192,7 @@ synthetic "BLOCKED by policy" responses.
 #+begin_src bash
 # Quick start
 cp .env.template .env && $EDITOR .env
-gmake check          # 42 tests, all green
+gmake check          # 598 tests across 27 suites, all green
 gmake run            # REPL with YOLO tools
 
 # Full pipeline
