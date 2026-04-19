@@ -89,9 +89,26 @@
          (dot (string-index full #\.)))
     (if dot (substring full 0 dot) full)))
 
+;;; Readline-safe ANSI wrappers.
+;;; Readline counts characters to compute prompt width; ANSI escape
+;;; sequences must be wrapped with \x01 ... \x02 (RL_PROMPT_START_IGNORE
+;;; / END_IGNORE) so they're excluded from width. Without this, long
+;;; prompts wrap at the wrong column.
+(define (rl-color code s)
+  (string-append "\x01\x1b[" code "m\x02" s "\x01\x1b[0m\x02"))
+
+(define (rl-dim s)      (rl-color "2" s))           ;; dim grey
+(define (rl-cyan s)     (rl-color "36" s))          ;; cyan (model)
+(define (rl-green s)    (rl-color "32" s))          ;; green (brackets, OK)
+(define (rl-yellow s)   (rl-color "33" s))          ;; yellow (YOLO, warning)
+(define (rl-red s)      (rl-color "31" s))          ;; red (over-budget)
+(define (rl-bold s)     (rl-color "1"  s))
+
 (define (make-prompt)
-  "Generate dynamic prompt with user, host, repo, model, endpoint, and tokens."
-  (let* ((user (or (getenv "USER") (passwd:name (getpwuid (getuid)))))
+  "Generate dynamic prompt with user, host, repo, model, endpoint, and tokens.
+ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
+  (let* ((no-color (equal? "1" (or (getenv "SAGE_NO_COLOR") "")))
+         (user (or (getenv "USER") (passwd:name (getpwuid (getuid)))))
          (host (short-hostname))
          (ws (workspace))
          (repo (and ws (extract-repo-name ws)))
@@ -100,16 +117,39 @@
          (label (endpoint-label api-host))
          (status (session-status))
          (tokens (or (assoc-ref status "total_tokens") 0))
-         ;; Extract short model name (before colon if present)
+         (limit (or (and=> (getenv "TOKEN_LIMIT") string->number)
+                    (get-token-limit model)))
+         (ratio (if (and limit (> limit 0))
+                    (/ tokens (* 1.0 limit))
+                    0))
+         (yolo (equal? "1" (or (getenv "SAGE_YOLO_MODE") "")))
          (short-model (let ((idx (string-index model #\:)))
                         (if idx (substring model 0 idx) model)))
-         ;; Build context string
-         (context (if repo
-                      (format #f "~a@~a:~a" user host repo)
-                      (format #f "~a@~a" user host))))
+         (context-str (if repo
+                          (format #f "~a@~a:~a" user host repo)
+                          (format #f "~a@~a" user host)))
+         ;; Paint-helpers that no-op when SAGE_NO_COLOR=1
+         (paint (lambda (fn s) (if no-color s (fn s))))
+         (token-color (cond ((> ratio 0.9) rl-red)
+                            ((> ratio 0.5) rl-yellow)
+                            (else          rl-green)))
+         (tok-str (format-tokens tokens))
+         (bracket-l (if yolo (paint rl-yellow "[") (paint rl-green "[")))
+         (bracket-r (if yolo (paint rl-yellow "]") (paint rl-green "]"))))
     (if (> tokens 0)
-        (format #f "~a sage[~a@~a|~a]> " context short-model label (format-tokens tokens))
-        (format #f "~a sage[~a@~a]> " context short-model label))))
+        (string-append
+         (paint rl-dim context-str) " sage"
+         bracket-l
+         (paint rl-cyan short-model) "@" (paint rl-dim label)
+         (paint rl-dim "|") (paint token-color tok-str)
+         bracket-r
+         "> ")
+        (string-append
+         (paint rl-dim context-str) " sage"
+         bracket-l
+         (paint rl-cyan short-model) "@" (paint rl-dim label)
+         bracket-r
+         "> "))))
 
 ;;; Command Implementations
 
@@ -727,12 +767,21 @@ N chars + a single-line marker showing the elided byte count."
                (prev-tool #f)
                (repeats 0))
       (let ((tool-calls (as-list (assoc-ref msg "tool_calls"))))
-        ;; Check for degenerate loop: same tool N times in a row
+        ;; Degenerate-loop detection compares BOTH the tool name AND its
+        ;; arguments. Same name with different args (e.g. scratch_get
+        ;; paging: offset=0, 2000, 4000) is legitimate progress and must
+        ;; not trip the detector. Only a repeat with identical args is a
+        ;; stuck loop.
         (let* ((current-tool (and (pair? tool-calls)
                                   (let ((fn (assoc-ref (car tool-calls) "function")))
                                     (and fn (assoc-ref fn "name")))))
-               (is-repeat (and current-tool prev-tool
-                               (equal? current-tool prev-tool)))
+               (current-args (and (pair? tool-calls)
+                                  (let ((fn (assoc-ref (car tool-calls) "function")))
+                                    (and fn (assoc-ref fn "arguments")))))
+               (current-sig (and current-tool
+                                 (format #f "~a:~s" current-tool current-args)))
+               (is-repeat (and current-sig prev-tool
+                               (equal? current-sig prev-tool)))
                (new-repeats (if is-repeat (1+ repeats) 0))
                (degenerate? (>= new-repeats *max-same-tool-repeats*)))
           (if (or (null? tool-calls)
@@ -795,7 +844,7 @@ N chars + a single-line marker showing the elided byte count."
                               (or follow-tokens 0))
                 ;; Loop: check if the follow-up ALSO has tool calls
                 (loop follow-msg follow-content follow-tokens
-                      (1+ iteration) current-tool new-repeats)))))))))
+                      (1+ iteration) current-sig new-repeats)))))))))
 
 ;;; Agent Loop
 
