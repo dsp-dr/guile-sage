@@ -1,6 +1,12 @@
 #+TITLE: Contributing to guile-sage
 #+AUTHOR: dsp-dr
 
+* Reporting Security Issues
+
+*Do NOT file public GitHub issues or PRs for security vulnerabilities.*
+See [[file:SECURITY.md][SECURITY.md]] for the private disclosure channel
+(=security@defrecord.com=), response SLA, and scope.
+
 * Development Setup
 
 1. Clone the repository
