@@ -32,7 +32,7 @@ loosely to "search for tasks". The model grabs a tool whose
 description /contains the surface word/ instead of the one whose
 description /matches the intent/.
 
-** F2. "fetch and summarize" → fetch_url loop
+** F2. "fetch and summarize" → fetch_url fires once, then log-search loop
 
 *Prompt:* =get https://wal.sh/research/guile-sage-inject/payload.html and summarize=
 
@@ -41,17 +41,36 @@ description /matches the intent/.
 2. Produce a prose summary from the returned body
 3. (optional) =sage_task_push= for deep-dive sub-tasks
 
-*Observed:* =fetch_url= three times with identical args, then loop
-detector stop at 99% context. Model emitted empty assistant text
-between calls; no prose summary attempted.
+*Observed (two different sessions):*
 
-*Hypothesis:* 3.2 B params is below the threshold where the model
-reliably transitions from "got tool result" to "compose response
-from tool result". When the tool result is large relative to context
-(7 KB into an 8 K window), the model fails to plan and just
-re-invokes. v0.8.0's scratch / task-push primitives address the
-mechanism but the model has to choose to use them — and llama3.2
-doesn't.
+/Session A (pre-v0.8.0 tmux, body returned inline):/
+
+1. =fetch_url= fires once correctly with the expected URL
+2. Full HTML body comes back inline inside =<fetch-result>= wrapper
+   (visible closing =]]></fetch-result>=, =<script>= tags preserved)
+3. Model then pivots to =log_search_advanced= -> =search_logs= -> same
+   pair again, 3-in-a-row loop detector stops the chain
+4. No prose summary ever produced
+
+/Session B (earlier session before fetch_url existed):/
+
+1. =read_file= called three times on the test fixture
+2. Loop detector stops at 3
+
+The fetch itself is well-behaved. The failure is the /next step/: the
+model substitutes a semantically-unrelated tool (log search) for the
+"compose response" action. Same root cause as F1 — surface-word
+matching picks the wrong tool — but triggered by presence of a large
+tool-result in context rather than the word "task" in the prompt.
+
+*Hypothesis:* with a 7 KB body now in the conversation, the 8 K
+context is saturated and the model loses track of the original
+"summarize" directive. Looking for something to do, it grabs the
+first plausible tool it sees in the tools list (="log_"= tools happen
+to be near the top) and calls it. v0.8.0's scratch mode addresses
+this by keeping the envelope small when bodies exceed the inline
+threshold — but the fix is only effective if the session is running
+v0.8.0 or later (=793ab57=).
 
 ** F3. sage_task_push not selected despite explicit system-prompt nudge
 
