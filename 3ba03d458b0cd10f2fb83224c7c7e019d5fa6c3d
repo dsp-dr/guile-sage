@@ -1,0 +1,22 @@
+Attribution: Agent (Claude Opus 4.7, worktree agent-a31b54cd) implementing
+  bd guile-sage-eab.
+
+Testing: 6 SRFI-64 tests in tests/test-scratch-paging.scm. All pass locally.
+  Full gmake check remains green (778 PASS / 0 FAIL across 36 test files).
+
+Conjecture: The fix in 676e505 is sufficient: (format #f \"~a:~s\" name args)
+  produces distinct sigs for (sha, offset=0, len=1000), (sha, offset=1000,
+  len=1000), (sha, offset=2000, len=1000). Therefore is-repeat stays #f
+  across three paged calls and repeats never reaches *max-same-tool-repeats*
+  (=3). The detector still fires on genuine stuck loops because identical
+  args produce identical sigs.
+
+Validation: Direct assertions on (a) the chunk content returned by
+  execute-tool (exact string match: 1000 'A's, 1000 'B's, 1000 'C's) and
+  (b) the signature strings produced by the same format used in repl.scm.
+  State-machine walk asserts repeats=0 at each step.
+
+Research: src/sage/repl.scm:736-786 (loop detector), :781-782 (sig
+  format); src/sage/scratch.scm:51-64 (scratch-get); src/sage/tools.scm:
+  1257-1276 (scratch_get registration). Test style mirrors
+  tests/test-repl-chains.scm.
