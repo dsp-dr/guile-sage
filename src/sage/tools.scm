@@ -580,6 +580,50 @@ this is a local replacement that mirrors the curl call pattern."
               "</preview-truncated>"))
          "</fetch-result>"))))))
 
+;;; format-edit-diff: Produce a small unified-diff-style summary for
+;;; edit_file's return value. Shows ~2 lines of context before the
+;;; changed region and the old/new block.
+;;;
+;;; path       : resolved absolute path (for the header)
+;;; content    : original file content (pre-edit)
+;;; match-pos  : byte offset where SEARCH begins in CONTENT
+;;; search     : old text (possibly multi-line)
+;;; replace    : new text (possibly multi-line)
+(define (format-edit-diff path content match-pos search replace)
+  (let* ((line-of-match
+          ;; Count newlines in content[0..match-pos]
+          (let loop ((i 0) (n 1))
+            (if (>= i match-pos)
+                n
+                (loop (+ i 1)
+                      (if (char=? (string-ref content i) #\newline)
+                          (+ n 1)
+                          n)))))
+         (context-lines 2)
+         (start-line (max 1 (- line-of-match context-lines)))
+         (lines (string-split content #\newline))
+         (prefix (if (< start-line line-of-match)
+                     (string-join
+                      (map (lambda (n)
+                             (format #f "  ~a" (list-ref lines (- n 1))))
+                           (iota (- line-of-match start-line) start-line))
+                      "\n")
+                     ""))
+         (format-block
+          (lambda (sign text)
+            (string-join
+             (map (lambda (l) (format #f "~a ~a" sign l))
+                  (string-split text #\newline))
+             "\n"))))
+    (string-append
+     (format #f "Edited ~a (@ line ~a)~%" path line-of-match)
+     (format #f "@@ -~a,~a +~a,~a @@~%"
+             line-of-match (length (string-split search #\newline))
+             line-of-match (length (string-split replace #\newline)))
+     (if (string-null? prefix) "" (string-append prefix "\n"))
+     (format-block "-" search) "\n"
+     (format-block "+" replace))))
+
 (define (init-default-tools)
   ;; fetch_url (safe: read-only GET, URL scheme + size/time caps)
   (register-tool
@@ -767,10 +811,10 @@ this is a local replacement that mirrors the curl call pattern."
   ;; Self-Modification Tools
   ;; ============================================================
 
-  ;; edit_file - Edit existing files with search/replace
+  ;; edit_file - Edit existing files with search/replace; returns a diff.
   (register-tool
    "edit_file"
-   "Edit a file by replacing text (search and replace)"
+   "Edit a file by replacing text (search and replace). Returns a short unified diff with ~2 lines of context so the caller sees exactly what changed."
    '(("type" . "object")
      ("properties" . (("path" . (("type" . "string")
                                  ("description" . "File path relative to workspace")))
@@ -787,13 +831,15 @@ this is a local replacement that mirrors the curl call pattern."
            (let ((full-path (resolve-path path)))
              (if (file-exists? full-path)
                  (let* ((content (call-with-input-file full-path get-string-all))
-                        (new-content (string-replace-substring content search replace)))
-                   (if (equal? content new-content)
-                       (format #f "No match found for search text in ~a" full-path)
-                       (begin
-                         (call-with-output-file full-path
-                           (lambda (port) (display new-content port)))
-                         (format #f "Replaced text in ~a" full-path))))
+                        (match-pos (string-contains content search)))
+                   (cond
+                    ((not match-pos)
+                     (format #f "No match found for search text in ~a" full-path))
+                    (else
+                     (let ((new-content (string-replace-substring content search replace)))
+                       (call-with-output-file full-path
+                         (lambda (port) (display new-content port)))
+                       (format-edit-diff full-path content match-pos search replace)))))
                  (format #f "File not found: ~a" full-path)))
            (format #f "Unsafe path: ~a" path)))))
 
