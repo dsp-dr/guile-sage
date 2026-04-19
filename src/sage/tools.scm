@@ -13,6 +13,7 @@
   #:use-module (sage irc)
   #:use-module (sage ollama)
   #:use-module (sage telemetry)
+  #:use-module (sage provenance)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -419,13 +420,27 @@ that care about the exit code (git_push, git_commit) can surface it."
 ;;; Built-in Tools
 ;;; ============================================================
 
-;;; Wrapper + sanitizer for fetch_url (classified safe).
+;;; fetch_url tool (classified safe).
+;;;
 ;;; Contract: https://wal.sh/research/guile-sage-inject.html
-;;;   - GET only, UA "guile-sage/0.1"
-;;;   - Wraps body with "<!-- wrapped by guile-sage ... -->" markers
-;;;   - Strips <script>...</script> blocks (case-insensitive)
+;;;   - GET only, UA contains "guile-sage/0.1"
 ;;;   - Only http:// and https:// schemes
-;;;   - Capped at 1 MB body, 10 s timeout
+;;;   - Cap: 1 MB body, 10 s timeout
+;;;
+;;; Wrapper contract: framing + provenance only, NO sanitisation.
+;;; Output is a single <fetch-result> XML element with the body verbatim
+;;; inside CDATA. Attributes carry source URL, byte count, SHA-256,
+;;; fetched-at ISO timestamp, trust label, and the exact UA we sent.
+;;; Consumers decide what to do with the body; the wrapper does not.
+;;;
+;;; Design notes:
+;;; - Script stripping was removed on 2026-04-19 after the wal.sh T3
+;;;   test confirmed the <tool-result> role-boundary layer prevents the
+;;;   model acting on injected instructions. Stripping in the wrapper
+;;;   conflates framing with rendering-safety; keep them separate.
+;;; - CDATA is split on any occurrence of "]]>" in the body so we never
+;;;   emit invalid XML even if the source contains the terminator.
+
 (define *fetch-ua*
   "guile-sage/0.1 (+https://github.com/dsp-dr/guile-sage; Guile Scheme AI agent)")
 (define *fetch-max-bytes* 1048576)
@@ -435,21 +450,53 @@ that care about the exit code (git_push, git_commit) can surface it."
   (or (string-prefix? "http://" url)
       (string-prefix? "https://" url)))
 
-(define (strip-script-tags body)
-  "Remove <script>...</script> blocks (case-insensitive, non-greedy).
-Naive but sufficient for the wal.sh test contract."
-  (let loop ((s body))
-    (let ((lower (string-downcase s)))
-      (let ((open (string-contains lower "<script")))
-        (if (not open)
-            s
-            (let* ((close-tag (string-contains lower "</script>" open)))
-              (if (not close-tag)
-                  ;; Unclosed — drop from <script onwards to be safe
-                  (substring s 0 open)
-                  (loop (string-append
-                         (substring s 0 open)
-                         (substring s (+ close-tag (string-length "</script>"))))))))))))
+(define (fetch-cdata-safe body)
+  "Split any ]]> in BODY across two CDATA sections so the envelope stays
+well-formed XML. Lossless: concatenating the text content of every
+CDATA section inside a <fetch-result> reproduces BODY byte-for-byte."
+  (let loop ((s body) (acc '()))
+    (let ((i (string-contains s "]]>")))
+      (if (not i)
+          (apply string-append (reverse (cons s acc)))
+          (loop (substring s (+ i 3))
+                (cons "]]]]><![CDATA[>"
+                      (cons (substring s 0 i) acc)))))))
+
+(define (fetch-attr-escape s)
+  "Escape S for use inside a double-quoted XML attribute."
+  (let* ((s1 (string-replace-substring s "&" "&amp;"))
+         (s2 (string-replace-substring s1 "<" "&lt;"))
+         (s3 (string-replace-substring s2 ">" "&gt;"))
+         (s4 (string-replace-substring s3 "\"" "&quot;")))
+    s4))
+
+(define (fetch-now-iso)
+  "ISO-8601 timestamp in UTC."
+  (strftime "%Y-%m-%dT%H:%M:%SZ" (gmtime (current-time))))
+
+(define (fetch-sha256 content)
+  "Compute SHA-256 of CONTENT via shasum/sha256sum using the argv-based
+exec path (capture-argv-in-dir). The provenance module's content-sha256
+uses open-input-pipe which triggers the macOS Guile 3.0.11 Bad-FD bug;
+this is a local replacement that mirrors the curl call pattern."
+  (catch #t
+    (lambda ()
+      (let* ((tmp (format #f "/tmp/sage-fetch-sha-~a-~a"
+                          (getpid) (random 1000000)))
+             (_ (call-with-output-file tmp
+                  (lambda (p) (display content p))))
+             ;; shasum on macOS, sha256sum on Linux/FreeBSD
+             (out (or (let ((s (capture-argv-in-dir "/tmp" "shasum" "-a" "256" tmp)))
+                        (and s (not (string-null? s)) s))
+                      (let ((s (capture-argv-in-dir "/tmp" "sha256sum" tmp)))
+                        (and s (not (string-null? s)) s))
+                      ""))
+             (hex (if (>= (string-length out) 64)
+                      (substring out 0 64)
+                      "hash-error")))
+        (when (file-exists? tmp) (delete-file tmp))
+        hex))
+    (lambda (key . args) "hash-unavailable")))
 
 (define (fetch-url-execute args)
   (let ((url (assoc-ref args "url")))
@@ -459,22 +506,52 @@ Naive but sufficient for the wal.sh test contract."
      ((not (fetch-url-scheme-ok? url))
       (format #f "Error: only http:// and https:// URLs are permitted (got: ~a)" url))
      (else
-      ;; Use capture-argv-in-dir (primitive-fork + execlp) to dodge the
-      ;; macOS Guile 3.0.11 system*/open-pipe* Bad-FD bug. See the big
-      ;; comment block above capture-argv-in-dir.
-      (let ((body (capture-argv-in-dir
-                   "/tmp"
-                   "curl" "-sSL"
-                   "-A" *fetch-ua*
-                   "-H" "Accept: text/html, text/plain, */*"
-                   "--max-time" (number->string *fetch-timeout-secs*)
-                   "--max-filesize" (number->string *fetch-max-bytes*)
-                   url)))
+      ;; Two-file curl: body goes to -o, headers to -D, and -w writes
+      ;; "<content-type>\n<http-code>\n" to stdout so capture-argv-in-dir
+      ;; returns just the metadata. Accept header prefers markdown,
+      ;; falls through to plain text, then HTML, then anything.
+      (let* ((body-tmp (format #f "/tmp/sage-fetch-body-~a-~a"
+                               (getpid) (random 1000000)))
+             (hdr-tmp (format #f "/tmp/sage-fetch-hdr-~a-~a"
+                              (getpid) (random 1000000)))
+             (meta (capture-argv-in-dir
+                    "/tmp"
+                    "curl" "-sSL"
+                    "-A" *fetch-ua*
+                    "-H" "Accept: text/markdown, text/plain;q=0.9, text/html;q=0.8, */*;q=0.5"
+                    "--max-time" (number->string *fetch-timeout-secs*)
+                    "--max-filesize" (number->string *fetch-max-bytes*)
+                    "-o" body-tmp
+                    "-D" hdr-tmp
+                    "-w" "%{content_type}\n%{http_code}\n"
+                    url))
+             (meta-parts (string-split (string-trim-both meta) #\newline))
+             (content-type (if (pair? meta-parts)
+                               (car meta-parts)
+                               "unknown"))
+             (http-code (if (>= (length meta-parts) 2)
+                            (cadr meta-parts)
+                            "000"))
+             (body (if (file-exists? body-tmp)
+                       (call-with-input-file body-tmp get-string-all)
+                       ""))
+             (bytes (string-length body))
+             (sha (fetch-sha256 body))
+             (ts (fetch-now-iso)))
+        (when (file-exists? body-tmp) (delete-file body-tmp))
+        (when (file-exists? hdr-tmp) (delete-file hdr-tmp))
         (string-append
-         "<!-- wrapped by guile-sage " *fetch-ua* " -->\n"
-         "<!-- source: " url " -->\n"
-         (strip-script-tags body)
-         "\n<!-- end wrapped by guile-sage -->\n"))))))
+         "<fetch-result"
+         " source=\"" (fetch-attr-escape url) "\""
+         " content-type=\"" (fetch-attr-escape content-type) "\""
+         " http-code=\"" http-code "\""
+         " bytes=\"" (number->string bytes) "\""
+         " sha256=\"" sha "\""
+         " fetched-at=\"" ts "\""
+         " trust=\"untrusted\""
+         " user-agent=\"" (fetch-attr-escape *fetch-ua*) "\">"
+         "<![CDATA[" (fetch-cdata-safe body) "]]>"
+         "</fetch-result>"))))))
 
 (define (init-default-tools)
   ;; fetch_url (safe: read-only GET, URL scheme + size/time caps)
