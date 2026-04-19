@@ -194,9 +194,17 @@
   (string-append (sage-data-dir) "/commands"))
 
 ;;; ensure-dir: Create directory if it doesn't exist
+;;; bd: guile-sage-9j7/07f — argv-based mkdir via primitive-fork +
+;;; execlp; dodges shell injection and macOS Guile's spawn+bad-FD bug.
 (define (ensure-dir path)
   (unless (file-exists? path)
-    (system (format #f "mkdir -p '~a'" path)))
+    (let ((pid (primitive-fork)))
+      (cond
+       ((= pid 0)
+        (catch #t
+          (lambda () (execlp "mkdir" "mkdir" "-p" path))
+          (lambda args (primitive-exit 127))))
+       (else (waitpid pid)))))
   path)
 
 ;;; ensure-sage-dirs: Create all sage directories

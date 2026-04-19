@@ -529,14 +529,33 @@
 ;;; Arguments:
 ;;;   b64-data - Base64-encoded image data string
 ;;;   path - Output file path
+;;;
+;;; bd: guile-sage-9j7/07f — previously:
+;;;   (system (format #f "base64 -d < '~a' > '~a'" tmp-b64 path))
+;;; which single-quoted path into a shell command. A malicious image
+;;; filename could escape the quotes and inject commands. Now we fork,
+;;; redirect stdin from tmp-b64 and stdout to path via dup2, and exec
+;;; base64 -d directly — no /bin/sh is involved.
 (define (save-base64-png b64-data path)
   ;; Ensure parent directory exists
   (let ((dir (dirname path)))
     (unless (file-exists? dir)
       (mkdir dir)))
-  ;; Use base64 command to decode since Guile lacks native base64
   (let ((tmp-b64 (make-temp-file "sage-b64")))
     (call-with-output-file tmp-b64
       (lambda (port) (display b64-data port)))
-    (system (format #f "base64 -d < '~a' > '~a'" tmp-b64 path))
-    (delete-file tmp-b64)))
+    (let ((pid (primitive-fork)))
+      (cond
+       ((= pid 0)
+        (catch #t
+          (lambda ()
+            (let ((in-fd (open-fdes tmp-b64 O_RDONLY))
+                  (out-fd (open-fdes path (logior O_WRONLY O_CREAT O_TRUNC)
+                                     #o644)))
+              (dup2 in-fd 0)
+              (dup2 out-fd 1)
+              (execlp "base64" "base64" "-d")))
+          (lambda args (primitive-exit 127))))
+       (else
+        (waitpid pid)
+        (delete-file tmp-b64))))))

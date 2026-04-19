@@ -30,6 +30,7 @@
   #:use-module (ice-9 format)
   #:use-module (ice-9 receive)
   #:use-module (ice-9 popen)
+  #:use-module (ice-9 ftw)
   #:use-module (srfi srfi-1)
   #:use-module (sage util)
   #:use-module (sage logging)
@@ -222,20 +223,49 @@ The caller reads SSE events from this port via sse-read-event."
              ;; Clean up any stale FIFO from a previous crash
              (_ (when (file-exists? fifo-path)
                   (delete-file fifo-path)))
-             (_ (system (format #f "mkfifo '~a'" fifo-path)))
-             (header-args
-              (string-join
-               (cons "-H 'Accept: text/event-stream'"
-                     (map (lambda (h)
-                            (format #f "-H '~a: ~a'" (car h) (cdr h)))
-                          headers))
-               " "))
-             ;; Run curl in background writing to the FIFO.
-             ;; -s: silent, -N: no-buffer (stream immediately).
-             ;; The & backgrounds it so we can open the FIFO for reading.
-             (cmd (format #f "curl -sN --connect-timeout ~a ~a '~a' > '~a' &"
-                          timeout header-args url fifo-path)))
-        (system cmd)
+             ;; bd: guile-sage-9j7/07f — argv-based mkfifo via
+             ;; primitive-fork + execlp (no /bin/sh).
+             (_ (let ((pid (primitive-fork)))
+                  (cond
+                   ((= pid 0)
+                    (catch #t
+                      (lambda () (execlp "mkfifo" "mkfifo" fifo-path))
+                      (lambda args (primitive-exit 127))))
+                   (else (waitpid pid)))))
+             ;; bd: guile-sage-9j7/07f — construct the curl invocation
+             ;; as a sh -c script where URL and FIFO are positional
+             ;; parameters ($1, $2) and headers are passed as extra
+             ;; argv. Positional parameters are NOT re-interpreted as
+             ;; shell syntax, so metachars in URL/headers become literal
+             ;; bytes to curl. We use sh only because backgrounding (&)
+             ;; and output redirection (>) need a shell.
+             (timeout-str (number->string timeout))
+             (header-flags
+              ;; Two argv slots per header: -H and "Name: Value".
+              (let loop ((hs headers) (acc '()))
+                (cond
+                 ((null? hs) (reverse acc))
+                 (else
+                  (loop (cdr hs)
+                        (cons (format #f "~a: ~a" (caar hs) (cdar hs))
+                              (cons "-H" acc)))))))
+             (n-headers (length header-flags))
+             (header-refs
+              (let loop ((i 3) (remaining n-headers) (acc '()))
+                (if (zero? remaining)
+                    (reverse acc)
+                    (loop (+ i 1) (- remaining 1)
+                          (cons (format #f "\"$~a\"" i) acc)))))
+             (sh-script
+              (string-append
+               "exec curl -sN --connect-timeout '" timeout-str "' "
+               "-H 'Accept: text/event-stream' "
+               (string-join header-refs " ")
+               " \"$1\" > \"$2\" &"))
+             (argv (append (list "/bin/sh" "-c" sh-script "sage-sse"
+                                 url fifo-path)
+                           header-flags)))
+        (apply system* argv)
         ;; open-input-file blocks until curl starts writing to the FIFO.
         ;; This is the correct behaviour — it synchronizes the reader
         ;; with the writer without polling.
@@ -569,7 +599,24 @@ Also registers under the bare tool name if no collision with local tools."
               (catch #t
                 (lambda () (when (port? sse-port) (close-port sse-port)))
                 (lambda a #f))
-              (system (format #f "rm -f /tmp/sage-sse-~a-* 2>/dev/null" (getpid)))
+              ;; bd: guile-sage-9j7/07f — in-process FIFO cleanup
+              ;; instead of `rm -f /tmp/sage-sse-<pid>-*` via shell.
+              ;; (getpid) is a controlled integer so there was no real
+              ;; injection risk here, but we eliminate /bin/sh on
+              ;; principle so future edits don't reintroduce a hole.
+              (catch #t
+                (lambda ()
+                  (let* ((pid-prefix (format #f "sage-sse-~a-" (getpid)))
+                         (entries (or (scandir "/tmp") '())))
+                    (for-each
+                     (lambda (entry)
+                       (when (string-prefix? pid-prefix entry)
+                         (catch #t
+                           (lambda ()
+                             (delete-file (string-append "/tmp/" entry)))
+                           (lambda args #f))))
+                     entries)))
+                (lambda args #f))
               response)))))))
 
 (define (mcp-call-tool server-name tool-name args)

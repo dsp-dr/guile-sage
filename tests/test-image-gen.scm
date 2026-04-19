@@ -176,11 +176,26 @@
       ;; Clean up first
       (when (file-exists? test-path)
         (delete-file test-path))
-      ;; The save-base64-png is not exported, test via system call
+      ;; The save-base64-png is not exported, test via system call.
+      ;; bd: guile-sage-9j7/07f — fork+dup2+exec instead of /bin/sh.
       (let ((tmp-b64 (make-temp-file "sage-test-b64")))
         (call-with-output-file tmp-b64
           (lambda (port) (display b64-data port)))
-        (system (format #f "base64 -d < '~a' > '~a'" tmp-b64 test-path))
+        (let ((pid (primitive-fork)))
+          (cond
+           ((= pid 0)
+            (catch #t
+              (lambda ()
+                (let ((in-fd (open-fdes tmp-b64 O_RDONLY))
+                      (out-fd (open-fdes test-path
+                                         (logior O_WRONLY O_CREAT O_TRUNC)
+                                         #o644)))
+                  (dup2 in-fd 0)
+                  (dup2 out-fd 1)
+                  (execlp "base64" "base64" "-d")))
+              (lambda args (primitive-exit 127))))
+           (else
+            (waitpid pid))))
         (delete-file tmp-b64))
       (unless (file-exists? test-path)
         (error "file was not created"))
@@ -313,7 +328,22 @@
                      (when (string-suffix? ".png" filename)
                        (let* ((path (string-append fixtures-dir "/" filename))
                               (tmp (make-temp-file "sage-file-check")))
-                         (system (format #f "file '~a' > '~a'" path tmp))
+                         ;; bd: guile-sage-9j7/07f — fork+dup2+exec
+                         ;; file(1) instead of /bin/sh.
+                         (let ((pid (primitive-fork)))
+                           (cond
+                            ((= pid 0)
+                             (catch #t
+                               (lambda ()
+                                 (let ((out-fd (open-fdes
+                                                tmp
+                                                (logior O_WRONLY O_CREAT O_TRUNC)
+                                                #o644)))
+                                   (dup2 out-fd 1)
+                                   (execlp "file" "file" path)))
+                               (lambda args (primitive-exit 127))))
+                            (else
+                             (waitpid pid))))
                          (let ((result (call-with-input-file tmp get-string-all)))
                            (delete-file tmp)
                            (unless (string-contains result "PNG image data")

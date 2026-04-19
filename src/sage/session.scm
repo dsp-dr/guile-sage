@@ -42,8 +42,16 @@
                  (if project-local
                      (sage-project-sessions-dir)
                      (sage-sessions-dir)))))
+    ;; bd: guile-sage-9j7/07f — argv-based mkdir via primitive-fork +
+    ;; execlp; dodges shell injection and macOS Guile's spawn+bad-FD bug.
     (unless (file-exists? dir)
-      (system (format #f "mkdir -p '~a'" dir)))
+      (let ((pid (primitive-fork)))
+        (cond
+         ((= pid 0)
+          (catch #t
+            (lambda () (execlp "mkdir" "mkdir" "-p" dir))
+            (lambda args (primitive-exit 127))))
+         (else (waitpid pid)))))
     dir))
 
 ;;; session-create: Create a new session
