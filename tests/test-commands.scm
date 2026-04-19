@@ -12,6 +12,7 @@
 (use-modules (sage commands)
              (sage config)
              (sage repl)
+             (sage session)
              (srfi srfi-1)
              (ice-9 format))
 
@@ -171,6 +172,55 @@
   (lambda ()
     (assert-true (handle-command "/zzz-no-such-command")
                  "Unknown command still returns #t (error displayed)")))
+
+;;; ============================================================
+;;; /compact dispatch — bead guile-sage-7gb
+;;; Ensures /compact N is intercepted by handle-command and dispatched
+;;; to cmd-compact with the parsed integer; does NOT fall through to
+;;; the chat/model path. Stubs session-compact! so we observe its args
+;;; without running real compaction.
+;;; ============================================================
+
+(run-test "cmd-compact dispatched with integer arg from /compact N"
+  (lambda ()
+    (let* ((session-mod (resolve-module '(sage session)))
+           (real-compact (module-ref session-mod 'session-compact!))
+           (recorded-keep-recent #f)
+           (stub (lambda* (#:key (keep-recent 5) (summarize #f))
+                   (set! recorded-keep-recent keep-recent)
+                   ;; Return a string so cmd-compact's (display ...) works.
+                   "[stub] compacted")))
+      (dynamic-wind
+        (lambda ()
+          (module-set! session-mod 'session-compact! stub))
+        (lambda ()
+          (let ((result (handle-command "/compact 4")))
+            (assert-true result
+                         "handle-command should return #t when /compact is handled")
+            (assert-equal recorded-keep-recent 4
+                          "cmd-compact should pass integer 4 from args")))
+        (lambda ()
+          (module-set! session-mod 'session-compact! real-compact))))))
+
+(run-test "cmd-compact uses default keep-recent=5 when /compact has no args"
+  (lambda ()
+    (let* ((session-mod (resolve-module '(sage session)))
+           (real-compact (module-ref session-mod 'session-compact!))
+           (recorded-keep-recent #f)
+           (stub (lambda* (#:key (keep-recent 5) (summarize #f))
+                   (set! recorded-keep-recent keep-recent)
+                   "[stub] compacted")))
+      (dynamic-wind
+        (lambda ()
+          (module-set! session-mod 'session-compact! stub))
+        (lambda ()
+          (let ((result (handle-command "/compact")))
+            (assert-true result
+                         "handle-command should return #t for bare /compact")
+            (assert-equal recorded-keep-recent 5
+                          "cmd-compact should fall back to default keep-recent=5")))
+        (lambda ()
+          (module-set! session-mod 'session-compact! real-compact))))))
 
 ;;; ============================================================
 ;;; Edge Cases
