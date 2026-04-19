@@ -1,0 +1,33 @@
+## Attribution
+Bead: guile-sage-em9. Execution by Claude Opus 4.7 at user jwalsh's request;
+decision owner: Aidan Pace (apace@defrecord.com).
+
+## Testing
+- gmake check: one pre-existing failure in tests/test-agents-md-directives.scm
+  (syntax-transformer applied to test-assert) — confirmed by stashing this
+  commit's changes and re-running; failure reproduces on HEAD. Out of scope.
+- `git ls-files .beads/` no longer lists *.jsonl (verified)
+- `bd list` works against the local JSONL (verified)
+
+## Conjecture
+Option (a) untrack is correct over (b) scrub: .beads/ JSONL files are local
+`bd` state synced via `bd dolt push` to a separate Dolt remote, not via git.
+Keeping them in git creates a drift-prone second source of truth that leaks
+PII into commit history on every `bd sync`.
+
+## Validation
+- .gitignore now excludes .beads/issues.jsonl and .beads/interactions.jsonl
+- AGENTS.md diagram corrected: task queue is local + Dolt-synced, not git
+- Files remain on disk; bd list still functions
+- Note: git history prior to this commit still contains the PII. Full removal
+  from history would require `git filter-repo` which is out of scope for this
+  bead (file a separate bead if required before public release).
+
+## Research
+- .beads/.gitignore (inside .beads/) already ignored interactions.jsonl on
+  line 16, but gitignore does not retroactively untrack files. Root
+  .gitignore now ignores both JSONLs; `git rm --cached` completed the untrack.
+- 4 files in repo still contain @defrecord emails after this change:
+  docs/PRESENTATION.html, docs/PRESENTATION.org, CONTRIBUTING.org, and
+  .beads/issues.jsonl (no longer tracked). The first three are separate
+  PII-leak beads (not guile-sage-em9's scope).
