@@ -88,8 +88,16 @@
                  (string-append (getcwd) "/.logs"))))
     (set! *log-dir* dir)
     ;; Create directory if needed
+    ;; bd: guile-sage-9j7/07f — argv-based mkdir via primitive-fork +
+    ;; execlp; dodges shell injection and macOS Guile's spawn+bad-FD bug.
     (unless (file-exists? dir)
-      (system (format #f "mkdir -p '~a'" dir))))
+      (let ((pid (primitive-fork)))
+        (cond
+         ((= pid 0)
+          (catch #t
+            (lambda () (execlp "mkdir" "mkdir" "-p" dir))
+            (lambda args (primitive-exit 127))))
+         (else (waitpid pid))))))
 
   ;; Set log file path
   (set! *log-file* (string-append *log-dir* "/sage.log"))
