@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-gmake check          # Run test suite (42+ tests, all green)
+gmake check          # Run test suite (598+ tests across 27 suites, all green)
 gmake run            # Start sage REPL (Ollama provider, YOLO mode)
 cp .env.template .env && $EDITOR .env  # Configure provider
 bd ready             # Find available work
