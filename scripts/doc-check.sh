@@ -36,21 +36,21 @@ for f in src/sage/*.scm; do
 done
 
 echo
-# 2. Every src/sage/*.scm module appears in CLAUDE.md
-echo "--- Module coverage (CLAUDE.md) ---"
+# 2. Every src/sage/*.scm module appears in AGENTS.md
+echo "--- Module coverage (AGENTS.md) ---"
 for f in src/sage/*.scm; do
   base=$(basename "$f")
-  if grep -q "$base" CLAUDE.md 2>/dev/null; then
-    pass "$base in CLAUDE.md"
+  if grep -q "$base" AGENTS.md 2>/dev/null; then
+    pass "$base in AGENTS.md"
   else
-    fail "$base NOT in CLAUDE.md"
+    fail "$base NOT in AGENTS.md"
   fi
 done
 
 echo
 # 3. No hardcoded IPs in docs/
 echo "--- No hardcoded IPs (living docs only, not reports/) ---"
-count=$(grep -rn '192\.168\.' docs/*.org docs/*.md CLAUDE.md README.org .env.template 2>/dev/null | wc -l | tr -d ' ')
+count=$(grep -rn '192\.168\.' docs/*.org docs/*.md AGENTS.md README.org .env.template 2>/dev/null | wc -l | tr -d ' ')
 if [ "$count" -eq 0 ]; then
   pass "zero hardcoded IPs"
 else
@@ -78,24 +78,24 @@ else
 fi
 
 echo
-# 6. Version in CLAUDE.md matches src/sage/version.scm
+# 6. Version in AGENTS.md matches src/sage/version.scm
 echo "--- Version consistency ---"
 src_ver=$(grep 'define \*version\*' src/sage/version.scm | grep -o '"[^"]*"' | tr -d '"')
-if grep -q "$src_ver" CLAUDE.md 2>/dev/null; then
-  pass "CLAUDE.md mentions $src_ver"
+if grep -q "$src_ver" AGENTS.md 2>/dev/null; then
+  pass "AGENTS.md mentions $src_ver"
 else
-  warn "CLAUDE.md may not reference current version $src_ver"
+  warn "AGENTS.md may not reference current version $src_ver"
 fi
 
 echo
-# 7. Test suite table in CLAUDE.md lists every test file
-echo "--- Test file coverage (CLAUDE.md) ---"
+# 7. Test suite table in AGENTS.md lists every test file
+echo "--- Test file coverage (AGENTS.md) ---"
 for f in tests/test-*.scm; do
   base=$(basename "$f")
-  if grep -q "$base" CLAUDE.md 2>/dev/null; then
-    pass "$base in CLAUDE.md"
+  if grep -q "$base" AGENTS.md 2>/dev/null; then
+    pass "$base in AGENTS.md"
   else
-    warn "$base NOT in CLAUDE.md test table"
+    warn "$base NOT in AGENTS.md test table"
   fi
 done
 

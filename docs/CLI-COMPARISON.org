@@ -104,7 +104,7 @@ Versions tested:
 | Context compaction | ✓ (5 strategies) | ✓ =/compact= | ✓ | ✓ | ✓ (=--max-chat-history-tokens=) |
 | Repo map / indexing | ✗ | ✓ (codebase index) | ✓ | ✓ | ✓ (=--map-tokens=) |
 | Prompt caching | ✗ | ✓ (auto) | ✓ | ✓ | ✓ (=--cache-prompts=) |
-| AGENTS.md / CLAUDE.md | ✓ (AGENTS.md) | ✓ (CLAUDE.md) | ✓ (GEMINI.md) | ✓ (AGENTS.md) | ✓ (=.aider*= files) |
+| AGENTS.md / AGENTS.md | ✓ (AGENTS.md) | ✓ (AGENTS.md) | ✓ (GEMINI.md) | ✓ (AGENTS.md) | ✓ (=.aider*= files) |
 | Auto-memory (persistent) | ✗ | ✓ (auto-memory) | ✗ | ✗ | ✗ |
 | Project-scoped sessions | ✓ (XDG path-encoded) | ✓ (per-directory) | ✓ | ✓ | ✓ |
 

@@ -94,7 +94,7 @@
 (run-test "guard passes directory listing"
   (lambda ()
     (assert-false (tool-result-needs-guard?
-                   "src/\ntests/\nMakefile\nCLAUDE.md")
+                   "src/\ntests/\nMakefile\nAGENTS.md")
                   "Directory listing should not trigger guard")))
 
 (run-test "guard passes multi-line output"

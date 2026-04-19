@@ -8,7 +8,7 @@
 
 This document is a contract specification for how =guile-sage= discovers,
 parses, and applies =AGENTS.md= files from project directories. =AGENTS.md=
-is the sage equivalent of Claude Code's =CLAUDE.md= — a project-local
+is the sage equivalent of Claude Code's =AGENTS.md= — a project-local
 configuration file that shapes agent behavior, tool permissions, and
 operating conventions without modifying source code.
 

@@ -269,7 +269,7 @@
   #t)
 
 ;;; ============================================================
-;;; AGENTS.md Support (like Claude's CLAUDE.md)
+;;; AGENTS.md Support (open standard: https://agentskills.io)
 ;;; ============================================================
 
 ;;; find-agents-md: Find AGENTS.md files in order of precedence

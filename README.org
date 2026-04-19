@@ -393,7 +393,7 @@ guile-sage/
 │   ├── demo.sh          # Scripted asciinema demo with sanitised tmux pane
 │   ├── eval-sage.sh     # Drive eval traffic at a running sage session
 │   └── ...
-├── .env.template, Makefile, CLAUDE.md, AGENTS.md, LICENSE, SECURITY.md, CODE_OF_CONDUCT.md, CONTRIBUTING.org
+├── .env.template, Makefile, AGENTS.md, AGENTS.md, LICENSE, SECURITY.md, CODE_OF_CONDUCT.md, CONTRIBUTING.org
 #+end_example
 
 *** Running Tests

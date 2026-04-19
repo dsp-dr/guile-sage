@@ -14,7 +14,7 @@ contracts and runtime enforcement.
 
 The survey established a three-layer model:
 
-1. *Prose contracts* set intent (CLAUDE.md rules, system prompts).
+1. *Prose contracts* set intent (AGENTS.md rules, system prompts).
 2. *Runtime enforcement* guarantees compliance (hooks, guards).
 3. *Drift scores* measure adherence over time.
 

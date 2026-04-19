@@ -88,7 +88,7 @@ Target: Smarter context management
 - Aider: automatic codebase mapping
 - Gemini CLI: 1M token context window
 - Copilot CLI: web_fetch tool with URL controls
-- Claude Code: external CLAUDE.md imports
+- Claude Code: external AGENTS.md imports
 
 ** v0.4.0 - MCP Protocol
 

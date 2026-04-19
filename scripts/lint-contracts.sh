@@ -34,14 +34,14 @@ for provider in ollama openai gemini; do
 done
 
 echo
-# 2. Every module in CLAUDE.md exists in src/
-echo "--- CLAUDE.md module list vs src/ ---"
+# 2. Every module in AGENTS.md exists in src/
+echo "--- AGENTS.md module list vs src/ ---"
 # Only check the Architecture section (between "## Architecture" and the next "##")
-sed -n '/^## Architecture/,/^## [^A]/p' CLAUDE.md | grep '\.scm' | grep -o '[a-z_-]*.scm' | sort -u | while read m; do
+sed -n '/^## Architecture/,/^## [^A]/p' AGENTS.md | grep '\.scm' | grep -o '[a-z_-]*.scm' | sort -u | while read m; do
   if [ -f "src/sage/$m" ]; then
     pass "$m exists"
   else
-    fail "$m listed in CLAUDE.md but missing from src/sage/"
+    fail "$m listed in AGENTS.md but missing from src/sage/"
   fi
 done
 
