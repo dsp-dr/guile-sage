@@ -642,16 +642,23 @@ Handles both result.content (I20 path 2) and error (I20 path 1)."
        *mcp-servers*))
 
 (define (mcp-server-reachable?)
-  "Quick check if the default MCP server is network-reachable.
-Used to guard live integration tests. Uses curl with a short timeout
-to avoid hanging on the SSE long-lived connection."
+  "Quick check if a configured MCP server is network-reachable.
+Used to guard live integration tests. Reads SAGE_MCP_TEST_URL and optional
+SAGE_MCP_TEST_AUTH from the environment. Returns #f when unset."
   (catch #t
     (lambda ()
-      (let* ((cmd "curl -s --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' -H 'Accept: text/event-stream' http://192.168.86.100:8400/sse")
-             (pipe (open-input-pipe cmd))
-             (output (get-string-all pipe)))
-        (close-pipe pipe)
-        (equal? (string-trim-both output) "200")))
+      (let ((url (getenv "SAGE_MCP_TEST_URL"))
+            (auth (getenv "SAGE_MCP_TEST_AUTH")))
+        (and url
+             (let* ((auth-arg (if auth
+                                  (format #f " -H 'Authorization: Bearer ~a'" auth)
+                                  ""))
+                    (cmd (format #f "curl -s --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}'~a -H 'Accept: text/event-stream' ~a"
+                                 auth-arg url))
+                    (pipe (open-input-pipe cmd))
+                    (output (get-string-all pipe)))
+               (close-pipe pipe)
+               (equal? (string-trim-both output) "200")))))
     (lambda (key . args) #f)))
 
 (define (mcp-init)

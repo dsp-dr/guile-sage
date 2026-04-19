@@ -8,10 +8,9 @@
 - Model: glm-4.7 (cloud API)
 - Debug mode: ON
 
-## Gists
-- Analysis outputs (public): https://gist.github.com/dsp-dr/16435c3e3c7d6f65cb19b1393d6bd07b
-- Incident response playbook (secret): https://gist.github.com/dsp-dr/421f302d894617dc165ecde74409c1c6
-- Full transcript (secret): https://gist.github.com/dsp-dr/efd50239ec3a3ebb3525ffa9b10f3ecb
+## Artifacts
+- Full analysis outputs, incident response playbook, and session transcript
+  are retained privately (not linked from this public report).
 
 ## Analysis Outputs Generated
 1. Complete code review (B+ grade)

@@ -145,7 +145,7 @@
   (lambda ()
     (let* ((config `(("mcpServers" . (("skills-hub" .
                                         (("type" . "sse")
-                                         ("url" . "http://192.168.86.100:8400/sse")
+                                         ("url" . "http://203.0.113.10:8400/sse")
                                          ("headers" . (("Authorization" . "Bearer abc")))))
                                        ("stdio-srv" .
                                         (("command" . "node")
@@ -156,7 +156,7 @@
       (let ((first (car servers)))
         (assert-equal (assoc-ref first "name") "skills-hub"
                       "server name")
-        (assert-equal (assoc-ref first "url") "http://192.168.86.100:8400/sse"
+        (assert-equal (assoc-ref first "url") "http://203.0.113.10:8400/sse"
                       "server url")
         (assert-equal (assoc-ref (assoc-ref first "headers") "Authorization")
                       "Bearer abc"

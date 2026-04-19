@@ -17,7 +17,7 @@ are configured as =pre_call= content filters in LiteLLM.
 | guile-sage | 0.7.0 | SAGE_PROVIDER=openai |
 | LiteLLM | 1.83.4 | http://dev-host:4000 |
 | Model | gemini-2.5-flash | via LiteLLM proxy |
-| Auth | sk-litellm-local | master key |
+| Auth | ${LITELLM_KEY} | master key |
 
 ** Active Guardrails
 
@@ -148,7 +148,7 @@ including tool execution. Use =SAGE_STREAMING=0= for non-streaming
 #+BEGIN_SRC bash
 SAGE_PROVIDER=openai \
 SAGE_OPENAI_BASE=http://dev-host:4000/v1 \
-SAGE_OPENAI_API_KEY=sk-litellm-local \
+SAGE_OPENAI_API_KEY=${LITELLM_KEY} \
 SAGE_MODEL=gemini-2.5-flash \
 SAGE_MCP_DISABLE=1 \
 SAGE_STREAMING=0 \
@@ -161,7 +161,7 @@ Confirm guardrails evaluated per request:
 
 #+BEGIN_SRC bash
 curl -sS -D /tmp/headers.txt \
-  -H "Authorization: Bearer sk-litellm-local" \
+  -H "Authorization: Bearer ${LITELLM_KEY}" \
   -H "Content-Type: application/json" \
   http://dev-host:4000/v1/chat/completions \
   -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"test@example.com"}]}' \

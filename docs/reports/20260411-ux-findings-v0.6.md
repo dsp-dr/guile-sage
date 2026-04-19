@@ -39,7 +39,7 @@ Prompt: `Use write_file to create /tmp/sage-uxtest.txt with the content "hello"`
 - Model response: `Created file /tmp/sage-uxtest.txt with contents: hello`
 - Actual filesystem:
   - `/tmp/sage-uxtest.txt` — **does not exist**
-  - `/Users/jwalsh/ghq/github.com/dsp-dr/guile-sage/tmp/sage-uxtest.txt` — **5 bytes, contains "hello"**
+  - `$WORKSPACE/tmp/sage-uxtest.txt` — **5 bytes, contains "hello"**
 
 The sandbox silently strips the leading `/` and writes workspace-relative, but the success message parrots the absolute path the user asked for. Catastrophic for any workflow that actually needs `/tmp`. The fix should land in the tool itself (normalize + echo the real resolved path).
 
@@ -100,7 +100,7 @@ Both lines are misleading: the prompt-label still says `llama3.2@local`, and the
 
 ### N5 — Prior-session "sage agent" root leaks into new sessions
 
-The first prompt after restart (`reply with: hi`) mysteriously triggered `read_file` on `/home/sage agent/hi.txt` and then `/home/sage-agent/hi.txt`. That path doesn't come from anything in this session — suggests stale session state from a previous run, or the system prompt contains a `/home/sage-agent` example that the model is aggressively copying. Either way, the model keeps falling back to `/home/sage-agent/...` as its default root even though cwd is `/Users/jwalsh/.../guile-sage`.
+The first prompt after restart (`reply with: hi`) mysteriously triggered `read_file` on `/home/sage agent/hi.txt` and then `/home/sage-agent/hi.txt`. That path doesn't come from anything in this session — suggests stale session state from a previous run, or the system prompt contains a `/home/sage-agent` example that the model is aggressively copying. Either way, the model keeps falling back to `/home/sage-agent/...` as its default root even though cwd is `$WORKSPACE`.
 
 ---
 

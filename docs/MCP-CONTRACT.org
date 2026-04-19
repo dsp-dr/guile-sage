@@ -148,7 +148,7 @@ sequenceDiagram
     participant S as skills-hub<br/>(uvicorn)
 
     C->>T: (mcp-connect "http://nexus:8400/sse" token)
-    T->>S: GET /sse<br/>Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l<br/>Accept: text/event-stream
+    T->>S: GET /sse<br/>Authorization: Bearer <REDACTED-AUTH-TOKEN><br/>Accept: text/event-stream
     S-->>T: HTTP 200 text/event-stream (keep-alive)
     S-->>T: event: endpoint\ndata: /messages/?session_id=<hex>\n\n
     T->>T: derive POST endpoint = base + data
@@ -515,14 +515,14 @@ invariant has a short code (I##) so tests can reference it.
 
 All samples below are real bytes captured on 2026-04-11 against
 =${SKILLS_HUB_URL}/sse= with
-=Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l=.
+=Authorization: Bearer <REDACTED-AUTH-TOKEN>=.
 
 ** 7.1 SSE connect — endpoint event
 
 #+BEGIN_SRC http
 GET /sse HTTP/1.1
 Host: infra-host:8400
-Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l
+Authorization: Bearer <REDACTED-AUTH-TOKEN>
 Accept: text/event-stream
 #+END_SRC
 
@@ -845,7 +845,7 @@ returned. Timeouts are mandatory (invariant I12).
 #+BEGIN_SRC http
 POST /messages/?session_id=deadbeefdeadbeefdeadbeefdeadbeef HTTP/1.1
 Host: infra-host:8400
-Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l
+Authorization: Bearer <REDACTED-AUTH-TOKEN>
 Content-Type: application/json
 
 {"jsonrpc":"2.0","id":99,"method":"tools/list","params":{}}
@@ -1081,7 +1081,7 @@ set -o noglob  # zsh globs ?; matters for the session_id URL
 
 # 1. Open SSE channel in background
 curl -sSN \
-  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  -H 'Authorization: Bearer <REDACTED-AUTH-TOKEN>' \
   -H 'Accept: text/event-stream' \
   ${SKILLS_HUB_URL}/sse > /tmp/mcp-sse.log &
 
@@ -1093,25 +1093,25 @@ ENDPOINT="${SKILLS_HUB_URL}${SESSION_PATH}"
 
 # 3. initialize
 curl -sS -X POST -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  -H 'Authorization: Bearer <REDACTED-AUTH-TOKEN>' \
   --data-raw '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"roots":{"listChanged":true},"sampling":{}},"clientInfo":{"name":"guile-sage-probe","version":"0.1.0"}}}' \
   "$ENDPOINT"
 
 # 4. initialized notification
 curl -sS -X POST -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  -H 'Authorization: Bearer <REDACTED-AUTH-TOKEN>' \
   --data-raw '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
   "$ENDPOINT"
 
 # 5. tools/list
 curl -sS -X POST -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  -H 'Authorization: Bearer <REDACTED-AUTH-TOKEN>' \
   --data-raw '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
   "$ENDPOINT"
 
 # 6. tools/call (success)
 curl -sS -X POST -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer andhbHNoQG1pbmk6bm9uZTpub25l' \
+  -H 'Authorization: Bearer <REDACTED-AUTH-TOKEN>' \
   --data-raw '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"workflow__bd","arguments":{"query":"help"}}}' \
   "$ENDPOINT"
 

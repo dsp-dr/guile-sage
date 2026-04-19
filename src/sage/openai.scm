@@ -42,7 +42,7 @@
 (define (openai-api-key)
   (or (config-get "OPENAI_API_KEY")
       (getenv "SAGE_OPENAI_API_KEY")
-      "sk-litellm-local"))
+      "sk-no-key-set"))
 
 (define (openai-model)
   (or (config-get "MODEL")

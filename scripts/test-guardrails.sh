@@ -7,12 +7,12 @@
 # Usage:
 #   scripts/test-guardrails.sh                    # defaults
 #   MODEL=gemini-2.5-flash scripts/test-guardrails.sh
-#   LITELLM_URL=http://nexus:4000 scripts/test-guardrails.sh
+#   LITELLM_URL=http://proxy.example:4000 scripts/test-guardrails.sh
 
 set -eu
 
-LITELLM_URL="${LITELLM_URL:-http://192.168.86.22:4000}"
-LITELLM_KEY="${LITELLM_KEY:-sk-litellm-local}"
+LITELLM_URL="${LITELLM_URL:-http://localhost:4000}"
+LITELLM_KEY="${LITELLM_KEY:?LITELLM_KEY env var required}"
 MODEL="${MODEL:-gemini-2.5-flash}"
 TIMEOUT="${TIMEOUT:-30}"
 

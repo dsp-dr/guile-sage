@@ -152,10 +152,10 @@
 (run-test "endpoint derives :4318/v1/metrics from gRPC base"
   (lambda ()
     (unsetenv "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
-    (setenv "OTEL_EXPORTER_OTLP_ENDPOINT" "http://192.168.86.100:4317")
+    (setenv "OTEL_EXPORTER_OTLP_ENDPOINT" "http://203.0.113.10:4317")
     (telemetry-shutdown!)
     (telemetry-init)
-    (assert-equal (telemetry-endpoint) "http://192.168.86.100:4318/v1/metrics"
+    (assert-equal (telemetry-endpoint) "http://203.0.113.10:4318/v1/metrics"
                   ":4317 -> :4318 substitution + /v1/metrics suffix")))
 
 ;;; ----- Flush backoff tests -----

@@ -303,4 +303,3 @@ Why deferred:
   (mirrored from gist =aygp-dr/3e394bc89d3a8581eef96b27095b54a7=)
 - Late-bound module-ref pattern: =src/sage/context.scm:103= (commit b39f0e4)
 - Dashboard mutation script: =tmp/dashboard-add-guile-sage.py=
-- Plan that drove this work: =/Users/jwalsh/.claude/plans/curious-knitting-kahan.md=
