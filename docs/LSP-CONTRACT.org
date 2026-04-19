@@ -20,6 +20,10 @@ Language Server Protocol (LSP) server. It captures:
 The authoritative spec is LSP 3.17:
 https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/
 
+*Companion contract:* =docs/LSP-CLIENT-CONTRACT.org= specifies sage as
+an LSP /client/ consuming external language servers (typescript,
+ruby-lsp, pylsp) — independent from this server-mode contract.
+
 *Status:* N/A --- speculative feature. No implementation exists yet.
 This contract defines the target behavior for =src/sage/lsp.scm=.
 
