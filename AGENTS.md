@@ -332,7 +332,8 @@ bd show guile-xxx                  # Shows "in_progress"
        ▼                   ▼                   ▼
    ┌───────────────────────────────────────────────┐
    │              Beads Task Queue                 │
-   │  (.beads/issues.jsonl - shared via git)      │
+   │  (.beads/issues.jsonl - local; synced via     │
+   │   `bd dolt push` to Dolt remote, not git)    │
    └───────────────────────────────────────────────┘
 ```
 
