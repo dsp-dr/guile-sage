@@ -1,0 +1,23 @@
+Attribution: Claude Opus 4.7 (1M context) pair-programming with Aidan Pace
+Tests: N/A — docs-only change, no code path touched. Validated by:
+  - test -f SECURITY.md
+  - wc -l SECURITY.md → 100 (< 150 target)
+  - grep for required sections: Supported Versions, Reporting a
+    Vulnerability, Response SLA, Disclosure Timeline, Scope all
+    present
+Conjecture: A SECURITY.md with a private channel, SLAs, and
+  coordinated-disclosure timeline closes the 'no disclosure path'
+  gap from Legal appraisal and satisfies GitHub's security policy
+  expectation (repo-root SECURITY.md gets special rendering and
+  a Security tab pointer).
+Validation: Linked from README.org (new 'Security' section) and
+  CONTRIBUTING.org (prepended 'Reporting Security Issues' block
+  before dev setup). Both link to SECURITY.md and repeat the
+  'no public issues' rule so it is discoverable from either doc
+  entry point.
+Research: Scope list enumerates sage-specific risks (tool sandbox,
+  YOLO-mode threat model, MCP client, .env handling) and routes
+  Ollama/LiteLLM/Gemini issues upstream. Severity targets derived
+  from common open-source norms (critical 14d, high 30d, med 60d).
+  Pre-1.0 supported-versions table is explicitly provisional and
+  scheduled to shift after 1.0 ships.
