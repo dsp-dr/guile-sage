@@ -20,6 +20,7 @@
   #:use-module (sage model-tier)
   #:use-module (sage status)
   #:use-module (sage commands)
+  #:use-module (sage hooks)
   #:use-module (sage telemetry)
   #:use-module (sage mcp)
   #:use-module (srfi srfi-1)
@@ -184,6 +185,22 @@
     (newline)
     ;; Reset context warnings so they can re-fire if usage grows again
     (reset-fired-thresholds!))
+  #t)
+
+(define (cmd-hooks args)
+  "List registered lifecycle hooks (PreToolUse + PostToolUse)."
+  (let ((by-event (hook-list)))
+    (if (every (lambda (slot) (null? (cdr slot))) by-event)
+        (display "No hooks registered.\n")
+        (for-each
+         (lambda (slot)
+           (format #t "~a:~%" (car slot))
+           (if (null? (cdr slot))
+               (display "  (none)\n")
+               (for-each (lambda (name)
+                           (format #t "  - ~a~%" name))
+                         (cdr slot))))
+         by-event)))
   #t)
 
 (define (cmd-context args)
@@ -540,6 +557,7 @@
     ("/stats"     . ,cmd-status)
     ("/compact"   . ,cmd-compact)
     ("/context"   . ,cmd-context)
+    ("/hooks"     . ,cmd-hooks)
     ("/model"     . ,cmd-model)
     ("/models"    . ,cmd-models)
     ("/save"      . ,cmd-save)
