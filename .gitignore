@@ -40,3 +40,10 @@ tests/fixtures/test-*.png
 .beads-credential-key
 __pycache__/
 experiments/
+
+# Beads runtime state — treated as local by `bd`, synced via `bd dolt push`
+# to a separate Dolt remote. Tracking in git creates a second source of truth
+# that drifts, and historical entries contain real contributor emails.
+# Keep .beads/config.yaml and .beads/README.md tracked (safe metadata).
+.beads/issues.jsonl
+.beads/interactions.jsonl
