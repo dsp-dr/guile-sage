@@ -97,6 +97,34 @@ Enable YOLO mode for unsafe tools: =SAGE_YOLO_MODE=1 make run= or =make run-yolo
 - Context compaction for long conversations
 - Statistics tracking (tokens, requests, tool calls)
 
+** Responsible Use
+
+guile-sage is a *permissive* AI coding agent by design. Several features
+shift safety decisions onto the operator:
+
+- =SAGE_YOLO_MODE=1= disables the safe/unsafe tool separation documented
+  in =docs/adr/0003-security-model.md=. In YOLO mode the agent can
+  write files, commit, push to remotes, and evaluate arbitrary Scheme.
+- The =eval_scheme= tool evaluates arbitrary expressions with the REPL's
+  process privileges. There is no sandbox — it can read =.env=,
+  shell out, or exfiltrate data if an attacker controls the prompt.
+- Autonomous modes (=agent-mode= interactive/autonomous/yolo) allow
+  long-running multi-step actions without human confirmation per step.
+
+*You, the operator, are responsible for:*
+- Running sage on systems whose blast radius you accept
+- Vetting prompts before autonomous runs
+- Not connecting sage to production credentials or systems you cannot
+  afford to lose
+- Reviewing generated code before merging or deploying
+- Treating model output as untrusted input (see =docs/adr/0003-security-model.md=)
+
+*Recommended starting posture:*
+- Leave =SAGE_YOLO_MODE= unset (safe tools only)
+- Use =interactive= agent mode until you trust a given task
+- Point sage at a scratch workspace, not your primary checkout
+- Review all diffs before commit
+
 ** Requirements
 
 - Guile 3.0+
