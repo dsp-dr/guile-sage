@@ -14,9 +14,13 @@
 
 [[file:docs/images/demo.gif]]
 
-Short recording: REPL startup, =/status=, =/tools=, one model turn, =/exit=.
-Rebuild with =make demo= (requires =asciinema=, =agg=, a local Ollama running
-=qwen3:0.6b=).
+Short recording (61 s, rendered at 2×): sage opens the =examples/petstore/=
+project, lists the built-in tool catalogue, reads =README.md= with a visible
+=[Tool: read_file]= trace, inspects the conversation =/context=, compacts
+history with =/compact 2=, then issues a =search_files= tool call against
+=*.py= — demonstrating the core primitives that make sage local-first and
+auditable. Rebuild with =make demo= (requires =asciinema=, =agg=, and a
+local Ollama running =llama3.2:latest=).
 
 ** Overview
 

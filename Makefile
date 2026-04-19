@@ -257,9 +257,11 @@ timing-bench:
 demo:
 	@command -v asciinema >/dev/null 2>&1 || { echo "asciinema required: brew install asciinema"; exit 1; }
 	@command -v agg >/dev/null 2>&1 || { echo "agg required: brew install agg"; exit 1; }
-	@asciinema rec -c scripts/demo.sh --rows 30 --cols 100 --overwrite docs/images/demo.cast
-	@sed -i.bak 's/@[^:]*:dsp-dr\/guile-sage/@host:dsp-dr\/guile-sage/g' docs/images/demo.cast && rm docs/images/demo.cast.bak
-	@agg --cols 100 --rows 30 --font-size 14 --theme monokai docs/images/demo.cast docs/images/demo.gif
+	@asciinema rec -c scripts/demo.sh --rows 36 --cols 110 --overwrite docs/images/demo.cast
+	@sed -i.bak 's/@[^:]*:dsp-dr\/guile-sage/@host:dsp-dr\/guile-sage/g' docs/images/demo.cast
+	@sed -i.bak 's|/Users/[^/]*/ghq/github.com/dsp-dr/guile-sage|/workspace/guile-sage|g' docs/images/demo.cast
+	@rm docs/images/demo.cast.bak
+	@agg --cols 110 --rows 36 --font-size 13 --speed 2 --theme monokai docs/images/demo.cast docs/images/demo.gif
 	@echo "Wrote docs/images/demo.gif"
 
 # Version bumping (semantic versioning)
