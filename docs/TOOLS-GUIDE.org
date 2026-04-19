@@ -90,18 +90,18 @@ END:VCARD"
 ** QR Code (No MCP Needed)
 
 #+begin_src scheme
+;; IMPORTANT: argv-based (no shell). Never shell-interpolate
+;; attacker-controlled strings. See ADR-0003 and bd guile-sage-9j7.
 (register-tool
  "qrcode"
  "Generate QR code ASCII art"
  '(("type" . "object")
    ("properties" . (("text" . (("type" . "string"))))))
  (lambda (args)
-   (let* ((text (assoc-ref args "text"))
-          (tmp (format #f "/tmp/sage-qr-~a" (getpid))))
-     (system (format #f "qrencode -t UTF8 '~a' > ~a" text tmp))
-     (let ((result (call-with-input-file tmp get-string-all)))
-       (delete-file tmp)
-       result))))
+   (let ((text (assoc-ref args "text")))
+     ;; capture-argv-in-dir is defined in src/sage/tools.scm; it
+     ;; fork+exec's PROG with ARGS as argv and returns stdout.
+     (capture-argv-in-dir (workspace) "qrencode" "-t" "UTF8" text))))
 #+end_src
 
 ** Dynamic Tool Creation
@@ -123,12 +123,16 @@ END:VCARD"
     "Unsafe path")
 #+end_src
 
-** Shell Commands
+** Shell Commands (prefer argv, never string-interpolate user data)
 #+begin_src scheme
-(let ((tmp (format #f "/tmp/sage-~a" (getpid))))
-  (system (format #f "cmd > ~a 2>&1" tmp))
-  (let ((r (call-with-input-file tmp get-string-all)))
-    (delete-file tmp) r))
+;; DO: use capture-argv-in-dir (from src/sage/tools.scm). It fork+exec's
+;; the program with arguments as separate argv elements — no /bin/sh is
+;; involved, so shell metachars in arguments are treated literally.
+(capture-argv-in-dir (workspace) "cmd" "arg1" "arg2")
+
+;; DON'T: `(system (format #f "cmd ~a > /tmp/out" user-input))`.
+;; Any metachar in user-input (;, |, &, `, $, newline) gives the
+;; caller arbitrary shell execution. See bd guile-sage-9j7 / 07f.
 #+end_src
 
 ** HTTP Requests

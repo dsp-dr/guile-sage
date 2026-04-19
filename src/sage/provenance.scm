@@ -121,8 +121,11 @@ Uses the default GPG key.  Fails gracefully — never breaks the HTTP path."
                  (_ (call-with-output-file tmp
                       (lambda (p) (display record-str p))))
                  (sig-file (string-append tmp ".asc"))
-                 (rc (system (format #f "gpg --batch --yes --detach-sign --armor -o '~a' '~a' 2>/dev/null"
-                                     sig-file tmp))))
+                 ;; bd: guile-sage-9j7/07f — argv-based gpg. tmp and
+                 ;; sig-file are pid-derived so not attacker-controlled,
+                 ;; but we avoid /bin/sh on principle.
+                 (rc (prov-exec "gpg" "--batch" "--yes" "--detach-sign"
+                                "--armor" "-o" sig-file tmp)))
             (if (zero? rc)
                 (let ((sig (call-with-input-file sig-file get-string-all)))
                   (delete-file tmp)
@@ -141,6 +144,25 @@ Uses the default GPG key.  Fails gracefully — never breaks the HTTP path."
 
 (define (shell-escape str)
   (string-replace-all str "'" "'\\''"))
+
+;;; bd: guile-sage-9j7/07f — local argv-based system* helper.
+;;; Can't use a shared helper because util imports provenance.
+;;; primitive-fork + execlp dodges shell injection and the macOS
+;;; Guile 3.0.11 spawn+bad-FD bug.
+(define (prov-exec prog . args)
+  (catch #t
+    (lambda ()
+      (let ((pid (primitive-fork)))
+        (cond
+         ((= pid 0)
+          (catch #t
+            (lambda () (apply execlp prog prog args))
+            (lambda args (primitive-exit 127))))
+         (else
+          (let* ((pair (waitpid pid))
+                 (status (cdr pair)))
+            (or (status:exit-val status) 1))))))
+    (lambda args 127)))
 
 ;;; ============================================================
 ;;; ISO 8601 timestamp
@@ -190,8 +212,9 @@ Returns an alist: hash, url, fetched-at, wrapped, and optionally gpg-sig."
     (lambda ()
       (let* ((path (provenance-log-file))
              (dir  (dirname path)))
+        ;; bd: guile-sage-9j7/07f — argv-based mkdir via prov-exec.
         (unless (file-exists? dir)
-          (system (format #f "mkdir -p '~a'" dir)))
+          (prov-exec "mkdir" "-p" dir))
         (let ((port (open-file path "a")))
           ;; Minimal JSONL — no dependency on json-write-string to avoid
           ;; circular imports from util.

@@ -14,6 +14,17 @@
 (include "test-harness.scm")
 (test-begin "expect-provenance")
 
+;; bd: guile-sage-9j7/07f — argv-based subprocess via primitive-fork
+;; + execlp. Test paths are pid-derived so defence-in-depth only.
+(define (exec-argv prog . args)
+  (let ((pid (primitive-fork)))
+    (cond
+     ((= pid 0)
+      (catch #t
+        (lambda () (apply execlp prog prog args))
+        (lambda args (primitive-exit 127))))
+     (else (waitpid pid)))))
+
 ;;; ============================================================
 ;;; xml-wrap: exact output
 ;;; ============================================================
@@ -181,7 +192,7 @@
     (let* ((tmp-dir (format #f "/tmp/sage-prov-test-~a" (getpid)))
            (tmp-file (string-append tmp-dir "/provenance.jsonl")))
       ;; Set up temp log dir
-      (system (format #f "mkdir -p '~a'" tmp-dir))
+      (exec-argv "mkdir" "-p" tmp-dir)
       (setenv "SAGE_LOG_DIR" tmp-dir)
       (setenv "SAGE_PROVENANCE" "1")
       ;; Write one entry
@@ -203,13 +214,13 @@
       ;; Clean up
       (setenv "SAGE_PROVENANCE" #f)
       (setenv "SAGE_LOG_DIR" #f)
-      (system (format #f "rm -rf '~a'" tmp-dir)))))
+      (exec-argv "rm" "-rf" tmp-dir))))
 
 (run-test "provenance-log! escapes URLs with quotes"
   (lambda ()
     (let* ((tmp-dir (format #f "/tmp/sage-prov-test2-~a" (getpid)))
            (tmp-file (string-append tmp-dir "/provenance.jsonl")))
-      (system (format #f "mkdir -p '~a'" tmp-dir))
+      (exec-argv "mkdir" "-p" tmp-dir)
       (setenv "SAGE_LOG_DIR" tmp-dir)
       (setenv "SAGE_PROVENANCE" "1")
       (provenance-log! "http://a.com/path?q=\"val\"" 200 0 "deadbeef")
@@ -219,13 +230,13 @@
         (assert-not-contains line "\"val\"\"" "raw quotes should not appear"))
       (setenv "SAGE_PROVENANCE" #f)
       (setenv "SAGE_LOG_DIR" #f)
-      (system (format #f "rm -rf '~a'" tmp-dir)))))
+      (exec-argv "rm" "-rf" tmp-dir))))
 
 (run-test "provenance-log! appends multiple lines"
   (lambda ()
     (let* ((tmp-dir (format #f "/tmp/sage-prov-test3-~a" (getpid)))
            (tmp-file (string-append tmp-dir "/provenance.jsonl")))
-      (system (format #f "mkdir -p '~a'" tmp-dir))
+      (exec-argv "mkdir" "-p" tmp-dir)
       (setenv "SAGE_LOG_DIR" tmp-dir)
       (setenv "SAGE_PROVENANCE" "1")
       (provenance-log! "http://a.com/1" 200 10 "hash1")
@@ -243,7 +254,7 @@
                          "line 3 code"))
       (setenv "SAGE_PROVENANCE" #f)
       (setenv "SAGE_LOG_DIR" #f)
-      (system (format #f "rm -rf '~a'" tmp-dir)))))
+      (exec-argv "rm" "-rf" tmp-dir))))
 
 ;;; ============================================================
 ;;; provenance-enabled?: exact behavior

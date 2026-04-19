@@ -17,6 +17,7 @@
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
   #:use-module (ice-9 ftw)
+  #:use-module (ice-9 popen)
   #:use-module (ice-9 regex)
   #:use-module (ice-9 textual-ports)
   #:use-module (ice-9 eval-string)
@@ -126,6 +127,96 @@
   (catch #t
     (lambda () (canonicalize-path path))
     (lambda args path)))
+
+;;; ============================================================
+;;; Safe subprocess execution
+;;; ============================================================
+;;;
+;;; SECURITY (bd: guile-sage-9j7 / guile-sage-07f): Tool
+;;; implementations historically built shell commands via
+;;; (system (string-append "cd ~a && git add ~a && git commit ..."
+;;;                        workspace files msg))
+;;; which is a textbook shell-injection vector — any attacker-controlled
+;;; metachar in workspace paths, file lists, or commit messages becomes
+;;; arbitrary shell execution.
+;;;
+;;; We use `primitive-fork + execlp` (not system*/spawn) for two reasons:
+;;; 1. argv-based exec: shell metachars in ARGS are treated as literal
+;;;    bytes, not parsed as shell syntax.
+;;; 2. dodges the known macOS Guile 3.0.11 spawn+bad-FD bug that makes
+;;;    `system*` and `open-pipe*` fail with "Bad file descriptor".
+;;;
+;;; `argv-clean?` is a defence-in-depth string check; primary defence
+;;; is the argv-based exec path which doesn't interpret shell metachars
+;;; at all.
+
+(define %shell-meta-re
+  ;; Characters that, in a shell context, change the meaning of a
+  ;; command: ;, |, &, `, $, newline, carriage-return, <, >.
+  (make-regexp "[;|&`$\n\r<>]"))
+
+(define (argv-clean? s)
+  "Return #t if S is a string with no shell metacharacters. Used as a
+defence-in-depth check on top of argv-based subprocess invocation."
+  (and (string? s)
+       (not (regexp-exec %shell-meta-re s))))
+
+(define (capture-argv-in-dir dir prog . args)
+  "Run PROG with ARGS as argv in directory DIR, capturing stdout+stderr.
+Uses primitive-fork + execlp so no /bin/sh is involved. Returns the
+combined output as a string. On any error returns \"\"."
+  (catch #t
+    (lambda ()
+      (let* ((p (pipe))
+             (read-port (car p))
+             (write-port (cdr p))
+             (pid (primitive-fork)))
+        (cond
+         ((= pid 0)
+          (close-port read-port)
+          (chdir dir)
+          (dup2 (fileno write-port) 1)
+          (dup2 (fileno write-port) 2)
+          (close-port write-port)
+          (catch #t
+            (lambda () (apply execlp prog prog args))
+            (lambda args (primitive-exit 127))))
+         (else
+          (close-port write-port)
+          (let ((out (get-string-all read-port)))
+            (close-port read-port)
+            (waitpid pid)
+            out)))))
+    (lambda args "")))
+
+(define (run-argv-in-dir dir prog . args)
+  "Like capture-argv-in-dir but returns (status . output) so callers
+that care about the exit code (git_push, git_commit) can surface it."
+  (catch #t
+    (lambda ()
+      (let* ((p (pipe))
+             (read-port (car p))
+             (write-port (cdr p))
+             (pid (primitive-fork)))
+        (cond
+         ((= pid 0)
+          (close-port read-port)
+          (chdir dir)
+          (dup2 (fileno write-port) 1)
+          (dup2 (fileno write-port) 2)
+          (close-port write-port)
+          (catch #t
+            (lambda () (apply execlp prog prog args))
+            (lambda args (primitive-exit 127))))
+         (else
+          (close-port write-port)
+          (let ((out (get-string-all read-port)))
+            (close-port read-port)
+            (let* ((status-pair (waitpid pid))
+                   (status (cdr status-pair))
+                   (code (status:exit-val status)))
+              (cons (or code 1) out)))))))
+    (lambda args (cons 127 ""))))
 
 ;;; register-tool: Register a new tool
 ;;; Arguments:
@@ -288,6 +379,8 @@
            (format #f "Unsafe path: ~a" path)))))
 
   ;; git_status
+  ;; bd: guile-sage-9j7/07f — used to shell-interpolate workspace path.
+  ;; Now argv-based via capture-argv-in-dir (no /bin/sh).
   (register-tool
    "git_status"
    "Get git status of workspace"
@@ -295,14 +388,9 @@
      ("properties" . ())
      ("required" . #()))
    (lambda (args)
-     (let ((cmd (format #f "cd ~a && git status --porcelain 2>&1" (workspace))))
-       (let* ((tmp (format #f "/tmp/sage-git-~a" (getpid))))
-         (system (string-append cmd " > " tmp))
-         (let ((result (call-with-input-file tmp get-string-all)))
-           (delete-file tmp)
-           result)))))
+     (capture-argv-in-dir (workspace) "git" "status" "--porcelain")))
 
-  ;; git_diff
+  ;; git_diff — argv-based, no shell (bd: guile-sage-9j7/07f).
   (register-tool
    "git_diff"
    "Get git diff of workspace"
@@ -311,17 +399,13 @@
                                    ("description" . "Show staged changes only")))))
      ("required" . #()))
    (lambda (args)
-     (let* ((staged (assoc-ref args "staged"))
-            (cmd (format #f "cd ~a && git diff ~a 2>&1"
-                         (workspace)
-                         (if staged "--staged" ""))))
-       (let* ((tmp (format #f "/tmp/sage-git-~a" (getpid))))
-         (system (string-append cmd " > " tmp))
-         (let ((result (call-with-input-file tmp get-string-all)))
-           (delete-file tmp)
-           result)))))
+     (let ((staged (assoc-ref args "staged")))
+       (if staged
+           (capture-argv-in-dir (workspace) "git" "diff" "--staged")
+           (capture-argv-in-dir (workspace) "git" "diff")))))
 
-  ;; git_log
+  ;; git_log — argv-based; count coerced to integer string so a crafted
+  ;; value cannot inject flags (bd: guile-sage-9j7/07f).
   (register-tool
    "git_log"
    "Get git log of workspace"
@@ -330,16 +414,16 @@
                                   ("description" . "Number of commits to show")))))
      ("required" . #()))
    (lambda (args)
-     (let* ((count (or (assoc-ref args "count") 10))
-            (cmd (format #f "cd ~a && git log --oneline -n ~a 2>&1"
-                         (workspace) count)))
-       (let* ((tmp (format #f "/tmp/sage-git-~a" (getpid))))
-         (system (string-append cmd " > " tmp))
-         (let ((result (call-with-input-file tmp get-string-all)))
-           (delete-file tmp)
-           result)))))
+     (let* ((count (coerce->int (assoc-ref args "count") 10))
+            (count-str (number->string count)))
+       (capture-argv-in-dir (workspace) "git" "log" "--oneline"
+                            "-n" count-str))))
 
   ;; search_files
+  ;; bd: guile-sage-9j7/07f — previously shell-interpolated pattern,
+  ;; file-pattern, and scope-path. A pattern like "foo'; rm -rf / #"
+  ;; escaped the quotes and ran rm. Now grep is fork+exec'd with argv
+  ;; directly; head -200 truncation is replicated in-process.
   (register-tool
    "search_files"
    "Search for pattern in files (optionally scoped to a subdirectory)"
@@ -354,34 +438,32 @@
                                   ("description" . "Treat pattern as regex (default: false)")))))
      ("required" . #("pattern")))
    (lambda (args)
-     ;; bd: guile-tpf — schema previously didn't expose a path/scope arg,
-     ;; so models had no way to scope a search and the implementation
-     ;; always grepped from workspace root then truncated to head -50.
-     ;; Now: accept path, validate via safe-path?, walk grep from there.
      (let* ((pattern (assoc-ref args "pattern"))
             (raw-path (or (assoc-ref args "path") "."))
             (file-pattern (or (assoc-ref args "file_pattern") "*"))
             (use-regex (assoc-ref args "regex"))
-            ;; Use -F for fixed strings by default to avoid escaping issues
             (grep-flag (if use-regex "-r" "-rF")))
        (cond
         ((not (safe-path? raw-path))
          (format #f "Unsafe path: ~a" raw-path))
         (else
          (let* ((scope-path (if (equal? raw-path ".") "." raw-path))
-                ;; --include= MUST come before -- so grep treats it as a
-                ;; flag rather than a filename. -- '~a' protects against
-                ;; patterns starting with -. head -200 (was 50) gives
-                ;; narrower scopes a fair shot at filling the window.
-                (cmd (format #f "cd ~a && grep ~a --include='~a' -- '~a' ~a 2>&1 | head -200"
-                             (workspace) grep-flag file-pattern pattern scope-path))
-                (tmp (format #f "/tmp/sage-grep-~a" (getpid))))
-           (system (string-append cmd " > " tmp))
-           (let ((result (call-with-input-file tmp get-string-all)))
-             (delete-file tmp)
-             result)))))))
+                (raw-out (capture-argv-in-dir
+                          (workspace)
+                          "grep"
+                          grep-flag
+                          (string-append "--include=" file-pattern)
+                          "--"
+                          pattern
+                          scope-path))
+                (lines (string-split raw-out #\newline))
+                (kept (if (> (length lines) 200)
+                          (take lines 200)
+                          lines)))
+           (string-join kept "\n")))))))
 
-  ;; glob_files
+  ;; glob_files — argv-based find; name pattern never touches /bin/sh
+  ;; (bd: guile-sage-9j7/07f).
   (register-tool
    "glob_files"
    "Find files matching glob pattern"
@@ -391,18 +473,17 @@
      ("required" . #("pattern")))
    (lambda (args)
      (let* ((pattern (assoc-ref args "pattern"))
-            ;; Split pattern into directory and filename parts for find
-            ;; This fixes issues where patterns like "src/*.scm" fail
             (dir-part (dirname pattern))
             (name-part (basename pattern))
             (search-path (if (equal? dir-part ".") "." dir-part))
-            (cmd (format #f "cd ~a && find ~a -name '~a' 2>&1 | head -100"
-                         (workspace) search-path name-part)))
-       (let* ((tmp (format #f "/tmp/sage-find-~a" (getpid))))
-         (system (string-append cmd " > " tmp))
-         (let ((result (call-with-input-file tmp get-string-all)))
-           (delete-file tmp)
-           result)))))
+            (raw-out (capture-argv-in-dir (workspace)
+                                          "find" search-path
+                                          "-name" name-part))
+            (lines (string-split raw-out #\newline))
+            (kept (if (> (length lines) 100)
+                      (take lines 100)
+                      lines)))
+       (string-join kept "\n"))))
 
   ;; ============================================================
   ;; Self-Modification Tools
@@ -439,6 +520,11 @@
            (format #f "Unsafe path: ~a" path)))))
 
   ;; run_tests - Execute test suite
+  ;; bd: guile-sage-9j7/07f — previously built a shell for-loop that
+  ;; interpolated PATTERN into the command and used $(command -v ...)
+  ;; for guile path. An attacker-controlled pattern could inject. Now
+  ;; we expand the glob in-process (scandir + regex) and exec guile
+  ;; with argv.
   (register-tool
    "run_tests"
    "Run the test suite"
@@ -448,27 +534,70 @@
      ("required" . #()))
    (lambda (args)
      (let* ((pattern (or (assoc-ref args "pattern") "test-*.scm"))
-            ;; Use command -v to find guile (guile3 on FreeBSD, guile on macOS)
-            (guile-bin "$(command -v guile3 2>/dev/null || command -v guile)")
-            (cmd (format #f "cd ~a && for test in tests/~a; do ~a -L src $test 2>&1; done"
-                         (workspace) pattern guile-bin))
-            (tmp (format #f "/tmp/sage-test-~a" (getpid))))
-       (system (string-append cmd " > " tmp " 2>&1"))
-       (let* ((raw (call-with-input-file tmp get-string-all))
-              ;; Strip ANSI escape codes (colors, cursor movement)
-              (stripped (regexp-substitute/global #f "\x1b\\[[0-9;]*[a-zA-Z]" raw 'pre 'post))
-              ;; Truncate to 4096 chars to avoid blowing up context window
-              (max-len 4096)
-              (truncated (if (> (string-length stripped) max-len)
-                             (string-append (substring stripped 0 max-len)
-                                            "\n... [truncated, "
-                                            (number->string (string-length stripped))
-                                            " chars total]")
-                             stripped)))
-         (delete-file tmp)
-         truncated))))
+            (tests-dir (string-append (workspace) "/tests"))
+            (guile-bin (or (find file-exists?
+                                 '("/usr/local/bin/guile3"
+                                   "/usr/bin/guile3"
+                                   "/opt/homebrew/bin/guile3"
+                                   "/usr/local/bin/guile"
+                                   "/usr/bin/guile"
+                                   "/opt/homebrew/bin/guile"))
+                           "guile"))
+            (safe-pat? (and (string? pattern)
+                            (not (string-contains pattern "/"))
+                            (argv-clean? pattern)))
+            (glob->re (lambda (p)
+                        (let loop ((chars (string->list p))
+                                   (acc '(#\^)))
+                          (cond
+                           ((null? chars) (list->string (reverse (cons #\$ acc))))
+                           ((char=? (car chars) #\*)
+                            (loop (cdr chars) (append (list #\* #\.) acc)))
+                           ((char=? (car chars) #\?)
+                            (loop (cdr chars) (cons #\. acc)))
+                           ((memv (car chars)
+                                  '(#\. #\+ #\( #\) #\[ #\] #\{ #\} #\\))
+                            (loop (cdr chars)
+                                  (cons (car chars) (cons #\\ acc))))
+                           (else
+                            (loop (cdr chars) (cons (car chars) acc))))))))
+       (cond
+        ((not safe-pat?)
+         (format #f "Unsafe pattern: ~a" pattern))
+        ((not (file-exists? tests-dir))
+         "No tests/ directory")
+        (else
+         (let* ((re (make-regexp (glob->re pattern)))
+                (entries (catch #t
+                           (lambda () (scandir tests-dir))
+                           (lambda args '())))
+                (matches (filter (lambda (f) (regexp-exec re f)) (or entries '())))
+                (raw (string-concatenate
+                      (map (lambda (test-file)
+                             (capture-argv-in-dir
+                              (workspace)
+                              guile-bin "-L" "src"
+                              (string-append "tests/" test-file)))
+                           (sort matches string<?))))
+                (stripped (regexp-substitute/global
+                           #f "\x1b\\[[0-9;]*[a-zA-Z]" raw 'pre 'post))
+                (max-len 4096)
+                (truncated (if (> (string-length stripped) max-len)
+                               (string-append (substring stripped 0 max-len)
+                                              "\n... [truncated, "
+                                              (number->string (string-length stripped))
+                                              " chars total]")
+                               stripped)))
+           truncated))))))
 
   ;; git_commit - Make atomic commits
+  ;; bd: guile-sage-9j7/07f — CRITICAL FIX. Commit messages and file
+  ;; paths were shell-interpolated into a single `/bin/sh -c` command.
+  ;; A message like "fix'; rm -rf $HOME; echo '" escaped the quoted
+  ;; context and ran arbitrary commands. Now git add/commit are fork
+  ;; +exec'd separately with argv; message and filenames are literal
+  ;; argv elements. Also: reject file paths with shell metachars or
+  ;; `..` — no legitimate path needs those.
   (register-tool
    "git_commit"
    "Stage files and create a git commit"
@@ -482,20 +611,41 @@
    (lambda (args)
      (let* ((files (assoc-ref args "files"))
             (message (assoc-ref args "message"))
-            (file-list (if (list? files)
-                           (string-join files " ")
-                           files))
-            (tmp (format #f "/tmp/sage-commit-~a" (getpid)))
+            (file-list (cond
+                        ((list? files) files)
+                        ((string? files) (list files))
+                        (else '())))
             (coauthor (or (getenv "SAGE_COAUTHOR")
                           "Sage <sage@users.noreply.github.com>"))
-            (cmd (format #f "cd ~a && git add ~a && git commit -m '~a\n\nCo-Authored-By: ~a'"
-                         (workspace) file-list message coauthor)))
-       (system (string-append cmd " > " tmp " 2>&1"))
-       (let ((result (call-with-input-file tmp get-string-all)))
-         (delete-file tmp)
-         result))))
+            (full-msg (string-append message
+                                     "\n\nCo-Authored-By: " coauthor)))
+       (cond
+        ((not (string? message))
+         "Error: message must be a string")
+        ((null? file-list)
+         "Error: files is empty")
+        ((not (every (lambda (f)
+                       (and (string? f)
+                            (argv-clean? f)
+                            (not (string-contains f ".."))))
+                     file-list))
+         "Error: file list contains unsafe path(s)")
+        (else
+         (let* ((add-result (apply run-argv-in-dir
+                                   (workspace) "git" "add" "--" file-list))
+                (add-status (car add-result))
+                (add-out (cdr add-result)))
+           (if (not (zero? add-status))
+               (format #f "git add failed (status ~a):\n~a" add-status add-out)
+               (let* ((commit-result (run-argv-in-dir
+                                      (workspace)
+                                      "git" "commit" "-m" full-msg))
+                      (commit-out (cdr commit-result)))
+                 (string-append add-out commit-out)))))))))
 
   ;; git_add_note - Add git notes for documentation
+  ;; bd: guile-sage-9j7/07f — message passed as argv, not interpolated
+  ;; into a shell-quoted string.
   (register-tool
    "git_add_note"
    "Add a git note to the current HEAD commit"
@@ -504,18 +654,20 @@
                                     ("description" . "Note message")))))
      ("required" . #("message")))
    (lambda (args)
-     (let* ((message (assoc-ref args "message"))
-            (tmp (format #f "/tmp/sage-note-~a" (getpid)))
-            (cmd (format #f "cd ~a && git notes add -f -m '~a'"
-                         (workspace) message)))
-       (system (string-append cmd " > " tmp " 2>&1"))
-       (let ((result (call-with-input-file tmp get-string-all)))
-         (delete-file tmp)
-         (if (string-null? (string-trim-both result))
-             "Note added successfully"
-             result)))))
+     (let ((message (assoc-ref args "message")))
+       (if (not (string? message))
+           "Error: message must be a string"
+           (let* ((res (run-argv-in-dir
+                        (workspace)
+                        "git" "notes" "add" "-f" "-m" message))
+                  (out (cdr res)))
+             (if (string-null? (string-trim-both out))
+                 "Note added successfully"
+                 out))))))
 
   ;; git_push - Push commits to remote
+  ;; bd: guile-sage-9j7/07f — remote/branch are argv elements. Reject
+  ;; values containing shell metachars since git ref names never do.
   (register-tool
    "git_push"
    "Push commits to the remote repository"
@@ -527,19 +679,20 @@
      ("required" . #()))
    (lambda (args)
      (let* ((remote (or (assoc-ref args "remote") "origin"))
-            (branch (assoc-ref args "branch"))
-            (tmp (format #f "/tmp/sage-push-~a" (getpid)))
-            (cmd (if branch
-                     (format #f "cd ~a && git push ~a ~a"
-                             (workspace) remote branch)
-                     (format #f "cd ~a && git push ~a"
-                             (workspace) remote))))
-       (system (string-append cmd " > " tmp " 2>&1"))
-       (let ((result (call-with-input-file tmp get-string-all)))
-         (delete-file tmp)
-         (if (string-null? (string-trim-both result))
-             "Push completed (no output)"
-             result)))))
+            (branch (assoc-ref args "branch")))
+       (cond
+        ((not (argv-clean? remote))
+         "Error: remote name contains unsafe characters")
+        ((and branch (not (argv-clean? branch)))
+         "Error: branch name contains unsafe characters")
+        (else
+         (let* ((res (if branch
+                         (run-argv-in-dir (workspace) "git" "push" remote branch)
+                         (run-argv-in-dir (workspace) "git" "push" remote)))
+                (out (cdr res)))
+           (if (string-null? (string-trim-both out))
+               "Push completed (no output)"
+               out)))))))
 
   ;; eval_scheme - Evaluate scheme code dynamically
   (register-tool

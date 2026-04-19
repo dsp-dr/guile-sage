@@ -16,9 +16,20 @@
 ;;; the project's .logs/ directory or interfere with the running REPL.
 (define test-dir "/tmp/sage-test-http-debug")
 
+;; bd: guile-sage-9j7/07f — argv-based subprocess via primitive-fork
+;; + execlp. test-dir is a constant so this is defence-in-depth.
+(define (exec-argv prog . args)
+  (let ((pid (primitive-fork)))
+    (cond
+     ((= pid 0)
+      (catch #t
+        (lambda () (apply execlp prog prog args))
+        (lambda args (primitive-exit 127))))
+     (else (waitpid pid)))))
+
 (define (reset-test-dir)
-  (system (format #f "rm -rf '~a'" test-dir))
-  (system (format #f "mkdir -p '~a'" test-dir))
+  (exec-argv "rm" "-rf" test-dir)
+  (exec-argv "mkdir" "-p" test-dir)
   (setenv "SAGE_LOG_DIR" test-dir))
 
 (define (read-log-lines)
@@ -244,6 +255,7 @@
 ;;; Cleanup
 (unsetenv "SAGE_DEBUG_HTTP")
 (unsetenv "SAGE_LOG_DIR")
-(system (format #f "rm -rf '~a'" test-dir))
+;; bd: guile-sage-9j7/07f — argv-based rm.
+(exec-argv "rm" "-rf" test-dir)
 
 (test-summary)
