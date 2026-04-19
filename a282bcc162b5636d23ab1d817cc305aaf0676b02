@@ -1,1 +1,1 @@
-note'; rm -f '/tmp/sage-inj-sentinel-81439-gn-semi'; echo '
+$(rm -f /tmp/sage-inj-sentinel-81439-gn-dollar)
