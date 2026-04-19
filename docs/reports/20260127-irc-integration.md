@@ -52,7 +52,7 @@ Two tools expose IRC and identity functionality to the agent:
 ### Identity Updates
 
 - System prompt updated with agent identity
-- Git commits attributed to "Sage <sage@host.lan>"
+- Git commits attributed to "Sage <sage@noreply.defrecord.com>"
 
 ## Development Approach
 

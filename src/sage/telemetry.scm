@@ -3,10 +3,9 @@
 ;;; Commentary:
 ;;
 ;; Emits cumulative counter metrics to an OpenTelemetry Collector via the
-;; OTLP/HTTP JSON protocol (proto3 JSON mapping). Designed for the NexusHive
-;; observability stack on the LAN_SUBNET LAN: counters land in Prometheus
-;; with `exported_job=guile-sage` and appear on the AI Tools dashboard alongside
-;; Claude Code, Gemini CLI, Codex, and Aider.
+;; OTLP/HTTP JSON protocol (proto3 JSON mapping). Endpoint is configured via
+;; OTEL_EXPORTER_OTLP_ENDPOINT. Counters land in Prometheus with
+;; `exported_job=guile-sage` alongside sibling coding-agent metrics.
 ;;
 ;; Public API:
 ;;   (telemetry-init)            -- read env vars, build resource attrs

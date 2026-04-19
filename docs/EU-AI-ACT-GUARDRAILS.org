@@ -1,11 +1,11 @@
 #+TITLE: guile-sage — EU AI Act Guardrails
 #+DATE: 2026-04-12
-#+AUTHOR: jwalsh
+#+AUTHOR: guile-sage contributors
 #+PROPERTY: header-args:shell :results output :exports both
 
 * Context
 
-LiteLLM proxy v1.83.4 on mini (dev-host:4000) with PostgreSQL backend.
+LiteLLM proxy v1.83.4 running at ${LITELLM_URL} with PostgreSQL backend.
 EU AI Act Article 5 policy template installed via the admin UI, creating
 10 =litellm_content_filter= guardrails (5 English + 5 French) covering
 all prohibited AI practices under Art. 5.
@@ -14,8 +14,8 @@ all prohibited AI practices under Art. 5.
 
 ** Prerequisites
 
-- LiteLLM proxy running at =http://dev-host:4000=
-- Admin UI at =http://dev-host:4000/ui/= (admin / sk-REDACTED)
+- LiteLLM proxy running at =${LITELLM_URL}=
+- Admin UI at =${LITELLM_URL}/ui/= (see deployment docs for admin credentials)
 - EU AI Act Article 5 policy template created via UI → Policies → Templates
 - All 10 guardrails enabled as =pre_call= content filters
 
@@ -42,8 +42,8 @@ a prompt designed to trigger (or not trigger) a specific guardrail.
 ** Environment
 
 #+begin_src shell
-export LITELLM_URL="http://dev-host:4000"
-export LITELLM_KEY="sk-REDACTED"
+export LITELLM_URL="${LITELLM_URL}"
+export LITELLM_KEY="${LITELLM_KEY}"
 export MODEL="ollama-llama3.2"
 #+end_src
 
@@ -189,11 +189,11 @@ Success criteria: 7/10 BLOCKED, 3/10 PASSED, 0 false positives on legitimate que
 #+begin_src shell :eval no
 #!/bin/sh
 # EU AI Act Article 5 guardrail validation suite
-# Run from any host on the LAN LAN
+# Run from any host on any host
 # Requires: curl, python3
 
-LITELLM_URL="http://dev-host:4000"
-LITELLM_KEY="sk-REDACTED"
+LITELLM_URL="${LITELLM_URL}"
+LITELLM_KEY="${LITELLM_KEY}"
 MODEL="ollama-llama3.2"
 
 test_guardrail() {
@@ -257,27 +257,27 @@ curl -sf '${PROMETHEUS_URL}/api/v1/query?query=litellm_proxy_total_requests_metr
 Check Grafana at ${GRAFANA_URL} → LiteLLM dashboard for
 guardrail activity panels.
 
-Check LiteLLM admin UI at http://dev-host:4000/ui/ → Guardrails Monitor
+Check LiteLLM admin UI at ${LITELLM_URL}/ui/ → Guardrails Monitor
 for per-guardrail trigger history.
 
 * Configuration for Other Agents
 
-** guile-sage (on hydra/nexus)
+** guile-sage (on a remote host)
 
-To route guile-sage through the LiteLLM proxy on mini:
+To route guile-sage through the LiteLLM proxy:
 
 #+begin_src shell
-# Add to ~/.bashrc or ~/.profile on hydra/nexus
-export OPENAI_API_BASE="http://dev-host:4000"
-export OPENAI_API_KEY="sk-REDACTED"
+# Add to ~/.bashrc or ~/.profile on a remote host
+export OPENAI_API_BASE="${LITELLM_URL}"
+export OPENAI_API_KEY="${LITELLM_KEY}"
 #+end_src
 
 Or in the guile-sage config file (if it uses one):
 
 #+begin_src scheme
 ;; guile-sage litellm config
-(define *llm-api-base* "http://dev-host:4000")
-(define *llm-api-key* "sk-REDACTED")
+(define *llm-api-base* "${LITELLM_URL}")
+(define *llm-api-key* "${LITELLM_KEY}")
 (define *llm-model* "ollama-llama3.2")  ; substitute any model your LiteLLM config registers
 #+end_src
 
@@ -289,8 +289,8 @@ Any requests from guile-sage through the proxy will be:
 ** Any OpenAI-compatible tool
 
 #+begin_src shell
-export OPENAI_API_BASE="http://dev-host:4000"
-export OPENAI_API_KEY="sk-REDACTED"
+export OPENAI_API_BASE="${LITELLM_URL}"
+export OPENAI_API_KEY="${LITELLM_KEY}"
 #+end_src
 
 The guardrails apply to ALL traffic through the proxy regardless of
@@ -301,5 +301,5 @@ which tool sent it.
 - EU AI Act Article 5: https://eur-lex.europa.eu/eli/reg/2024/1689/oj (Art. 5)
 - LiteLLM Guardrail Policies: https://docs.litellm.ai/docs/proxy/guardrails/guardrail_policies
 - LiteLLM Content Filter: https://docs.litellm.ai/docs/proxy/guardrails
-- LiteLLM Admin UI: http://dev-host:4000/ui/
+- LiteLLM Admin UI: ${LITELLM_URL}/ui/
 - Grafana: ${GRAFANA_URL}

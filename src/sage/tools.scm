@@ -486,8 +486,10 @@
                            (string-join files " ")
                            files))
             (tmp (format #f "/tmp/sage-commit-~a" (getpid)))
-            (cmd (format #f "cd ~a && git add ~a && git commit -m '~a\n\nCo-Authored-By: Sage <sage@host.lan>'"
-                         (workspace) file-list message)))
+            (coauthor (or (getenv "SAGE_COAUTHOR")
+                          "Sage <sage@users.noreply.github.com>"))
+            (cmd (format #f "cd ~a && git add ~a && git commit -m '~a\n\nCo-Authored-By: ~a'"
+                         (workspace) file-list message coauthor)))
        (system (string-append cmd " > " tmp " 2>&1"))
        (let ((result (call-with-input-file tmp get-string-all)))
          (delete-file tmp)
@@ -797,8 +799,7 @@
       "Name: Sage\n"
       "System: guile-sage (Guile Scheme AI agent framework)\n"
       "Role: Autonomous software engineering agent\n"
-      "Contact: sage@host.lan\n"
-      "IRC: SageNet (#sage-agents, #sage-tasks, #sage-debug)\n"
+      "IRC: SageNet (#sage-agents, #sage-tasks, #sage-debug) -- optional\n"
       "Workspace: " (workspace) "\n"
       "Tools: " (number->string (length *tools*)) " registered\n"
       "Mode: " (symbol->string (agent-mode)))))

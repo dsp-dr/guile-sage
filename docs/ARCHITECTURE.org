@@ -20,7 +20,7 @@ System_Boundary(sage_boundary, "guile-sage") {
 
 System_Ext(ollama, "Ollama", "LLM runtime.\nlocalhost:11434 (or cloud).\nChat completions + native tool_calls.")
 
-System_Ext(skills_hub, "skills-hub MCP", "Python/uvicorn MCP server.\nnexus:8400/sse.\n~35 skills as tools over HTTP+SSE.")
+System_Ext(skills_hub, "skills-hub MCP", "Python/uvicorn MCP server.\ninfra-host:8400/sse.\n~35 skills as tools over HTTP+SSE.")
 
 System_Ext(otel, "OTel Collector", "infra-host:4318.\nReceives OTLP/HTTP JSON metrics.")
 
@@ -154,12 +154,12 @@ SHOW_LEGEND()
 
 #+BEGIN_SRC mermaid
 flowchart LR
-    subgraph mini["mini (.22) — macOS workstation"]
+    subgraph dev["dev-host — developer workstation"]
         sage["sage REPL"]
         ollama_local["Ollama :11434"]
     end
 
-    subgraph nexus["nexus (.100) — FreeBSD server"]
+    subgraph infra["infra-host — observability + MCP server"]
         skills["skills-hub MCP :8400"]
         otel["OTel Collector :4318"]
         prom["Prometheus :9090"]
@@ -173,12 +173,12 @@ flowchart LR
     prom -- "PromQL" --> graf
 #+END_SRC
 
-All traffic is on the LAN LAN. No Tailscale.
+Topology is deployment-specific; endpoints are configured via environment variables.
 
-| Host       | IP              | Services                               |
+| Role       | Example host    | Services                               |
 |------------+-----------------+----------------------------------------|
-| mini       | dev-host   | sage REPL, Ollama (localhost:11434)    |
-| nexus      | infra-host  | skills-hub :8400, OTel :4318, Prometheus :9090, Grafana :3000 |
+| dev-host   | workstation     | sage REPL, Ollama (localhost:11434)    |
+| infra-host | server          | skills-hub :8400, OTel :4318, Prometheus :9090, Grafana :3000 |
 
 * 4. Startup Sequence
 
@@ -471,7 +471,7 @@ flowchart TB
         structured["logging.scm\nlog-info/warn/error"]
     end
 
-    subgraph nexus["nexus (.100)"]
+    subgraph infra["infra-host"]
         otel["OTel Collector :4318"]
         prom["Prometheus :9090"]
         graf["Grafana :3000\n/d/ai-tools/"]
