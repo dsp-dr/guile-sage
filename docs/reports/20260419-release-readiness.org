@@ -1,0 +1,40 @@
+#+TITLE: Release Readiness — gmake check verified green
+#+DATE: 2026-04-19
+#+PROPERTY: bead guile-sage-zv6
+
+* Run
+
+- Timestamp: 2026-04-19T11:14-04:00
+- HEAD: =16523e4c9fc971b1af64316ae0b2a4a4371175f2=
+- Runtime: 319 s, Darwin 25.4.0, GNU Guile 3.x
+- Command: =gmake check= from a clean worktree
+
+* Result
+
+*598/598 tests passed across 27 reporting suites, 0 failures.* Five files
+run without emitting a =Tests: x/y= counter (harness, hooks, image-gen,
+openai-aig, tools) and all exit 0. Final line: =All tests passed.=
+
+Representative counts: agents-md-directives 27/27, compaction-deep 98/98,
+model-capability 51/51, pbt 31/31, repl-guard 40/40, telemetry 42/42.
+
+* Correction to the 2026-04-19 CTO appraisal
+
+The appraisal's failing-test claim for =tests/test-agents-md-directives.scm:20=
+was accurate at HEAD =d497702=. Commit =6a47cd9= ("privacy sanitization") did
+NOT touch the stub test files — the appraisal's attribution of a fix to that
+commit was incorrect. Of the five stub files added in =6be3f29=, four imported
+=(srfi srfi-64)= before loading the harness; =test-agents-md-directives.scm=
+missed the import, so auto-compilation saw =test-assert= as unbound and raised
+the syntax-transformer error. Repaired in =16523e4= ("fix(tests): import
+srfi-64 before loading harness in test-agents-md-directives").
+
+* Stale test-count references (flagged, not updated)
+
+- =CLAUDE.md= Quick Start: "42+ tests, all green" — actual 598.
+- =docs/PRESENTATION.org:195=: "42 tests, all green" — actual 598.
+
+* Sign-off
+
+Verified green at HEAD =16523e4c9fc971b1af64316ae0b2a4a4371175f2= on
+2026-04-19.
