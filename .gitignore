@@ -39,3 +39,4 @@ tests/fixtures/test-*.png
 *.db
 .beads-credential-key
 __pycache__/
+experiments/
