@@ -2,10 +2,10 @@
 
 Date: 2026-04-12
 Model: llama3.2:latest on localhost:11434
-Host: mini (macOS, Apple Silicon)
+Host: dev-host (macOS, Apple Silicon)
 Guile: 3.0.11 (/opt/homebrew/bin/guile)
-MCP: skills-hub at nexus:8400 (36 tools registered)
-OTel: nexus:4318 (DOWN -- all flushes return code=0)
+MCP: skills-hub at infra-host:8400 (36 tools registered)
+OTel: infra-host:4318 (DOWN -- all flushes return code=0)
 
 ## 1. Methodology
 
@@ -26,8 +26,8 @@ Timing layers extracted from:
 - Wall clock: Python `time.time()` delta
 - Ollama API: `elapsed_ms` in `.logs/http.jsonl` for localhost:11434 entries
 - Tool execution: `duration_ms` in `.logs/sage.log` (Guile rational format)
-- Telemetry flush: `elapsed_ms` for nexus:4318/v1/metrics entries
-- MCP round-trip: `elapsed_ms` for nexus:8400/messages entries
+- Telemetry flush: `elapsed_ms` for infra-host:4318/v1/metrics entries
+- MCP round-trip: `elapsed_ms` for infra-host:8400/messages entries
 - Boot time: residual = wall - ollama_stream - ollama_followup - telemetry
 
 Environment: `SAGE_MCP_DISABLE=1` was tested for Group 1 but has **no effect** --
@@ -198,7 +198,7 @@ These prompts should become automated regression tests with timing thresholds:
 
 ## 7. Known Issues
 
-- **OTel collector DOWN**: All telemetry flushes to nexus:4318 return code=0 (connection refused/timeout). Each takes ~1000ms. This accounts for ~14% of total wall time.
+- **OTel collector DOWN**: All telemetry flushes to infra-host:4318 return code=0 (connection refused/timeout). Each takes ~1000ms. This accounts for ~14% of total wall time.
 - **MCP tool calls 100% broken**: SSE response channel is stale after init. All MCP tool invocations time out. POST returns 202 but response never arrives via SSE.
 - **No SAGE_MCP_DISABLE support**: The env var is not checked. MCP always initializes. MCP init itself is fast (<100ms), but the stale SSE port causes tool-call failures.
 - **FIFO cleanup**: `/tmp/sage-sse-<pid>` FIFOs are created per sage invocation. No cleanup occurs on abnormal termination.

@@ -55,7 +55,7 @@ read, write, and execute code within a controlled workspace.
                         ▼
              ┌──────────────────┐
              │  Ollama Backend  │
-             │ (mac.lan:11434)  │
+             │ (localhost:11434)│
              └──────────────────┘
 #+end_example
 

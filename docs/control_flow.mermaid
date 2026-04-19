@@ -5,9 +5,9 @@ sequenceDiagram
     participant O as Ollama (ollama.scm)
     participant T as tools.scm
     participant MCP as mcp.scm
-    participant SK as skills-hub (nexus:8400)
+    participant SK as skills-hub (infra-host:8400)
     participant TM as telemetry.scm
-    participant OC as OTel Collector (nexus:4318)
+    participant OC as OTel Collector (infra-host:4318)
 
     U->>R: input text
     R->>R: inc-counter! active.time(user)

@@ -16,13 +16,13 @@ System_Boundary(sage_boundary, "guile-sage") {
 
 System_Ext(ollama, "Ollama", "LLM runtime.\nlocalhost:11434 (or cloud).\nChat completions + native tool_calls.")
 
-System_Ext(skills_hub, "skills-hub MCP", "Python/uvicorn MCP server.\nnexus:8400/sse.\n~35 skills as tools over HTTP+SSE.")
+System_Ext(skills_hub, "skills-hub MCP", "Python/uvicorn MCP server.\ninfra-host:8400/sse.\n~35 skills as tools over HTTP+SSE.")
 
-System_Ext(otel, "OTel Collector", "nexus:4318.\nReceives OTLP/HTTP JSON metrics.")
+System_Ext(otel, "OTel Collector", "infra-host:4318.\nReceives OTLP/HTTP JSON metrics.")
 
-System_Ext(prometheus, "Prometheus", "nexus:9090.\nScrapes OTel Collector.")
+System_Ext(prometheus, "Prometheus", "infra-host:9090.\nScrapes OTel Collector.")
 
-System_Ext(grafana, "Grafana", "nexus:3000.\nAI Tools dashboard /d/ai-tools/.")
+System_Ext(grafana, "Grafana", "infra-host:3000.\nAI Tools dashboard /d/ai-tools/.")
 
 Rel(user, sage, "Prompts, /commands", "stdin/tty")
 Rel(sage, ollama, "POST /api/chat\n(NDJSON streaming + tools)", "HTTP")

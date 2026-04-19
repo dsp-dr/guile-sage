@@ -13,7 +13,7 @@ This multiplies token accumulation rate by the number of parallel sessions.
 ├─────────────┬─────────────┬─────────────┬─────────────────────┤
 │  pane 0     │  pane 1     │  pane 2     │  pane 3             │
 │  sage-a     │  sage-b     │  sage-c     │  sage-d             │
-│  cloud API  │  cloud API  │  mac.lan    │  mac.lan            │
+│  cloud API  │  cloud API  │  dev-host    │  dev-host            │
 │  glm-4.7    │  glm-4.7    │  qwen3-coder│  qwen3-coder        │
 └─────────────┴─────────────┴─────────────┴─────────────────────┘
 ```
@@ -22,8 +22,8 @@ This multiplies token accumulation rate by the number of parallel sessions.
 
 - `stress-test-3a` - Cloud API instance A
 - `stress-test-3b` - Cloud API instance B
-- `stress-test-3c` - Local (mac.lan) instance C
-- `stress-test-3d` - Local (mac.lan) instance D
+- `stress-test-3c` - Local (dev-host) instance C
+- `stress-test-3d` - Local (dev-host) instance D
 
 ## Setup Commands
 
@@ -37,8 +37,8 @@ tmux split-window -v -t sage-parallel:0.1
 # Start sage in each pane (need separate .env per instance or env vars)
 tmux send-keys -t sage-parallel:0.0 "SAGE_OLLAMA_HOST=https://ollama.com SAGE_MODEL=glm-4.7 guile3 -L src -c '(use-modules (sage repl)) (repl-start)'" Enter
 tmux send-keys -t sage-parallel:0.1 "SAGE_OLLAMA_HOST=https://ollama.com SAGE_MODEL=glm-4.7 guile3 -L src -c '(use-modules (sage repl)) (repl-start)'" Enter
-tmux send-keys -t sage-parallel:0.2 "SAGE_OLLAMA_HOST=http://mac.lan:11434 SAGE_MODEL=qwen3-coder:latest guile3 -L src -c '(use-modules (sage repl)) (repl-start)'" Enter
-tmux send-keys -t sage-parallel:0.3 "SAGE_OLLAMA_HOST=http://mac.lan:11434 SAGE_MODEL=qwen3-coder:latest guile3 -L src -c '(use-modules (sage repl)) (repl-start)'" Enter
+tmux send-keys -t sage-parallel:0.2 "SAGE_OLLAMA_HOST=http://dev-host:11434 SAGE_MODEL=qwen3-coder:latest guile3 -L src -c '(use-modules (sage repl)) (repl-start)'" Enter
+tmux send-keys -t sage-parallel:0.3 "SAGE_OLLAMA_HOST=http://dev-host:11434 SAGE_MODEL=qwen3-coder:latest guile3 -L src -c '(use-modules (sage repl)) (repl-start)'" Enter
 ```
 
 ## Implementation Requirements
@@ -59,7 +59,7 @@ Each pane needs unique session names to avoid conflicts:
 
 ### 3. API Rate Limiting Considerations
 - Cloud API: May have rate limits per API key
-- Local mac.lan: Limited by GPU/CPU capacity
+- Local dev-host: Limited by GPU/CPU capacity
 - Recommendation: 2 cloud + 2 local for balance
 
 ### 4. Prompt Distribution
@@ -112,7 +112,7 @@ Parallel (2 cloud + 2 local):
 
 1. **API rate limits** - Cloud may throttle multiple concurrent requests
 2. **Session file conflicts** - Must use unique session names
-3. **Resource exhaustion** - mac.lan GPU may struggle with 2 concurrent models
+3. **Resource exhaustion** - dev-host GPU may struggle with 2 concurrent models
 4. **Monitoring complexity** - Need to track 4 sessions instead of 1
 
 ## Recommended Start
@@ -125,16 +125,16 @@ Parallel (2 cloud + 2 local):
 
 ```bash
 # Terminal 1 - Cloud
-cd /home/dsp-dr/ghq/github.com/dsp-dr/guile-sage
+cd $HOME/ghq/github.com/dsp-dr/guile-sage
 SAGE_OLLAMA_HOST=https://ollama.com \
-OLLAMA_API_KEY=027735e40fdc46fa898012cdb4754732.3fXx1j_0nKITgSn1AYgPGeJZ \
+OLLAMA_API_KEY=<REDACTED-API-KEY> \
 SAGE_MODEL=glm-4.7 \
 guile3 -L src -c '(use-modules (sage repl)) (repl-start)'
 # Then: /load stress-test-3a (or create new)
 
 # Terminal 2 - Local
-cd /home/dsp-dr/ghq/github.com/dsp-dr/guile-sage
-SAGE_OLLAMA_HOST=http://mac.lan:11434 \
+cd $HOME/ghq/github.com/dsp-dr/guile-sage
+SAGE_OLLAMA_HOST=http://dev-host:11434 \
 SAGE_MODEL=qwen3-coder:latest \
 guile3 -L src -c '(use-modules (sage repl)) (repl-start)'
 # Then: /load stress-test-3b (or create new)
