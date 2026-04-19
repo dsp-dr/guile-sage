@@ -81,6 +81,19 @@
     ("gpt-4o" . 128000)
     ("gpt-4" . 8000)
     ("claude" . 200000)
+    ;; Gemini family — check specific variants before the fallback.
+    ;; Real context windows per Google docs (2026-04):
+    ;;   gemini-2.5-pro       2_000_000   (2M)
+    ;;   gemini-2.5-flash     1_000_000   (1M)
+    ;;   gemini-2.5-flash-lite  1_000_000 (1M)
+    ;;   gemini-1.5-pro       2_000_000
+    ;;   gemini-1.5-flash       128_000
+    ("gemini-2.5-pro" . 2000000)
+    ("gemini-2.5-flash-lite" . 1000000)
+    ("gemini-2.5-flash" . 1000000)
+    ("gemini-1.5-pro" . 2000000)
+    ("gemini-1.5-flash" . 128000)
+    ("gemini" . 128000)
     ;; Fallback categories (checked last)
     ("local" . 8000)
     ("cloud" . 64000)))
