@@ -174,6 +174,98 @@
       ;; In non-interactive mode, deny unsafe tools by default
       #f))
 
+;;; ============================================================
+;;; eval_scheme Sandbox (NC12: fires even in YOLO mode)
+;;; ============================================================
+;;;
+;;; Denylist of symbols that would give eval_scheme access to the
+;;; shell, filesystem mutation, subprocesses, network pipes, code
+;;; loading, or a recursive eval escape. This list is intentionally
+;;; broad — if a symbol is even *named* in the code string, the call
+;;; is rejected, regardless of whether it would actually be resolved
+;;; to the dangerous binding. False positives are cheaper than an RCE.
+(define eval-scheme-denied-symbols
+  '(;; Shell-out / subprocess
+    system system* primitive-fork execl execle execlp
+    ;; Pipes (ice-9 popen)
+    open-pipe open-pipe* open-input-pipe open-output-pipe
+    open-input-output-pipe
+    ;; Network sockets
+    socket connect bind accept listen
+    ;; Filesystem mutation
+    delete-file rename-file copy-file chmod chown
+    mkdir rmdir symlink truncate-file umask
+    ;; File I/O that could read secrets or write arbitrary bytes
+    open-file open-input-file open-output-file open-io-file
+    call-with-input-file call-with-output-file
+    with-input-from-file with-output-to-file
+    ;; Module loading / recursive eval / code injection
+    load primitive-load primitive-load-path
+    load-from-path load-compiled eval-string
+    eval compile compile-file
+    resolve-module use-modules module-use! module-use-interfaces!
+    ;; Continuation escape to parent
+    dynamic-wind make-continuation call-with-current-continuation
+    call/cc
+    ;; Raw memory / FFI
+    dynamic-link dynamic-func dynamic-call dynamic-pointer
+    pointer->bytevector bytevector->pointer
+    ;; Environment mutation
+    setenv unsetenv putenv
+    ;; ftw helpers that walk the filesystem
+    ftw nftw scandir opendir readdir closedir
+    ;; Exit / abort the host process
+    exit quit primitive-exit abort abort-to-prompt))
+
+;;; walk-sexp-for-denied: recursively inspect an s-expression and
+;;; return the first denied symbol found, or #f. Lists, vectors, and
+;;; pairs are all descended. Strings, numbers, and other atoms are
+;;; safe — we only denylist identifiers.
+(define (walk-sexp-for-denied sexp)
+  (cond
+   ((symbol? sexp)
+    (if (memq sexp eval-scheme-denied-symbols) sexp #f))
+   ((pair? sexp)
+    (or (walk-sexp-for-denied (car sexp))
+        (walk-sexp-for-denied (cdr sexp))))
+   ((vector? sexp)
+    (let loop ((i 0))
+      (cond
+       ((>= i (vector-length sexp)) #f)
+       ((walk-sexp-for-denied (vector-ref sexp i)))
+       (else (loop (+ i 1))))))
+   (else #f)))
+
+;;; eval-scheme-sandbox-check: parse the code string and check it
+;;; against the denylist. Returns 'allow on success, or
+;;; (veto . reason-string) on denial.
+;;;
+;;; This enforces NC12 (docs/HOOK-NEGATIVE-CONTRACTS.org): safety
+;;; invariants that fire even in YOLO mode. YOLO lets eval_scheme be
+;;; *called*; this sandbox constrains what it can *do*.
+(define (eval-scheme-sandbox-check code)
+  (catch #t
+    (lambda ()
+      (let* ((port (open-input-string code))
+             ;; Read all top-level forms so multi-form strings
+             ;; like "(define x 1) (system ...)" are scanned too.
+             (forms (let loop ((acc '()))
+                      (let ((f (read port)))
+                        (if (eof-object? f)
+                            (reverse acc)
+                            (loop (cons f acc)))))))
+        (let ((hit (walk-sexp-for-denied forms)))
+          (if hit
+              (cons 'veto
+                    (format #f "denied symbol '~a' (sandbox blocks shell-out, filesystem mutation, pipes, and code loading even in YOLO mode — NC12)"
+                            hit))
+              'allow))))
+    (lambda (key . rest)
+      ;; If the code doesn't even parse, reject — we can't safely
+      ;; walk it and eval-string would just throw anyway, but we'd
+      ;; rather the sandbox message be clear.
+      (cons 'veto (format #f "parse error: ~a ~a" key rest)))))
+
 ;;; execute-tool: Execute a tool by name
 ;;; Arguments:
 ;;;   name - Tool name
@@ -555,10 +647,23 @@
              "Push completed (no output)"
              result)))))
 
-  ;; eval_scheme - Evaluate scheme code dynamically
+  ;; eval_scheme - Evaluate scheme code dynamically (sandboxed)
+  ;;
+  ;; The eval_scheme sandbox is a safety invariant per
+  ;; docs/HOOK-NEGATIVE-CONTRACTS.org NC12: "guards fire even in YOLO
+  ;; mode". YOLO gates whether the tool is callable at all (ADR-0003),
+  ;; but this sandbox gates WHAT the tool can do regardless of YOLO.
+  ;;
+  ;; Approach: symbol denylist. We parse the code string once, walk
+  ;; the s-expression tree, and reject the call if any identifier
+  ;; appears in eval-scheme-denied-symbols. This stops the common
+  ;; attack vectors (system, pipes, filesystem mutation, recursive
+  ;; eval, module loading) without needing a full interpreter rewrite.
+  ;;
+  ;; Red team findings #2 (guile-sage-6tp / guile-sage-h9y).
   (register-tool
    "eval_scheme"
-   "Evaluate Scheme code and return result"
+   "Evaluate Scheme code and return result (sandboxed — no I/O, no shell, no filesystem mutation)"
    '(("type" . "object")
      ("properties" . (("code" . (("type" . "string")
                                  ("description" . "Scheme code to evaluate")))))
@@ -567,8 +672,13 @@
      (let ((code (assoc-ref args "code")))
        (catch #t
          (lambda ()
-           (let ((result (eval-string code)))
-             (format #f "~s" result)))
+           (let ((sandbox-check (eval-scheme-sandbox-check code)))
+             (if (eq? sandbox-check 'allow)
+                 (let ((result (eval-string code)))
+                   (format #f "~s" result))
+                 ;; sandbox-check is (veto . reason)
+                 (format #f "eval_scheme sandbox denied: ~a"
+                         (cdr sandbox-check)))))
          (lambda (key . rest)
            (format #f "Evaluation error: ~a ~a" key rest))))))
 
