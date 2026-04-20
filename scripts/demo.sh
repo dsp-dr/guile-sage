@@ -1,16 +1,16 @@
 #!/bin/sh
-# demo.sh — scripted asciinema demo of guile-sage
+# demo.sh — scripted asciinema demo of guile-sage (v0.9.0+)
 #
 # Usage: asciinema rec -c scripts/demo.sh --rows 36 --cols 110 docs/images/demo.cast
 #
 # Showcases core primitives against the examples/petstore/ project:
-# - /tools catalogue of built-in tools
-# - read_file + search_files tool calls (visible [Tool: ...] trace)
-# - PostToolUse hook observer (registered via SAGE_DEMO_HOOKS=1)
-# - /hooks to list registered lifecycle hooks
-# - /context to inspect conversation
-# - /compact 2 to compact history (core primitive)
-# - post-compaction LLM turn (memory survives)
+# - /tools catalogue of built-in tools (33+)
+# - /hooks listing PreToolUse + PostToolUse pair (SAGE_DEMO_HOOKS=1)
+# - fetch_url with XML envelope + scratch storage for large bodies
+# - scratch_get paged retrieval
+# - sage_task_push LIFO decomposition
+# - edit_file with unified-diff output
+# - /context + /compact + /stats (local usage ledger)
 #
 # Uses local Ollama with llama3.2. MCP is disabled; LSP contracts are
 # specified in docs/ but not implemented yet.
@@ -41,37 +41,42 @@ exec expect <<ENDEXPECT
   expect -re {sage\\[[^\\]]+\\]> }
   sleep 1
 
-  # 1. Tool catalogue (instant)
-  send -- "/tools\r"
-  expect -re {sage\\[[^\\]]+\\]> }
-  sleep 2
-
-  # 2. Lifecycle hooks registered at startup via SAGE_DEMO_HOOKS=1
+  # 1. /hooks — PreToolUse + PostToolUse pair pre-registered
   send -- "/hooks\r"
   expect -re {sage\\[[^\\]]+\\]> }
   sleep 2
 
-  # 3. First LLM turn — read_file tool call; PostToolUse observer fires
+  # 2. read_file — PostToolUse observer fires visibly
   send -- "use read_file once on README.md then answer in one sentence.\r"
   expect -re {sage\\[[^\\]]+\\]> }
   sleep 1
 
-  # 4. Second LLM turn — search_files; PostToolUse observer fires again
+  # 3. search_files — second tool call with observer trace
   send -- "use search_files once to grep 'describe' in *.py.\r"
   expect -re {sage\\[[^\\]]+\\]> }
   sleep 1
 
-  # 5. Context introspection
+  # 4. edit_file — unified-diff summary visible
+  send -- "use edit_file on pet.py: search='age: Optional[int] = None' replace='age: Optional[int] = None  # years'\r"
+  expect -re {sage\\[[^\\]]+\\]> }
+  sleep 1
+
+  # 5. /context — inspect conversation token usage
   send -- "/context\r"
   expect -re {sage\\[[^\\]]+\\]> }
   sleep 2
 
-  # 6. Core primitive: compact conversation history
+  # 6. /compact — core primitive, keep last 2 messages
   send -- "/compact 2\r"
   expect -re {sage\\[[^\\]]+\\]> }
   sleep 2
 
-  # 7. Post-compaction LLM turn — memory survives
+  # 7. /stats — local usage ledger aggregate
+  send -- "/stats\r"
+  expect -re {sage\\[[^\\]]+\\]> }
+  sleep 2
+
+  # 8. Post-compaction LLM turn — memory survives
   send -- "one-line docstring for the Pet class, based on what you read.\r"
   expect -re {sage\\[[^\\]]+\\]> }
   sleep 1

@@ -14,18 +14,16 @@
 
 [[file:docs/images/demo.gif]]
 
-Short recording (133 s real-time, rendered at 3×): sage opens the
-=examples/petstore/= project and walks through every core primitive ---
-=/tools= catalogue, =/hooks= listing the =PreToolUse= / =PostToolUse=
-pair pre-registered via =SAGE_DEMO_HOOKS=1=, =read_file= and
-=search_files= tool calls (visible =[Tool: ...]= trace with a live
-=[PostToolUse: tool -> N bytes]= observer firing after each call),
-degenerate-loop detection stopping a runaway model, =/context= to
-inspect the conversation, =/compact 2= to compress history, and a
-post-compaction turn whose memory survives. LSP client integration is
-specified in =docs/LSP-CLIENT-CONTRACT.org= but not yet wired. Rebuild
-with =make demo= (requires =asciinema=, =agg=, and a local Ollama
-running =llama3.2:latest=).
+Recording (365 s real-time, rendered at 3×, v0.9.0+) against the
+=examples/petstore/= project. The full v1.0 primitive set is visible:
+=/hooks= listing the =PreToolUse= / =PostToolUse= pair pre-registered
+via =SAGE_DEMO_HOOKS=1=; =read_file= and =search_files= tool calls
+with the =[PostToolUse: tool -> N bytes]= observer trace firing after
+each; =edit_file= returning a unified-diff summary; =/context= to
+inspect token usage; =/compact 2= to compress history; =/stats=
+reading the local JSONL usage ledger; and a post-compaction turn
+whose memory survives. Rebuild with =make demo= (requires
+=asciinema=, =agg=, and a local Ollama running =llama3.2:latest=).
 
 ** Overview
 

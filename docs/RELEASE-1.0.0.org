@@ -1,0 +1,172 @@
+#+TITLE: guile-sage — v1.0.0 release notes (draft)
+#+AUTHOR: guile-sage
+#+DATE: 2026-04-19
+#+OPTIONS: toc:2 num:nil
+
+* Summary
+
+v1.0.0 is the first publicly-releasable cut. The codebase at this tag
+is AI-agent-tool-agnostic (Agent Skills open standard), legally
+unblocked (LICENSE, CONTRIBUTING inbound=outbound MIT, CODE_OF_CONDUCT,
+SECURITY.md), and PII-audited at HEAD (historic blobs may still contain
+internal references; see the known-issues section).
+
+Intent: usable from a fresh clone + a local LLM (Ollama with
+=qwen3= / =qwen2.5-coder= / =llama3.2= / =deepseek-coder-v2=) inside
+~30 seconds of setup.
+
+* Feature highlights since v0.5.0
+
+** Multi-provider backends
+- Ollama (native =/api/chat=, tool calls, streaming NDJSON)
+- Gemini (Google AI, =gemini-2.5-flash= / =-pro= / =-lite= with 1M+
+  context windows)
+- OpenAI-compat (LiteLLM / vLLM, with guardrail-header surfacing)
+
+** Tool system (33+ built-in)
+- File / Git / Logs / Network (=fetch_url=) / Scratch store / Agent
+  tasks / Meta (run_tests, eval_scheme sandbox, create_tool,
+  reload_module, generate_image).
+- Safe / Unsafe split (=SAGE_YOLO_MODE=1= toggles the unsafe subset).
+- =eval_scheme= runs in a denylist sandbox that blocks =system=,
+  =open-input-pipe=, =delete-file=, =primitive-load=, nested
+  =eval-string= etc. — fires even in YOLO mode (NC12 invariant).
+- =fetch_url= sends =Accept: text/markdown,...= for content
+  negotiation; returns an XML envelope with source, content-type,
+  SHA-256, bytes, trust label; bodies over =SAGE_FETCH_INLINE_THRESHOLD=
+  (default 1 KB) routed to the scratch store with a preview + sha.
+- =scratch_get= / =scratch_list= for paged retrieval.
+- =sage_task_push= (LIFO) alongside =sage_task_create= (FIFO) for
+  sub-task decomposition.
+- =edit_file= returns a unified-diff summary visible to both model
+  and user.
+- =git_pull= / =git_fetch= tools (new in v0.9.x) for repo-aware
+  agent work.
+
+** Lifecycle hooks
+- =PreToolUse= (veto semantics, short-circuit on any #f return) and
+  =PostToolUse= (observation only, H13).
+- Error isolation: handler exceptions caught + logged, REPL never
+  crashes because of a bad hook.
+- =SAGE_DEMO_HOOKS=1= pre-registers a veto + observer pair for
+  demos and testing.
+
+** Context management
+- Five compaction strategies: truncate, token-limit, importance,
+  summarize, intent. =/compact [n]= manual, auto-compact at 80%
+  of the active model's token limit.
+- Per-model token limits for Gemini family (=2.5-pro= 2M,
+  =2.5-flash=/=flash-lite= 1M, =1.5-flash= 128K) — not the stale
+  8K Ollama tier default.
+- Context-window warnings at 50% / 80% / 90%.
+
+** MCP client
+- SSE transport + JSON-RPC 2.0 per =docs/MCP-CONTRACT.org= (23
+  numbered invariants I01-I23, 4 observed divergences D01-D04).
+- =/mcp= slash command prints an endpoints table with skill count
+  per server; =SAGE_MCP_PROBE=1= adds =/health= / =/metrics=
+  reachability probing.
+- Config at =~/.claude.json= today (migration to
+  =$XDG_CONFIG_HOME/sage/mcp.json= tracked in bead =guile-sage-szw=).
+
+** Observability
+- Local JSONL usage ledger at =$XDG_STATE_HOME/sage/usage.jsonl=
+  (=/stats= aggregates). Opt-out via =SAGE_STATS_DISABLE=1=.
+- OTLP/HTTP counters to any OTel Collector (opt-in via
+  =OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=). Counters:
+  =session.count=, =token.usage=, =cost.usage=, =active.time=,
+  =code_edit.tool_decision=, =mcp.tool_call=.
+- Structured JSONL logging at =.logs/sage.log=.
+- Ingress provenance (SHA-256, XML trust wrapping, optional GPG
+  signing) for fetched content.
+
+** REPL UX
+- Readline-safe ANSI-coloured prompt (user dim, model cyan,
+  brackets green / yellow in YOLO, token count green/yellow/red by
+  budget). Disable with =SAGE_NO_COLOR=1=.
+- Tool-result display capped at 500 chars (=SAGE_TOOL_DISPLAY_MAX=);
+  model still sees full body via session.
+- Tool results wrapped in =<tool-result>= role-boundary delimiters
+  + system-prompt clause telling the model to treat contents as
+  DATA, not instructions.
+- Degenerate-loop detector compares tool name + args (so paged
+  =scratch_get= doesn't trip it); stops after 3 identical calls.
+- =/agent= mode (interactive / autonomous / yolo), =/tasks=,
+  =/pause=, =/continue=.
+
+** Project conventions (agnostic)
+- =AGENTS.md= is the single source of agent instructions
+  (agentskills.io open standard). =CLAUDE.md= removed in v0.9.x —
+  any AI-coding agent that respects AGENTS.md reads this project.
+- Testing suite: 38 files, 767 tests (unit + UAT + PBT + security).
+- Documentation: org-mode except =AGENTS.md=. Contracts (MCP,
+  Hooks, LSP, Skills, Eval, Negative-Contracts) have numbered
+  invariants tied to test codes.
+
+* Minimum setup (fresh machine)
+
+#+BEGIN_SRC sh
+# 1. Prereqs (macOS example)
+brew install guile guile-gnutls  # guile3 on FreeBSD
+# Or: apt install guile-3.0
+
+# 2. LLM backend — pick one:
+#    Local (zero cost, no keys):
+brew install ollama
+ollama pull qwen2.5-coder:7b   # or llama3.2, deepseek-coder-v2
+ollama serve &
+
+# 3. Clone + verify
+git clone https://github.com/dsp-dr/guile-sage.git
+cd guile-sage
+gmake check       # 767 tests should pass
+gmake run         # starts REPL with YOLO enabled
+#+END_SRC
+
+* Known issues / limitations
+
+** Git history has pre-sanitisation blobs
+Old commits (pre-6a47cd9 on 2026-04-19) contain internal hostnames
+(=mini=, =nexus=, =hydra=, =host.lan=), internal IPs (=LAN_PREFIX.*=),
+user paths, a base64-encoded test auth token, and a deleted internal
+runbook. HEAD is clean; history is not. A =git filter-repo= plan is
+in =tmp/guile-sage-filter-repo-proposal.md= and tracked as bead
+=guile-sage-pfw=. Running it is operator discretion — not blocking
+for public release, blocking only if you want zero historic PII.
+
+** Model-tool-selection is weaker on small models
+llama3.2:latest (3.2 B) reliably mis-selects when multiple tools
+share keywords in their descriptions (documented in
+=docs/reports/20260419-small-model-tool-selection.org=). Use a 7 B+
+local model or Gemini for chain-of-tools work. v0.9.0 mitigations:
+scratch store reduces context pressure, =sage_task_push= gives
+weak models an explicit decomposition primitive.
+
+** Streaming disabled for OpenAI provider
+SSE format differs from Ollama NDJSON; openai provider currently
+uses non-streaming path. No behavioural impact; just slightly less
+interactive.
+
+** macOS Guile 3.0.11 spawn bug workaround
+=system*= and =open-input-pipe= fail with "Bad file descriptor" on
+Darwin. sage uses =capture-argv-in-dir= (primitive-fork + execlp)
+for all subprocess spawns. Transparent to users; noted for anyone
+hacking on =util.scm= or subprocess-calling tools.
+
+* Acknowledgements
+
+Co-authored across Claude Opus 4.6 / 4.7 / Claude Sonnet / Gemini
+2.5-flash during the 2026-04 sprint. Notes attached via =git notes=
+(CPRR-shaped: attribution / testing / conjecture / validation /
+research) on the commits that drove the design decisions.
+
+* What's next (v1.1+)
+
+- =guile-sage-szw= — sage-owned MCP config path (XDG)
+- =guile-sage-7o3= — tool-call transition Markov chain
+- =guile-sage-740= / =-pmr= / =-goo= / etc. — settings-panel parity
+  (output style, /recap, thinking tokens, /editor-mode, PR status
+  footer, auto-update channel, /verbose)
+- =guile-sage-6fx= — filesystem skills ingestion (Anthropic-compatible)
+- =guile-sage-7wm= — LSP client implementation (contract shipped)
+- =guile-sage-pfw= — git-history PII scrub (proposal ready)
