@@ -1,5 +1,5 @@
 #!/bin/sh
-# demo.sh — scripted asciinema demo of guile-sage (v0.9.0+)
+# demo.sh — scripted asciinema demo of guile-sage (v1.0.0+)
 #
 # Usage: asciinema rec -c scripts/demo.sh --rows 36 --cols 110 docs/images/demo.cast
 #
