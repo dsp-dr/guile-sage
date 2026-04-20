@@ -127,9 +127,9 @@ gmake run         # starts REPL with YOLO enabled
 
 ** Git history has pre-sanitisation blobs
 Old commits (pre-6a47cd9 on 2026-04-19) contain internal hostnames
-(=mini=, =nexus=, =hydra=, =host.lan=), internal IPs (=LAN_PREFIX.*=),
-user paths, a base64-encoded test auth token, and a deleted internal
-runbook. HEAD is clean; history is not. A =git filter-repo= plan is
+(=mini=, =nexus=, =hydra=, =host.lan=), internal LAN IPs in the
+RFC 1918 range, user paths, a base64-encoded test auth token, and a
+deleted internal runbook. HEAD is clean; history is not. A =git filter-repo= plan is
 in =tmp/guile-sage-filter-repo-proposal.md= and tracked as bead
 =guile-sage-pfw=. Running it is operator discretion — not blocking
 for public release, blocking only if you want zero historic PII.
