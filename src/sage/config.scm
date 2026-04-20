@@ -4,6 +4,8 @@
 ;;
 ;; Provides configuration management for guile-sage.
 ;; Loads settings from environment variables and .env files.
+;;
+;;; reload-contract: destroys *config* hash (all dotenv entries); --hard must re-run config-load-dotenv.
 
 (define-module (sage config)
   #:use-module (ice-9 textual-ports)

@@ -7,6 +7,8 @@
 ;; Beads (bd) is an OPTIONAL export path, not a dependency — tasks
 ;; work without bd installed. This decouples the agent from the
 ;; broken open-input-pipe on macOS Guile (guile-5tr).
+;;
+;;; reload-contract: destroys *agent-mode*, *agent-tasks*, *agent-iteration*; --hard loses in-flight task queue.
 
 (define-module (sage agent)
   #:use-module (sage config)

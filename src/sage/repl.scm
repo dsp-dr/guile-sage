@@ -4,6 +4,8 @@
 ;;
 ;; Interactive REPL for guile-sage with slash commands.
 ;; Manages conversation flow via provider dispatch (Ollama, Gemini, OpenAI).
+;;
+;;; reload-contract: destroys *running*, *available-tiers*, *history-file*; --hard must re-run full repl-start init chain.
 
 (define-module (sage repl)
   #:use-module (sage config)

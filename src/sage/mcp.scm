@@ -19,6 +19,8 @@
 ;;
 ;; Failure mode: any error (network, timeout, parse) is logged at WARN
 ;; and swallowed. MCP must never crash the REPL.
+;;
+;;; reload-contract: destroys *mcp-servers*, *mcp-next-id*; --hard must re-run mcp-init.
 
 (define-module (sage mcp)
   #:use-module (web client)

@@ -9,6 +9,8 @@
 ;;   - Debug logging (#sage-debug)
 ;;
 ;; Protocol: RFC 1459 subset (NICK, USER, JOIN, PART, PRIVMSG, PING/PONG)
+;;
+;;; reload-contract: destroys *irc-connection* (live socket); --hard must re-run init-irc if IRC is enabled.
 
 (define-module (sage irc)
   #:use-module (sage config)

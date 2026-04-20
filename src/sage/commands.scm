@@ -5,6 +5,8 @@
 ;; Allows users to define custom slash commands that map to Scheme
 ;; expressions or tool-call sequences. Commands are persisted to
 ;; ~/.config/sage/commands.scm as a serialized alist.
+;;
+;;; reload-contract: destroys *custom-commands*; --hard must re-run load-custom-commands!.
 
 (define-module (sage commands)
   #:use-module (sage config)

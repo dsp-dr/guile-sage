@@ -16,6 +16,8 @@
 ;;   (scratch-has? sha)                        -> boolean
 ;;   (scratch-list)                            -> list of (sha . metadata)
 ;;   (scratch-clear!)                          -> #t
+;;
+;;; reload-contract: destroys *scratch* hash (all stored blobs); --hard loses all in-memory scratch content.
 
 (define-module (sage scratch)
   #:use-module (ice-9 format)

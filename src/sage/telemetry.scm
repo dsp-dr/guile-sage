@@ -22,6 +22,8 @@
 ;; and silently swallowed. Telemetry must never break the REPL.
 ;;
 ;; Opt-out: set SAGE_TELEMETRY_DISABLE=1 to make every operation a no-op.
+;;
+;;; reload-contract: destroys *counters*, *initialized*, *enabled*; --hard loses unflushed counts, must re-run telemetry-init.
 
 (define-module (sage telemetry)
   #:use-module (sage config)

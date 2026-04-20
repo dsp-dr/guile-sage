@@ -4,6 +4,8 @@
 ;;
 ;; Tool system for guile-sage.
 ;; Provides tool registration, permission checking, and execution.
+;;
+;;; reload-contract: destroys *tools*, *safe-tools*, *workspace*; --hard must re-run init-default-tools.
 
 (define-module (sage tools)
   #:use-module (sage config)

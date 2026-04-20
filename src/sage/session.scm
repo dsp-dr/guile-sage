@@ -4,6 +4,8 @@
 ;;
 ;; Manages conversation history, session persistence, and context.
 ;; Supports saving/loading sessions and compacting conversation history.
+;;
+;;; reload-contract: destroys *session* (live conversation); --hard loses all in-flight messages.
 
 (define-module (sage session)
   #:use-module (sage config)

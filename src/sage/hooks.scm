@@ -25,6 +25,8 @@
 ;; PreToolUse handlers return #t/truthy to allow, #f to veto. The first
 ;; #f wins; remaining handlers don't run. PostToolUse handlers run for
 ;; observation only -- their return values are ignored (H13).
+;;
+;;; reload-contract: destroys *hooks* (all registered handlers); --hard must re-run hooks-reinit!.
 
 (define-module (sage hooks)
   #:use-module (sage logging)
