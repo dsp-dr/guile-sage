@@ -126,11 +126,16 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
          (yolo (equal? "1" (or (getenv "SAGE_YOLO_MODE") "")))
          (short-model (let ((idx (string-index model #\:)))
                         (if idx (substring model 0 idx) model)))
-         (context-str (if repo
-                          (format #f "~a@~a:~a" user host repo)
-                          (format #f "~a@~a" user host)))
          ;; Paint-helpers that no-op when SAGE_NO_COLOR=1
          (paint (lambda (fn s) (if no-color s (fn s))))
+         ;; Prefix (user@host[:]) is dim; repo (owner/repo) is yellow so the
+         ;; branch/worktree identity jumps out at a glance. Fall back to the
+         ;; plain host form when we aren't in a github.com-shaped workspace.
+         (context-str
+          (if repo
+              (string-append (paint rl-dim (format #f "~a@~a:" user host))
+                             (paint rl-yellow repo))
+              (paint rl-dim (format #f "~a@~a" user host))))
          (token-color (cond ((> ratio 0.9) rl-red)
                             ((> ratio 0.5) rl-yellow)
                             (else          rl-green)))
@@ -139,14 +144,14 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
          (bracket-r (if yolo (paint rl-yellow "]") (paint rl-green "]"))))
     (if (> tokens 0)
         (string-append
-         (paint rl-dim context-str) " sage"
+         context-str " sage"
          bracket-l
          (paint rl-cyan short-model) "@" (paint rl-dim label)
          (paint rl-dim "|") (paint token-color tok-str)
          bracket-r
          "> ")
         (string-append
-         (paint rl-dim context-str) " sage"
+         context-str " sage"
          bracket-l
          (paint rl-cyan short-model) "@" (paint rl-dim label)
          bracket-r
