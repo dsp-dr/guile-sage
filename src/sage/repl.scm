@@ -488,6 +488,11 @@ Reflects what was bridged into sage's registry at init time."
       ;; iteration. Safe because we're only mid-dispatch of cmd-reload;
       ;; the outer catch still guards reload-time errors.
       (reload-module (resolve-module '(sage repl)))
+      ;; Reloading tools.scm re-evaluates (define *tools* '()), wiping
+      ;; the registry. Repopulate it so slash-/tool calls still work.
+      ;; Also re-read .env so any edits become visible without restart.
+      ((module-ref (resolve-module '(sage tools)) 'init-default-tools))
+      ((module-ref (resolve-module '(sage config)) 'config-load-dotenv))
       (display "Reloaded: util, config, logging, ollama, provider, tools, session, repl\n"))
     (lambda (key . args)
       (format #t "Reload error: ~a ~a~%" key args)))
