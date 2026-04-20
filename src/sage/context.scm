@@ -100,13 +100,8 @@ Returns #t on success, #f on failure."
 (define (reset-fired-thresholds!)
   (set! *fired-thresholds* '()))
 
-;;; get-session-tokens: Late-bound accessor for session token count.
-;;; Works around Guile module binding order issues when (sage session)
-;;; is loaded as a transitive dependency before session state is set.
 (define (get-session-tokens)
-  (let ((proc (module-ref (resolve-module '(sage session))
-                          'session-total-tokens)))
-    (proc)))
+  (session-total-tokens))
 
 ;;; context-usage: Get current token usage and context window limit
 ;;; Arguments:

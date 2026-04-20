@@ -1357,13 +1357,7 @@ N chars + a single-line marker showing the elided byte count."
     (session-create #:model (provider-model))))
 
   ;; Emit session-start counter (labeled with session name).
-  ;; Use late-bound module-ref to avoid Guile module binding order
-  ;; issues with *session* (same workaround as context.scm).
-  (let* ((sess (catch #t
-                 (lambda ()
-                   (module-ref (resolve-module '(sage session)) '*session*))
-                 (lambda args #f)))
-         (sess-name (or (and sess (assoc-ref sess "name")) "unknown")))
+  (let* ((sess-name (or (session-current-name) "unknown")))
     (inc-counter! "guile_sage.session.count"
                   `(("session_id" . ,sess-name)) 1)
     (telemetry-flush!))
