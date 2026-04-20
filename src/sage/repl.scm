@@ -221,10 +221,11 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
 (define (cmd-status args)
   (display (format-session-status))
   (newline)
-  ;; Show context window usage against the CURRENT provider model
-  ;; (session model can be stale; see note in handle-chat).
-  (display (context-window-status (provider-model)))
-  (newline)
+  ;; Show context window usage. Use the session's model so status
+  ;; reflects what the session was accounted against.
+  (let ((model (and *session* (assoc-ref *session* "model"))))
+    (display (context-window-status model))
+    (newline))
   #t)
 
 ;;; cmd-stats: Show aggregated tool-usage counts from
@@ -1219,13 +1220,13 @@ N chars + a single-line marker showing the elided byte count."
          (else
           (format #t "Error: ~a ~a~%" key args)))))
 
-    ;; Check context window thresholds after response. Use the CURRENT
-    ;; provider model rather than the session's frozen model: sessions
-    ;; snapshot model at creation, which can be stale (e.g. after
-    ;; /reload re-resolves the provider) and cause spurious warnings
-    ;; when the live model has a much larger context window (gemini
-    ;; 2.5 flash = 1M vs. a stale local-ollama 8K fallback).
-    (let ((warning-text (context-format-warnings (provider-model))))
+    ;; Check context window thresholds after response. Use the session
+    ;; model (the model that actually accrued these tokens). Session
+    ;; freshness is a separate concern addressed in session-create.
+    (let ((warning-text (context-format-warnings
+                          (if *session*
+                              (assoc-ref *session* "model")
+                              #f))))
       (unless (string-null? warning-text)
         (display warning-text)
         (newline)))))))
@@ -1337,18 +1338,21 @@ N chars + a single-line marker showing the elided byte count."
   (when (config-get "DEBUG")
     (set! *debug* #t))
 
-  ;; Create or load session
+  ;; Create or load session. Pass the live provider model explicitly:
+  ;; session-create's (config-get "MODEL") fallback becomes qwen3-coder
+  ;; if *config* was cleared mid-run (e.g. after /reload), which then
+  ;; poisons the session's stored model.
   (cond
    (continue?
     ;; Load most recent session
     (let ((sessions (session-list)))
       (if (null? sessions)
-          (session-create)
+          (session-create #:model (provider-model))
           (session-load (car sessions)))))
    (session-name
     (session-load session-name))
    (else
-    (session-create)))
+    (session-create #:model (provider-model))))
 
   ;; Emit session-start counter (labeled with session name).
   ;; Use late-bound module-ref to avoid Guile module binding order
