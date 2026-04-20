@@ -39,6 +39,7 @@
             safe-path?
             resolve-path
             init-default-tools
+            tools-reinit!
             tools-to-schema))
 
 ;;; Tool Registry
@@ -1487,3 +1488,18 @@ this is a local replacement that mirrors the curl call pattern."
            (format #f "Saved to output/~a.png" filename))
          (lambda (key . rest)
            (format #f "Image generation error: ~a ~a" key rest)))))))
+
+;;; tools-reinit!: Re-populate the tool registry after a --hard reload.
+;;; Resets *tools* to empty and *safe-tools* to the canonical initial list,
+;;; then calls init-default-tools to re-register all built-in tools.
+;;; Use this instead of module-ref into init-default-tools after reload.
+(define (tools-reinit!)
+  (set! *tools* '())
+  (set! *safe-tools* '("read_file" "list_files" "git_status" "git_diff"
+                       "git_log" "git_fetch" "glob_files" "search_files"
+                       "read_logs" "search_logs"
+                       "sage_task_create" "sage_task_push"
+                       "sage_task_complete" "sage_task_list" "sage_task_status"
+                       "scratch_get" "scratch_list"
+                       "generate_image"))
+  (init-default-tools))
