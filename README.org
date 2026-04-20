@@ -169,9 +169,27 @@ shift safety decisions onto the operator:
 
 ** Requirements
 
-- Guile 3.0+
-- curl (for HTTP requests)
-- Ollama (local or cloud API)
+- *GNU Guile 3.0+* (=guile= on macOS/Linux, =guile3= on FreeBSD)
+- *curl* — used for =fetch_url= and for streaming HTTP to the LLM
+  provider (Gemini, Ollama). A future refactor (bead =guile-sage-szw=)
+  may migrate the non-streaming path to =(web client)= + =guile-gnutls=
+  but curl stays required today.
+- *An LLM backend*, one of:
+  - *Ollama* running locally (=localhost:11434= by default) — zero-cost,
+    no API keys; suitable for vetting with =qwen3= / =qwen2.5-coder=
+    / =deepseek-coder-v2= / =llama3.2=.
+  - *Gemini API* (=GEMINI_API_KEY=) for cloud inference.
+  - *LiteLLM / OpenAI-compat proxy* (=SAGE_OPENAI_BASE= +
+    =SAGE_OPENAI_API_KEY=) for mixed routing with guardrails.
+
+Optional:
+
+- *guile-gnutls* — needed only if you use the experimental native HTTPS
+  path via =(web client)=. Not required for the default curl-based
+  flow.
+- *git-filter-repo* — only if you're maintaining a fork and need to
+  rewrite history.
+- *asciinema* + *agg* — only for =make demo= (README GIF rebuild).
 
 ** Installation
 

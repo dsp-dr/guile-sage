@@ -651,7 +651,7 @@ this is a local replacement that mirrors the curl call pattern."
   ;; fetch_url (safe: read-only GET, URL scheme + size/time caps)
   (register-tool
    "fetch_url"
-   "Fetch an http(s) URL via GET and return the body wrapped with guile-sage markers. <script> tags are stripped. Capped at 1 MB / 10 s."
+   "Fetch an http(s) URL via GET. Sends Accept: text/markdown, text/plain;q=0.9, text/html;q=0.8 so servers that support content negotiation return the agent-friendly shape. Returns a <fetch-result> XML envelope with source, content-type, http-code, bytes, SHA-256, fetched-at, trust, and user-agent attributes; body is inside CDATA verbatim (no sanitisation — the role-boundary layer handles safety). Bodies over SAGE_FETCH_INLINE_THRESHOLD (default 1 KB) are stored in scratch and the envelope carries a 500-char preview + sha for retrieval via scratch_get. Capped at 1 MB / 10 s."
    '(("type" . "object")
      ("properties" . (("url" . (("type" . "string")
                                 ("description" . "http:// or https:// URL to fetch")))))
