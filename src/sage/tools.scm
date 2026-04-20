@@ -48,7 +48,7 @@
 ;; SAGE_YOLO_MODE. Task and image tools remain here because they only
 ;; touch sage-managed state, not source files or git history.
 (define *safe-tools* '("read_file" "list_files" "git_status" "git_diff"
-                       "git_log" "glob_files" "search_files"
+                       "git_log" "git_fetch" "glob_files" "search_files"
                        "read_logs" "search_logs"
                        "sage_task_create" "sage_task_push"
                        "sage_task_complete" "sage_task_list" "sage_task_status"
@@ -1039,6 +1039,56 @@ this is a local replacement that mirrors the curl call pattern."
                 (out (cdr res)))
            (if (string-null? (string-trim-both out))
                "Push completed (no output)"
+               out)))))))
+
+  (register-tool
+   "git_pull"
+   "Pull commits from the remote repository (may merge or rebase; mutates working tree)"
+   '(("type" . "object")
+     ("properties" . (("remote" . (("type" . "string")
+                                   ("description" . "Remote name (default: origin)")))
+                      ("branch" . (("type" . "string")
+                                   ("description" . "Branch to pull (default: current)")))
+                      ("rebase" . (("type" . "boolean")
+                                   ("description" . "Use --rebase instead of merge (default: true)")))))
+     ("required" . #()))
+   (lambda (args)
+     (let* ((remote (or (assoc-ref args "remote") "origin"))
+            (branch (assoc-ref args "branch"))
+            (rebase (let ((r (assoc-ref args "rebase")))
+                      (if (eq? r #f) #f (if (eq? r #t) #t #t))))
+            (flag (if rebase "--rebase" "--ff-only")))
+       (cond
+        ((not (argv-clean? remote))
+         "Error: remote name contains unsafe characters")
+        ((and branch (not (argv-clean? branch)))
+         "Error: branch name contains unsafe characters")
+        (else
+         (let* ((res (if branch
+                         (run-argv-in-dir (workspace) "git" "pull" flag remote branch)
+                         (run-argv-in-dir (workspace) "git" "pull" flag remote)))
+                (out (cdr res)))
+           (if (string-null? (string-trim-both out))
+               "Pull completed (no output)"
+               out)))))))
+
+  (register-tool
+   "git_fetch"
+   "Fetch remote refs without merging (non-mutating)"
+   '(("type" . "object")
+     ("properties" . (("remote" . (("type" . "string")
+                                   ("description" . "Remote name (default: origin)")))))
+     ("required" . #()))
+   (lambda (args)
+     (let ((remote (or (assoc-ref args "remote") "origin")))
+       (cond
+        ((not (argv-clean? remote))
+         "Error: remote name contains unsafe characters")
+        (else
+         (let* ((res (run-argv-in-dir (workspace) "git" "fetch" remote))
+                (out (cdr res)))
+           (if (string-null? (string-trim-both out))
+               "Fetch completed (no new refs)"
                out)))))))
 
   ;; eval_scheme - Evaluate scheme code dynamically (sandboxed)

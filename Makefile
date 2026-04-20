@@ -339,6 +339,39 @@ tmux-session:
 tmux-kill:
 	@tmux kill-session -t $(SESSION) 2>/dev/null && echo "Killed session '$(SESSION)'" || echo "No session '$(SESSION)' to kill"
 
+# Dashboard: split-pane tmux layout for a live debugging session.
+# Left pane: sage REPL (non-streaming, yolo).
+# Right pane: tails .logs/sage.log.
+# Second window: scratch shell. Third window: tests.
+#
+# Idempotent — if a session named 'sage' exists, attach.
+DASH_SESSION = sage
+dash:
+	@if tmux has-session -t $(DASH_SESSION) 2>/dev/null; then \
+		tmux attach -t $(DASH_SESSION); \
+	else \
+		mkdir -p .logs; touch .logs/sage.log; \
+		tmux new-session -d -s $(DASH_SESSION) -x 240 -y 60 -c "$$PWD"; \
+		tmux rename-window -t $(DASH_SESSION):0 dash; \
+		tmux split-window -h -t $(DASH_SESSION):dash -c "$$PWD"; \
+		tmux send-keys -t $(DASH_SESSION):dash.0 \
+			'SAGE_STREAMING=0 $(MAKE) run' Enter; \
+		tmux send-keys -t $(DASH_SESSION):dash.1 \
+			'tail -F .logs/sage.log' Enter; \
+		tmux new-window -t $(DASH_SESSION) -n shell -c "$$PWD"; \
+		tmux send-keys -t $(DASH_SESSION):shell 'git log --oneline -5' Enter; \
+		tmux new-window -t $(DASH_SESSION) -n tests -c "$$PWD"; \
+		tmux send-keys -t $(DASH_SESSION):tests 'echo ready: gmake check' Enter; \
+		tmux select-window -t $(DASH_SESSION):dash; \
+		tmux select-pane -t $(DASH_SESSION):dash.0; \
+		tmux attach -t $(DASH_SESSION); \
+	fi
+
+dash-kill:
+	@tmux kill-session -t $(DASH_SESSION) 2>/dev/null \
+		&& echo "Killed session '$(DASH_SESSION)'" \
+		|| echo "No session '$(DASH_SESSION)' to kill"
+
 # UAT tests
 uat:
 	@echo "Running UAT tests..."
