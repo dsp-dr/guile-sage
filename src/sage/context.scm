@@ -100,8 +100,17 @@ Returns #t on success, #f on failure."
 (define (reset-fired-thresholds!)
   (set! *fired-thresholds* '()))
 
+;;; get-session-tokens: Late-bound accessor for session token count.
+;;; Tests that set *session* via module-ref into (sage session) see a
+;;; DIFFERENT *session* than a direct (session-total-tokens) call from
+;;; inside (sage context) because Guile captures the binding at compile
+;;; time. Late-bound resolve via module-ref reads the live binding every
+;;; call. Reverts commit ea2c2ca; RFC v2 change #3 needs a different
+;;; approach (likely a test-harness fix, not a call-site fix).
 (define (get-session-tokens)
-  (session-total-tokens))
+  (let ((proc (module-ref (resolve-module '(sage session))
+                          'session-total-tokens)))
+    (proc)))
 
 ;;; context-usage: Get current token usage and context window limit
 ;;; Arguments:
