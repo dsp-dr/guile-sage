@@ -52,7 +52,9 @@
             sage-log-keep
             ;; Guardrail visibility
             guardrail-proxy-url
-            guardrail-check-provider))
+            guardrail-check-provider
+            ;; Reload sentinel
+            *config-loaded*))
 
 ;;; Constants
 
@@ -103,6 +105,10 @@
 ;;; Internal state
 
 (define *config* (make-hash-table))
+;;; *config-loaded*: #f until config-load-dotenv succeeds at least once.
+;;; Resets to #f on module reload; --hard reload must call config-load-dotenv
+;;; to restore it to #t and repopulate *config*.
+(define *config-loaded* #f)
 
 ;;; config-get: Get configuration value
 ;;; Arguments:
@@ -143,19 +149,21 @@
 ;;;   path - Path to .env file (optional, defaults to ".env")
 ;;; Returns: Number of variables loaded
 (define* (config-load-dotenv #:optional (path ".env"))
-  (if (file-exists? path)
-      (call-with-input-file path
-        (lambda (port)
-          (let loop ((line (get-line port))
-                     (count 0))
-            (if (eof-object? line)
-                count
-                (let ((parsed (parse-dotenv-line line)))
-                  (when parsed
-                    (hash-set! *config* (car parsed) (cdr parsed)))
-                  (loop (get-line port)
-                        (if parsed (1+ count) count)))))))
-      0))
+  (let ((result (if (file-exists? path)
+                    (call-with-input-file path
+                      (lambda (port)
+                        (let loop ((line (get-line port))
+                                   (count 0))
+                          (if (eof-object? line)
+                              count
+                              (let ((parsed (parse-dotenv-line line)))
+                                (when parsed
+                                  (hash-set! *config* (car parsed) (cdr parsed)))
+                                (loop (get-line port)
+                                      (if parsed (1+ count) count)))))))
+                    0)))
+    (set! *config-loaded* #t)
+    result))
 
 ;;; ============================================================
 ;;; XDG Base Directory Support
