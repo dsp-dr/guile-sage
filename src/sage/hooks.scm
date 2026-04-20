@@ -36,7 +36,8 @@
             hook-list
             hook-clear!
             hook-fire-pre-tool
-            hook-fire-post-tool))
+            hook-fire-post-tool
+            hooks-reinit!))
 
 ;;; Registry: alist of (event . list-of-(name . handler))
 ;;; Insertion order preserved (H15: FIFO).
@@ -98,6 +99,12 @@
   (set! *hooks* '((PreToolUse . ())
                   (PostToolUse . ())))
   #t)
+
+;;; hooks-reinit!: Re-initialize hook registry after a --hard reload.
+;;; Hooks are registered dynamically at runtime, so reinit simply clears
+;;; the stale registry; callers re-register their hooks after --hard reload.
+(define (hooks-reinit!)
+  (hook-clear!))
 
 ;;; call-handler-safely: Error isolation (H14). Exceptions are logged
 ;;; and swallowed; the REPL never crashes because of a misbehaving hook.
