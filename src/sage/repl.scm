@@ -473,33 +473,67 @@ Reflects what was bridged into sage's registry at init time."
   (format #t "Backend: ~a (~a)~%" (current-provider) (provider-host))
   #t)
 
+;;; Pure-function modules safe to reload without reinit.
+;;; These have no mutable top-level state that reload would destroy.
+(define *reload-pure-modules*
+  '((sage util)
+    (sage provider)
+    (sage ollama)
+    (sage openai)
+    (sage gemini)
+    (sage compaction)
+    (sage model-tier)
+    (sage version)
+    (sage status)
+    (sage provenance)))
+
+;;; Stateful modules whose globals are destroyed by reload-module.
+;;; --hard reloads these and runs the reinit chain to restore state.
+(define *reload-stateful-modules*
+  '((sage config)
+    (sage logging)
+    (sage tools)
+    (sage hooks)
+    (sage session)
+    (sage commands)
+    (sage telemetry)
+    (sage context)
+    (sage repl)))
+
 (define (cmd-reload args)
-  "Hot-reload sage modules without losing session state."
-  (display "Reloading modules...\n")
-  (catch #t
-    (lambda ()
-      ;; Reload core modules
-      (reload-module (resolve-module '(sage util)))
-      (reload-module (resolve-module '(sage config)))
-      (reload-module (resolve-module '(sage logging)))
-      (reload-module (resolve-module '(sage ollama)))
-      (reload-module (resolve-module '(sage provider)))
-      (reload-module (resolve-module '(sage tools)))
-      (reload-module (resolve-module '(sage session)))
-      ;; Reload repl last. Top-level `define`s rebind on reload, so the
-      ;; main loop picks up new make-prompt / cmd-* / etc. on its next
-      ;; iteration. Safe because we're only mid-dispatch of cmd-reload;
-      ;; the outer catch still guards reload-time errors.
-      (reload-module (resolve-module '(sage repl)))
-      ;; Reloading tools.scm re-evaluates (define *tools* '()), wiping
-      ;; the registry. Repopulate it so slash-/tool calls still work.
-      ;; Also re-read .env so any edits become visible without restart.
-      (tools-reinit!)
-      (config-load-dotenv)
-      (display "Reloaded: util, config, logging, ollama, provider, tools, session, repl\n"))
-    (lambda (key . args)
-      (format #t "Reload error: ~a ~a~%" key args)))
-  #t)
+  "Hot-reload sage modules. Default: pure-function modules only.
+--hard: all modules including stateful ones, then runs reinit chain."
+  (let ((hard? (and (string? args)
+                    (string-contains args "--hard"))))
+    (if hard?
+        (begin
+          (display "Hard-reloading all modules + reinit chain...\n")
+          (catch #t
+            (lambda ()
+              (for-each (lambda (mod)
+                          (reload-module (resolve-module mod)))
+                        (append *reload-pure-modules*
+                                *reload-stateful-modules*))
+              ;; Reinit chain: restore state destroyed by reload
+              (config-load-dotenv)
+              (tools-reinit!)
+              (hooks-reinit!)
+              (load-custom-commands!)
+              (telemetry-init)
+              (display "Hard reload complete. State restored.\n"))
+            (lambda (key . rest)
+              (format #t "Reload error: ~a ~a~%" key rest))))
+        (begin
+          (display "Reloading pure modules (use --hard for stateful reload)...\n")
+          (catch #t
+            (lambda ()
+              (for-each (lambda (mod)
+                          (reload-module (resolve-module mod)))
+                        *reload-pure-modules*)
+              (display "Reloaded: util, provider, ollama, openai, gemini, compaction, model-tier, version, status, provenance\n"))
+            (lambda (key . rest)
+              (format #t "Reload error: ~a ~a~%" key rest)))))
+    #t))
 
 (define (cmd-logs args)
   "Show recent log entries."
