@@ -221,10 +221,10 @@ ANSI-coloured, readline-safe. Disable with SAGE_NO_COLOR=1."
 (define (cmd-status args)
   (display (format-session-status))
   (newline)
-  ;; Show context window usage
-  (let ((model (and *session* (assoc-ref *session* "model"))))
-    (display (context-window-status model))
-    (newline))
+  ;; Show context window usage against the CURRENT provider model
+  ;; (session model can be stale; see note in handle-chat).
+  (display (context-window-status (provider-model)))
+  (newline)
   #t)
 
 ;;; cmd-stats: Show aggregated tool-usage counts from
@@ -1219,11 +1219,13 @@ N chars + a single-line marker showing the elided byte count."
          (else
           (format #t "Error: ~a ~a~%" key args)))))
 
-    ;; Check context window thresholds after response
-    (let ((warning-text (context-format-warnings
-                          (if *session*
-                              (assoc-ref *session* "model")
-                              #f))))
+    ;; Check context window thresholds after response. Use the CURRENT
+    ;; provider model rather than the session's frozen model: sessions
+    ;; snapshot model at creation, which can be stale (e.g. after
+    ;; /reload re-resolves the provider) and cause spurious warnings
+    ;; when the live model has a much larger context window (gemini
+    ;; 2.5 flash = 1M vs. a stale local-ollama 8K fallback).
+    (let ((warning-text (context-format-warnings (provider-model))))
       (unless (string-null? warning-text)
         (display warning-text)
         (newline)))))))
