@@ -1,6 +1,6 @@
 #+TITLE: guile-sage — v1.0.0 release notes (draft)
 #+AUTHOR: guile-sage
-#+DATE: 2026-04-19
+#+DATE: 2026-04-20
 #+OPTIONS: toc:2 num:nil
 
 * Summary
@@ -169,4 +169,7 @@ research) on the commits that drove the design decisions.
   footer, auto-update channel, /verbose)
 - =guile-sage-6fx= — filesystem skills ingestion (Anthropic-compatible)
 - =guile-sage-7wm= — LSP client implementation (contract shipped)
-- =guile-sage-pfw= — git-history PII scrub (proposal ready)
+- =guile-sage-pfw= — git-history PII scrub (proposal ready; base64 auth
+  token in history is a placeholder 'user@dev-host:none:none', not a
+  real credential — scrub is about identity exposure, not rotation)
+- =guile-sage-rsx= — =web_search= tool (DDG HTML wrapper over fetch_url)

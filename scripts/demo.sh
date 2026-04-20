@@ -76,7 +76,12 @@ exec expect <<ENDEXPECT
   expect -re {sage\\[[^\\]]+\\]> }
   sleep 2
 
-  # 8. Post-compaction LLM turn — memory survives
+  # 8. /reload — soft module reload (pure, no state loss)
+  send -- "/reload\r"
+  expect -re {sage\\[[^\\]]+\\]> }
+  sleep 2
+
+  # 9. Post-reload LLM turn — memory survives
   send -- "one-line docstring for the Pet class, based on what you read.\r"
   expect -re {sage\\[[^\\]]+\\]> }
   sleep 1
