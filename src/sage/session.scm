@@ -30,6 +30,7 @@
             session-list
             session-dir
             session-total-tokens
+            session-current-name
             estimate-tokens
             format-session-status))
 
@@ -158,6 +159,9 @@
   (if *session*
       (assoc-ref (assoc-ref *session* "stats") "total_tokens")
       0))
+
+(define (session-current-name)
+  (and *session* (assoc-ref *session* "name")))
 
 ;;; session-compact!: Compact conversation history
 ;;; Summarizes older messages to reduce token count
