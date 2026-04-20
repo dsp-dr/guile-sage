@@ -37,13 +37,19 @@ log_info() {
 echo "=== Guile-Sage Configuration Check ==="
 echo ""
 
-# Check guile3
+# Check guile (prefer guile3, fall back to guile on macOS/brew)
 echo "--- Runtime ---"
 if command -v guile3 >/dev/null 2>&1; then
+    GUILE_BIN=guile3
     VERSION=$(guile3 --version | head -1)
     log_ok "guile3 found: $VERSION"
+elif command -v guile >/dev/null 2>&1; then
+    GUILE_BIN=guile
+    VERSION=$(guile --version | head -1)
+    log_ok "guile found: $VERSION"
 else
-    log_error "guile3 not found in PATH"
+    GUILE_BIN=guile3
+    log_error "guile/guile3 not found in PATH"
 fi
 
 # Check curl
@@ -125,19 +131,19 @@ done
 # Check if modules load
 echo ""
 echo "--- Module Loading ---"
-if guile3 -L src -c "(use-modules (sage config))" 2>/dev/null; then
+if "$GUILE_BIN" -L src -c "(use-modules (sage config))" 2>/dev/null; then
     log_ok "(sage config) loads"
 else
     log_error "(sage config) failed to load"
 fi
 
-if guile3 -L src -c "(use-modules (sage util))" 2>/dev/null; then
+if "$GUILE_BIN" -L src -c "(use-modules (sage util))" 2>/dev/null; then
     log_ok "(sage util) loads"
 else
     log_error "(sage util) failed to load"
 fi
 
-if guile3 -L src -c "(use-modules (sage ollama))" 2>/dev/null; then
+if "$GUILE_BIN" -L src -c "(use-modules (sage ollama))" 2>/dev/null; then
     log_ok "(sage ollama) loads"
 else
     log_error "(sage ollama) failed to load"
