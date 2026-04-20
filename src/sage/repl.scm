@@ -483,9 +483,12 @@ Reflects what was bridged into sage's registry at init time."
       (reload-module (resolve-module '(sage provider)))
       (reload-module (resolve-module '(sage tools)))
       (reload-module (resolve-module '(sage session)))
-      ;; Don't reload repl - we're running in it!
-      (display "Reloaded: util, config, logging, ollama, provider, tools, session\n")
-      (display "Note: repl module requires restart\n"))
+      ;; Reload repl last. Top-level `define`s rebind on reload, so the
+      ;; main loop picks up new make-prompt / cmd-* / etc. on its next
+      ;; iteration. Safe because we're only mid-dispatch of cmd-reload;
+      ;; the outer catch still guards reload-time errors.
+      (reload-module (resolve-module '(sage repl)))
+      (display "Reloaded: util, config, logging, ollama, provider, tools, session, repl\n"))
     (lambda (key . args)
       (format #t "Reload error: ~a ~a~%" key args)))
   #t)
