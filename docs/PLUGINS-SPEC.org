@@ -1,12 +1,23 @@
-#+TITLE: Plugin System Specification
+#+TITLE: guile-sage — Plugin System Specification
 #+AUTHOR: guile-sage
 #+DATE: 2026-04-18
+
+*Status:* Raised to P1 on 2026-04-20. Strategic unlock for the
+core-stays-small philosophy. Tracked as bead =guile-sage-bmy=
+(implementation) and blocks =guile-sage-4tg= (generate_image move)
+and =guile-sage-hej= (irc move). Related: =docs/rfc/001-plugin-contract.org=
+(draft, 2026-01-28) with the native-Guile contract and permission model.
 
 * Overview
 
 Plugins bundle commands, skills, hooks, and MCP servers into a single
 distributable unit. This spec defines the contract for plugin discovery,
 loading, and lifecycle management.
+
+sage ships a small general-purpose core. Specialised features
+(image generation, embedding, IRC bridges, vendor SDKs) live in
+plugins the operator self-hoists. Users who don't need a capability
+don't pay for it in the default ship.
 
 * CLI Interface
 
