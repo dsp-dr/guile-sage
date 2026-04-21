@@ -523,6 +523,41 @@ after acceptance. Record WHY a decision was made.
 - Use `bd` for all issue tracking (not TaskCreate or markdown TODOs)
 - Use tmux for long-running / non-blocking work
 
+## Feature Deprecation Policy
+
+sage records every tool invocation to a local JSONL ledger at
+`$XDG_STATE_HOME/sage/usage.jsonl` (opt-out via `SAGE_STATS_DISABLE=1`).
+The `/stats` slash command aggregates it — top-N by call count and by
+total duration.
+
+Before deprecating ANY feature, consult `/stats`:
+
+1. **Heavily used** (top of the list, thousands of calls per sprint):
+   leave alone. Examples as of v1.0.0: `git_status`, `search_files`,
+   `read_file`, `write_file`, `read_logs`, `search_logs`.
+
+2. **Low but non-zero usage**: keep, or consolidate with overlapping
+   features. Example: `sage_task_create` (FIFO) vs `sage_task_push`
+   (LIFO) — if push dominates by 10× or more, consolidate into a
+   single command with a flag instead of two separately-registered
+   tools.
+
+3. **Zero recorded usage over a meaningful sprint**: candidate for
+   deprecation. Flag in the module docstring, emit a WARN on first
+   invocation, plan removal one minor version out. As of v1.0.0
+   the zero-use set included `git_diff`, `git_fetch`, `whoami`,
+   `echo_input`, and meta-tools (`reload_module`, `create_tool`,
+   `run_tests`) — some zero-use tools are intentional safety
+   surface (you don't want agents frequently creating tools) so
+   consider intent before cutting.
+
+4. **Registration artefacts** (`test-obs`, `test_safe` etc. showing
+   in `/stats` from tests leaking into the live registry): fix the
+   test hygiene, don't deprecate the underlying feature.
+
+Use `/stats --by=duration` (if available; plain `/stats` shows both)
+to catch *slow* tools worth optimising rather than removing.
+
 ## Session Completion
 
 1. Run quality gates: `gmake check`
