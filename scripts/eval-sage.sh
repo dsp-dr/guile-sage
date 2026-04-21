@@ -68,9 +68,29 @@ count_prompts() {
   echo "${n:-0}"
 }
 
+# wait_for_response: Poll until the sage REPL shows a new prompt after a turn.
+#
+# Invariant: a turn is complete when BOTH of the following are true:
+#   1. The pane content has changed since we sent the prompt (snapshot delta).
+#   2. The prompt count in the pane has increased (new "sage[" line appeared).
+#
+# Using prompt-count alone is unreliable: readline's in-place redraw (\r\x1b[K)
+# overwrites the previous prompt line rather than appending a new one, so the
+# scrollback count stays the same even after a fast response, causing the loop
+# to exhaust max_wait and return TIMEOUT.  The snapshot-delta check detects
+# any pane change (output arrived), then the prompt-count check confirms the
+# turn is fully committed to a new readline input line.
+#
+# Arguments:
+#   $1  max_wait        seconds to wait before giving up
+#   $2  baseline_prompts prompt count before the prompt was sent
+#   $3  before_snapshot  raw pane text captured before send-keys
+#
+# Returns 0 on success (prints final pane text), 1 on timeout.
 wait_for_response() {
   local max_wait="$1"
   local baseline_prompts="$2"
+  local before_snapshot="$3"
   local elapsed=0
 
   while [ "$elapsed" -lt "$max_wait" ]; do
@@ -78,6 +98,11 @@ wait_for_response() {
     elapsed=$((elapsed + POLL_INTERVAL))
     local pane
     pane=$(capture_pane)
+    # Phase 1: pane content must differ from the snapshot taken before send.
+    if [ "$pane" = "$before_snapshot" ]; then
+      continue
+    fi
+    # Phase 2: a new prompt line must be present.
     local current_prompts
     current_prompts=$(count_prompts "$pane")
     if [ "$current_prompts" -gt "$baseline_prompts" ]; then
@@ -235,24 +260,21 @@ for cat in $categories; do
       continue
     fi
 
-    # Record baseline prompt count
-    before_prompts=$(capture_pane | grep -c 'sage\[' || true)
+    # Snapshot pane state before sending so wait_for_response can detect change.
+    before_snapshot=$(capture_pane)
+    before_prompts=$(count_prompts "$before_snapshot")
     before_prompts=${before_prompts:-0}
 
     # Send prompt
     tmux send-keys -t "$SESSION" "$prompt" Enter
 
-    # Wait for new prompt to appear (response complete)
-    elapsed=0
-    while [ "$elapsed" -lt "$max_wait" ]; do
-      sleep "$POLL_INTERVAL"
-      elapsed=$((elapsed + POLL_INTERVAL))
-      now_prompts=$(capture_pane | grep -c 'sage\[' || true)
-      now_prompts=${now_prompts:-0}
-      [ "$now_prompts" -gt "$before_prompts" ] && break
-    done
+    # Wait for a new REPL prompt to appear (two-phase: snapshot delta + count).
+    # See wait_for_response for the rationale behind the two-phase approach.
+    wait_for_response "$max_wait" "$before_prompts" "$before_snapshot" \
+      > "/tmp/sage-eval-pane-$$" || true
 
     # Capture full pane and extract the last response block
+    # (wait_for_response already wrote it; re-read for the awk pass below)
     capture_pane > "/tmp/sage-eval-pane-$$"
     # Get everything between the second-to-last and last sage prompt
     new_output=$(awk '/sage\[/{buf=prev; prev=""} {prev=prev $0 "\n"} END{printf "%s", buf prev}' "/tmp/sage-eval-pane-$$")
