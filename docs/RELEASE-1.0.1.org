@@ -1,0 +1,83 @@
+#+TITLE: guile-sage — v1.0.1 release notes
+#+AUTHOR: guile-sage
+#+DATE: 2026-04-20
+#+OPTIONS: toc:2 num:nil
+
+* Summary
+
+v1.0.1 is a bug-sweep patch release.  Two operator-reported issues
+fixed; no new features, no API changes, no breaking changes.
+
+* Bug fixes
+
+** guile-sage-pdv — =/status= context bar read stale 8K cap for Gemini
+
+=get-token-limit= in =src/sage/config.scm= checked the =TOKEN_LIMIT=
+env/config key before the model-specific table.  A stale =.env= entry
+(=TOKEN_LIMIT=8000=, common in Ollama setups copied to a Gemini
+session) silently capped =gemini-2.5-flash= at 8 000 tokens instead of
+the correct 1 000 000.
+
+*Fix*: model-specific lookup now runs first; =TOKEN_LIMIT= is only
+consulted when no model-specific entry is found.  Priority order:
+
+#+begin_example
+model-specific → TOKEN_LIMIT override → provider default → 4000
+#+end_example
+
+*Observability*: =get-token-limit= now logs one INFO line per call
+(=model=, =limit=, =source=) to =.logs/sage.log=, making future
+=/status= discrepancies traceable without a debugger.
+
+*Test*: =tests/test-config.scm= (6 new tests) — including a regression
+test that sets =TOKEN_LIMIT=8000= in the environment and asserts
+=get-token-limit "gemini-2.5-flash"= returns 1 000 000.
+
+Commit: =c92e8a7=
+
+** guile-sage-zvq — tmux-poll UAT helper reported false TIMEOUTs
+
+=scripts/eval-sage.sh= polled for REPL turn completion by counting
+=sage[= occurrences in =tmux capture-pane= scrollback.  When the model
+responded in under one poll interval (~2s), readline's in-place redraw
+(=\r\x1b[K=) overwrote the prompt on the same scrollback line rather
+than appending a new one.  The count stayed equal to the baseline and
+the loop exhausted =max_wait=, producing a false TIMEOUT result.
+
+The =wait_for_response= helper function had been defined to address
+exactly this but was never wired into the main loop; the inline loop
+duplicated the flawed logic.
+
+*Fix*: the inline loop is replaced with a call to =wait_for_response=,
+which now uses a two-phase check:
+
+1. *Snapshot delta* — pane content must differ from the snapshot taken
+   immediately before =send-keys=.  This fires as soon as any output
+   appears, even if readline rewrote the line.
+2. *Prompt count* — =sage[= count must exceed the baseline.  This
+   confirms the REPL is back at a fresh input prompt (not mid-response).
+
+Both phases must pass.  Fast responses satisfy Phase 1 immediately and
+then Phase 2 on the next tick once readline has committed the new
+prompt.
+
+No Scheme code changed; =gmake check= is unaffected.
+
+Commit: =dd60978=
+
+* Test counts
+
+| Before | After  |
+|--------+--------|
+| 685    | 691    |
+
+All 691 tests pass.  The 3 pre-existing FAILs in =test-security.scm=
+(YOLO permission tests) are unchanged and unrelated to this release.
+
+* Upgrade notes
+
+No configuration changes required.  If your =.env= contains a bare
+=TOKEN_LIMIT=N= line intended as a global cap, it now only applies when
+sage cannot identify a model-specific limit.  For most users this is
+correct; operators who intentionally cap cloud models below their native
+window should verify their setup with =/status= after upgrading.
