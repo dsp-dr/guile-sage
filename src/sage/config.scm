@@ -328,26 +328,46 @@
 ;;; Arguments:
 ;;;   model - Optional model name to check specific limits
 ;;; Returns: Token limit integer
+;;;
+;;; Priority: model-specific lookup > TOKEN_LIMIT override > provider default > 4000.
+;;; TOKEN_LIMIT is intentionally checked AFTER model lookup so that a stale
+;;; .env entry (e.g. TOKEN_LIMIT=8000 left over from Ollama setup) does not
+;;; shadow the correct 1M limit for gemini-2.5-flash or other cloud models.
 (define* (get-token-limit #:optional (model #f))
-  (or
-   ;; Explicit configuration
-   (let ((explicit (config-get "TOKEN_LIMIT")))
-     (and explicit (string->number explicit)))
-   ;; Model-specific limit
-   (and model
-        (let loop ((limits *token-limits*))
-          (if (null? limits)
-              #f
-              (if (string-contains (string-downcase model)
-                                   (car (car limits)))
-                  (cdr (car limits))
-                  (loop (cdr limits))))))
-   ;; Provider-based default
-   (if (is-local-provider?)
-       (assoc-ref *token-limits* "local")
-       (assoc-ref *token-limits* "cloud"))
-   ;; Ultimate fallback
-   4000))
+  (let* ((model-limit
+          (and model
+               (let loop ((limits *token-limits*))
+                 (if (null? limits)
+                     #f
+                     (if (string-contains (string-downcase model)
+                                          (car (car limits)))
+                         (cdr (car limits))
+                         (loop (cdr limits)))))))
+         (explicit
+          (and (not model-limit)
+               (let ((v (config-get "TOKEN_LIMIT")))
+                 (and v (string->number v)))))
+         (provider-default
+          (and (not model-limit) (not explicit)
+               (if (is-local-provider?)
+                   (assoc-ref *token-limits* "local")
+                   (assoc-ref *token-limits* "cloud"))))
+         (limit (or model-limit explicit provider-default 4000))
+         (source (cond (model-limit      "model-match")
+                       (explicit         "explicit-override")
+                       (provider-default "provider-default")
+                       (else             "ultimate-fallback"))))
+    ;; Late-bound log call avoids circular import: logging.scm uses config.scm.
+    (catch #t
+      (lambda ()
+        ((module-ref (resolve-module '(sage logging)) 'log-info)
+         "config"
+         (format #f "get-token-limit: ~a tokens" limit)
+         `(("model"  . ,(or model "none"))
+           ("limit"  . ,limit)
+           ("source" . ,source))))
+      (lambda _ #f))
+    limit))
 
 ;;; ============================================================
 ;;; Logging Configuration
