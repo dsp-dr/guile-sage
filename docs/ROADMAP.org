@@ -245,6 +245,36 @@ Based on user needs and implementation complexity:
 5. *v0.6 Multi-model* - Flexibility
 6. *v0.7+ IDE/Cloud* - Extended reach
 
+* Patch-release sequence (post v1.0.0)
+
+Fast cadence — no external users yet, no backwards-compat debt.
+
+** v1.0.1 — bug sweep
+
+- =guile-sage-zvq= P1 — tmux-poll UAT helper reports false TIMEOUTs
+- =guile-sage-pdv= P2 — =/status= context bar reads stale 8K cap for Gemini
+
+** v1.0.2 — plugin system + deprecation warnings
+
+- =guile-sage-bmy= P1 — *implement plugin system* per RFC-001 +
+  =docs/PLUGINS-SPEC.org=. New =src/sage/plugins.scm=, discovery paths
+  (=$XDG_DATA_HOME/sage/plugins/=, =SAGE_PLUGIN_PATH=), =/plugins=
+  command, example plugin in =examples/plugins/generate-image/=.
+- =guile-sage-4tg= — *deprecation WARN* on =generate_image= load +
+  first call; built-in still works; ships alongside plugin successor.
+- =guile-sage-hej= — *deprecation WARN* on =irc.scm= load; built-in
+  still works; ships alongside plugin successor.
+- =guile-sage-0e0= — raise telemetry visibility (=/telemetry=,
+  =/doctor= status line, ARCHITECTURE observability section).
+
+** v1.0.3 — removal
+
+- =guile-sage-4tg= — remove =generate_image= from =init-default-tools=.
+- =guile-sage-hej= — remove =src/sage/irc.scm= from =repl-start=;
+  strip IRC line from =whoami=; clean up provider diagrams.
+
+Plugins become the only path; sage core is strictly general-purpose.
+
 * Sources
 
 - [[https://code.claude.com/docs/en/mcp][Claude Code MCP Docs]]
