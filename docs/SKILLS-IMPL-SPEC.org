@@ -1,0 +1,583 @@
+#+TITLE: guile-sage — Skills Module Implementation Spec
+#+AUTHOR: dsp-dr
+#+DATE: 2026-05-03
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose
+
+Standalone implementation specification for =src/sage/skills.scm=.
+
+Contract: =docs/SKILLS-CONTRACT.org= defines /what/ the module does.
+This document defines /how/ to build it, with exact file paths, line
+numbers, function signatures, data structures, and integration points.
+
+Beads: =guile-sage-02q= (loader), =guile-sage-411= (universal path),
+=guile-sage-yow= (YAML parser), =guile-sage-cy3= (invocation).
+
+*Status:* Implementation not started. This spec is the build input.
+
+* 1. Files to create
+
+| File | Purpose |
+|------|---------|
+| =src/sage/skills.scm= | New module: scanner, parser, registry, invocation |
+| =tests/test-skills.scm= | Unit tests: parser, validation, substitution, precedence |
+| =tests/test-skills-integration.scm= | Integration tests: temp-dir tree, full scan, invocation |
+
+* 2. Files to modify
+
+| File | Changes |
+|------|---------|
+| =src/sage/repl.scm:29= | Add =#:use-module (sage skills)= to import list |
+| =src/sage/repl.scm:492-501= | Add =(sage skills)= to =*reload-stateful-modules*= |
+| =src/sage/repl.scm:1313= | Insert =(skills-scan!)= call after =mcp-init= |
+| =src/sage/repl.scm:519-521= | Insert =(skills-reinit!)= in =--hard= reinit chain |
+| =src/sage/repl.scm= (=cmd-help=) | Add =/skills=, =/skill-show=, =/<skill-name>= entries |
+
+* 3. Module skeleton
+
+#+begin_src scheme
+;;; skills.scm --- SKILL.md filesystem loader -*- coding: utf-8 -*-
+
+;;; Commentary:
+;;
+;; Reads SKILL.md files from multiple scope directories, parses YAML
+;; frontmatter, and registers each skill as a slash command in the REPL.
+;;
+;; Contract: docs/SKILLS-CONTRACT.org (invariants SK01-SK24).
+;; Companion: docs/SKILLS-IMPL-SPEC.org.
+;;
+;; Scopes (precedence order, lowest number wins on name collision):
+;;   0=enterprise  1=personal  2=project  3=plugin  4=universal  5=claude-compat
+;;
+;; Public API:
+;;   (skills-scan!)                ; scan dirs, register commands
+;;   (skills-reload!)              ; re-scan from disk
+;;   (skills-reinit!)              ; hard reset for --hard reload
+;;   (skills-list)                 ; user-visible skill listing
+;;   (skill-show name)             ; full skill alist by name
+;;   (skill-invoke name args)      ; invoke skill, inject into session
+;;   (skills-paths)                ; resolved scan paths
+;;   (skills-scope-set! scope on?) ; stub: scope toggling
+;;   (skills-system-prompt-listing) ; description listing for LLM context
+;;
+;;; reload-contract: destroys *skills*, *skills-scan-paths*,
+;;;   *registered-skill-command-keys*; --hard must re-run skills-reinit!.
+
+(define-module (sage skills)
+  #:use-module (sage config)
+  #:use-module (sage util)
+  #:use-module (sage logging)
+  #:use-module (sage tools)
+  #:use-module (sage hooks)
+  #:use-module (sage session)
+  #:use-module (srfi srfi-1)
+  #:use-module (ice-9 regex)
+  #:use-module (ice-9 ftw)
+  #:use-module (ice-9 textual-ports)
+  #:use-module (ice-9 format)
+  #:export (skills-scan!
+            skills-reload!
+            skills-reinit!
+            skills-list
+            skill-show
+            skill-invoke
+            skills-paths
+            skills-scope-set!
+            skills-system-prompt-listing
+            *skills*
+            *skills-scan-paths*
+            *skills-char-budget*))
+#+end_src
+
+* 4. Module-level state
+
+#+begin_src scheme
+(define *skills* '())
+;; Alist of (name . skill-alist). Highest-precedence skill wins on
+;; name collision (enterprise=0 beats personal=1, etc).
+
+(define *skills-scan-paths* '())
+;; Ordered list of (scope-sym . absolute-path) pairs resolved at scan time.
+
+(define *skills-char-budget* 8000)
+;; Listing budget (SK24). 1% of context window × 4 chars/token,
+;; floored at 8000. Override: SAGE_SKILL_TOOL_CHAR_BUDGET env var.
+
+(define *registered-skill-command-keys* '())
+;; Tracks which "/name" keys in *commands* (sage repl) were added by
+;; this module, so deregister can remove exactly those.
+#+end_src
+
+* 5. Skill record structure
+
+Each parsed skill is a plain alist (no SRFI-9 records — matches
+=*hooks*= and =*custom-commands*= conventions).
+
+| Key | Type | Default | Notes |
+|-----|------|---------|-------|
+| ="name"= | string | dirname | SK03: =[a-z0-9-]{1,64}= |
+| ="description"= | string | =""= | Recommended. Truncated at 1536 in listing (SK05) |
+| ="when_to_use"= | string or =#f= | =#f= | Appended to description in listing |
+| ="argument-hint"= | string or =#f= | =#f= | Shown in autocomplete |
+| ="user-invocable"= | boolean | =#t= | If =#f=, hidden from =/= menu |
+| ="disable-model-invocation"= | boolean | =#f= | If =#t=, model never auto-invokes |
+| ="allowed-tools"= | list of string | ='()= | Pre-approve tools for this turn |
+| ="model"= | string or =#f= | =#f= | Override active model |
+| ="effort"= | string or =#f= | =#f= | =low\vert{}medium\vert{}high\vert{}xhigh\vert{}max= |
+| ="context"= | string or =#f= | =#f= | ="fork"= to run in subagent |
+| ="agent"= | string or =#f= | =#f= | Subagent type for =context: fork= |
+| ="hooks"= | alist or =#f= | =#f= | Skill-scoped lifecycle hooks |
+| ="paths"= | list of string | ='()= | Glob patterns gating auto-invocation |
+| ="shell"= | string | ="bash"= | For preprocessing |
+| ="_scope"= | symbol | — | ='enterprise=, ='personal=, ='project=, etc. |
+| ="_scope-priority"= | integer | — | 0-5 |
+| ="_skill-dir"= | string | — | Absolute path to skill directory |
+| ="_body"= | string | — | Verbatim body (NOT substituted) |
+| ="_extra-fields"= | alist | ='()= | SK08: unknown keys preserved |
+
+* 6. Internal helpers
+
+** 6.1 Path resolution
+
+=resolve-scope-paths= → list of =(scope-sym . path)= pairs.
+
+| Priority | Scope | Path | Env override |
+|----------|-------|------|-------------|
+| 0 | enterprise | =/etc/sage/skills/= | =SAGE_ENTERPRISE_SKILLS_DIR= |
+| 1 | personal | =(string-append (xdg-config-home) "/sage/skills/")= | =SAGE_PERSONAL_SKILLS_DIR= |
+| 2 | project | =.sage/skills/= relative to =(workspace)= | =SAGE_PROJECT_SKILLS_DIR= |
+| 3 | plugin | stub: ='()= in v1 | — |
+| 4 | universal | =~/.agents/skills/= | — |
+| 5 | claude-compat | =~/.claude/skills/= (only when =SAGE_CLAUDE_COMPAT=1=) | — |
+
+Reuse: =xdg-config-home= from =config.scm:173=, =workspace= from =tools.scm=.
+
+For project scope (§2.3 monorepo): walk upward from =(getcwd)= via
+=(dirname)= until hitting =(workspace)= or filesystem root, collecting
+any =.sage/skills/= found. Closest ancestor wins on name collision.
+
+** 6.2 YAML frontmatter parser
+
+Two functions:
+
+*** =parse-skill-md= : string → (values alist string)
+
+Splits content on first =---\n...\n---\n= block. Returns
+=(values frontmatter-alist body-string)=. If no frontmatter found,
+returns =(values '() content)= (SK02). Strips UTF-8 BOM (SK01).
+
+*** =parse-yaml-flat= : string → alist
+
+Line-by-line state machine with three states: =outside=, =in-array=,
+=in-hooks=. Handles:
+
+1. =key: value= → string scalar (unquoted or single/double quoted)
+2. =key: true|false= → Scheme boolean
+3. =key: [item1, item2]= → inline array
+4. Multi-line arrays: =key:\n  - item\n  - item=
+5. =hooks:= key: depth-1 sub-alist of =event: handler= pairs
+6. Unknown nesting (depth >1 on non-hooks keys) → skip with WARN (SK09)
+
+About 60 lines. No regex dependency beyond what =tools.scm= already imports.
+
+*** =parse-yaml-scalar= : string → string | boolean
+
+Strip quotes, handle =true=/=false=/=null=.
+
+** 6.3 Validation
+
+| Function | Behavior |
+|----------|----------|
+| =validate-skill-name= | Match =[a-z0-9-]{1,64}= via =(string-match)=. Returns string or =#f= (SK03) |
+| =normalize-allowed-tools= | Accept string (space-split) or list → list of strings (SK06) |
+| =truncate-listing-text= | Combine description + when_to_use, truncate at 1536 chars preserving first clause (SK05, SK23) |
+| =symlink-escapes-scope?= | =(string-prefix? scope-root (canonicalize-path-safe path))= — reuse =canonicalize-path-safe= from =tools.scm:133= (SK12) |
+
+** 6.4 Directory scanner
+
+=scan-scope-dir= : scope-sym × priority × path → list of skill-alists
+
+For each subdirectory of =path=:
+1. Check =SKILL.md= exists
+2. Check file size ≤ 512 KB (SK10)
+3. Check symlink does not escape scope root (SK12)
+4. Read UTF-8 content
+5. =parse-skill-md= → (frontmatter, body)
+6. =parse-yaml-flat= inside =catch #t=; on error: =log-warn "skills"= and continue (SK09, SK22)
+7. Validate =name= (SK03); on failure: WARN and skip
+8. Build skill alist with all fields + =_scope=, =_scope-priority=, =_skill-dir=, =_body=
+
+Uses =(scandir dir-path)= from =(ice-9 ftw)=. No recursion.
+
+=merge-skill-registries= : list of skill-lists → alist of =(name . skill-alist)=
+
+Fold all lists into one alist. Same name: lowest =_scope-priority= wins
+(SK13). Same scope: lexicographic tiebreak (SK04). WARN once per
+duplicate.
+
+** 6.5 Command registration
+
+=register-skill-command!= : skill-alist → boolean
+
+Mutates =*commands*= in =(sage repl)= via =module-ref= / =module-set!=
+(avoids circular import). Pattern:
+
+#+begin_src scheme
+(let* ((name (assoc-ref skill "name"))
+       (cmd-key (string-append "/" name))
+       (repl-mod (resolve-module '(sage repl)))
+       (cmds (module-ref repl-mod '*commands*)))
+  (if (assoc cmd-key cmds)
+      ;; SK: built-in wins, WARN
+      (begin
+        (log-warn "skills"
+                  (format #f "/~a conflicts with built-in; keeping built-in" name)
+                  `(("skill-dir" . ,(assoc-ref skill "_skill-dir"))))
+        #f)
+      (begin
+        (module-set! repl-mod '*commands*
+                     (cons (cons cmd-key (make-skill-handler skill)) cmds))
+        (set! *registered-skill-command-keys*
+              (cons cmd-key *registered-skill-command-keys*))
+        #t)))
+#+end_src
+
+=deregister-skill-commands!= : removes all keys in
+=*registered-skill-command-keys*= from =*commands*=. Called by
+=skills-reload!= before re-scanning.
+
+=make-skill-handler= : skill-alist → =(lambda (args) ...)=
+
+Closure that calls =invoke-skill=. Signature matches the handler
+convention in =repl.scm:1059= (=handle-command= calls =(handler args)=
+where =args= is a string).
+
+** 6.6 Invocation pipeline
+
+=invoke-skill= : skill-alist × args-string → string or =#f=
+
+Steps (contract §4.2):
+1. Read =_body= from skill alist (stored at scan time)
+2. =preprocess-shell-commands body skill= → preprocessed
+3. =substitute-variables preprocessed args-string skill= → rendered
+4. Log overrides (=allowed-tools=, =model=, =effort=) — stubs in v1 that WARN
+5. =session-add-message "user" rendered= (from =session.scm:21=)
+6. Register/unregister skill-scoped hooks around invocation
+7. Return rendered body
+
+** 6.7 Shell preprocessing (MVP: inline form only)
+
+=preprocess-shell-commands= : body × skill → string
+
+Match =!`([^`]+)`= in body. For each match:
+
+- If =SAGE_DISABLE_SKILL_SHELL=1=: replace with =[shell command execution disabled by policy]=
+- Otherwise: run command, replace with stdout
+
+=run-skill-shell-command= : command × skill → string
+
+Uses =primitive-fork + execlp "/bin/sh" "-c" command= pattern from
+=capture-argv-in-dir= (=tools.scm:171-197=). Key constraints:
+- Working directory: =(assoc-ref skill "_skill-dir")=
+- 10-second timeout (SK19) via =waitpid= loop with =alarm=
+- On timeout: return =[skill preprocessing timed out]=
+- Each output capped at 64 KB
+- Total substituted body capped at 256 KB
+- NEVER use =(system (format ...))= — see =tools.scm= commentary at line 142
+
+** 6.8 String substitution
+
+=substitute-variables= : body × args-string × skill → string
+
+Substitution order (avoid double-substitution):
+
+| Placeholder | Expansion |
+|-------------|-----------|
+| =$ARGUMENTS= | full args string |
+| =$ARGUMENTS[N]= / =$N= | Nth whitespace-token (0-based) |
+| =${SAGE_SESSION_ID}= | =(session-current-name)= or ="unknown"= |
+| =${SAGE_SKILL_DIR}= | =(assoc-ref skill "_skill-dir")= |
+| =${SAGE_WORKSPACE}= | =(workspace)= |
+| =${CLAUDE_SESSION_ID}= | alias when =SAGE_CLAUDE_COMPAT=1= |
+| =${CLAUDE_SKILL_DIR}= | alias when =SAGE_CLAUDE_COMPAT=1= |
+
+If =args-string= is non-empty and body does not contain =$ARGUMENTS=:
+append ="\n\nARGUMENTS: "= + args-string (§4.4 compat).
+
+Reuse: =string-replace-substring= from =util.scm:30=.
+
+** 6.9 System-prompt listing
+
+=skills-system-prompt-listing= → string
+
+Iterate =*skills*=. Include skills where =disable-model-invocation= is
+=#f= (per table in contract §4.2). Format:
+
+#+begin_example
+/name — description (truncated at 1536)
+#+end_example
+
+Accumulate until =*skills-char-budget*= is exhausted. If truncated,
+append =[... N more skills not shown]=.
+
+** 6.10 Skill-scoped hooks
+
+=register-skill-hooks!= / =unregister-skill-hooks!= : skill-alist → void
+
+If =hooks= frontmatter is present, register each event/handler pair
+via =hook-register= (=hooks.scm:53=) with name ="skill:<skill-name>:<event>"=.
+Unregister after the invocation turn (per contract §11).
+
+In v1, if handler names don't resolve to known procedures: WARN and skip.
+
+** 6.11 Subagent fork (context: fork)
+
+=fork-skill-subagent= : skill × rendered-body → string
+
+Per contract §9 "shortest path": =primitive-fork + execlp "guile3"=
+with =-L src=, pipe rendered prompt on stdin, capture stdout.
+Synchronous blocking subprocess. Mark in commentary that a full
+Agent-tool-style subagent is out of scope.
+
+** 6.12 Character budget
+
+=compute-skills-char-budget= → integer
+
+#+begin_src scheme
+(or (and=> (getenv "SAGE_SKILL_TOOL_CHAR_BUDGET") string->number)
+    (max 8000 (inexact->exact (round (* (get-token-limit) 0.01 4)))))
+#+end_src
+
+* 7. Integration into repl.scm
+
+** 7.1 Import (line 29)
+
+Add after =(sage mcp)=:
+
+#+begin_src scheme
+  #:use-module (sage skills)
+#+end_src
+
+** 7.2 Stateful modules (line 492-501)
+
+Add =(sage skills)= to =*reload-stateful-modules*=.
+
+** 7.3 Init call (after line 1313)
+
+Insert after =mcp-init=, before =(load-custom-commands!)=:
+
+#+begin_src scheme
+  ;; Scan and register skills (fail-soft; never crashes the REPL).
+  ;; See docs/SKILLS-CONTRACT.org.
+  (let ((n (catch #t
+             (lambda () (skills-scan!))
+             (lambda (key . rest)
+               (log-warn "repl" "skills-scan! failed"
+                         `(("error" . ,(format #f "~a" key))))
+               0))))
+    (when (> n 0)
+      (log-info "repl" (format #f "Loaded ~a skill~a" n (if (= n 1) "" "s")))))
+
+  ;; Inject skill listing into system prompt for LLM visibility.
+  (let ((listing (skills-system-prompt-listing)))
+    (unless (string-null? listing)
+      (session-add-message "system"
+                           (string-append
+                            "=== Available Skills ===\n"
+                            listing))))
+#+end_src
+
+** 7.4 Hard reload chain (line 519-521)
+
+Insert after =(hooks-reinit!)=, before =(load-custom-commands!)=:
+
+#+begin_src scheme
+              (skills-reinit!)
+#+end_src
+
+** 7.5 Management commands
+
+=skills-scan!= registers these into =*commands*= (alongside skill commands):
+
+| Key | Handler | Behavior |
+|-----|---------|----------|
+| =/skills= | =cmd-skills-list= | List all skills. If args contains ="reload"=: call =skills-reload!=. If ="path"=: print scan paths. If ="scope"=: call =skills-scope-set!=. |
+| =/skill-show= | =cmd-skill-show= | Print frontmatter for named skill |
+
+Route subcommands by inspecting =args=, same pattern as =cmd-agent= in
+=repl.scm:553=.
+
+* 8. Test strategy
+
+** 8.1 Test file template
+
+Follow =tests/test-hooks.scm= exactly:
+
+#+begin_src scheme
+#!/usr/bin/env guile3
+!#
+;;; test-skills.scm --- Tests for SKILL.md filesystem loader
+;;;
+;;; Contract: docs/SKILLS-CONTRACT.org
+;;; Spec: docs/SKILLS-IMPL-SPEC.org
+
+(add-to-load-path (string-append (dirname (current-filename)) "/../src"))
+(load (string-append (dirname (current-filename)) "/test-harness.scm"))
+
+(use-modules (sage skills)
+             (sage tools))
+
+(format #t "~%=== Skills Contract Tests ===~%")
+
+;; ... run-test blocks ...
+
+(test-summary)
+#+end_src
+
+** 8.2 Unit tests (=test-skills.scm=)
+
+| Test | Invariant | Assertion |
+|------|-----------|-----------|
+| YAML: flat key/value | SK02 | =(parse-yaml-flat "name: foo\ndescription: bar")= → alist with both |
+| YAML: boolean | SK02 | ="user-invocable: false"= → =#f= |
+| YAML: inline array | SK06 | ="paths: [\"*.scm\", \"*.org\"]"= → list of 2 strings |
+| YAML: multi-line array | SK06 | ="paths:\n  - *.scm\n  - *.org"= → list of 2 strings |
+| YAML: no frontmatter | SK02 | Content without =---= → =(values '() content)= |
+| YAML: malformed | SK09 | Invalid YAML → =#f= or empty alist, no crash |
+| YAML: BOM tolerance | SK01 | Content with =\xFEFF= prefix → parses correctly |
+| Name: valid | SK03 | ="my-skill-1"= → ="my-skill-1"= |
+| Name: uppercase | SK03 | ="MySkill"= → =#f= |
+| Name: too long | SK03 | 65-char string → =#f= |
+| Name: empty | SK03 | =""= → =#f= |
+| Truncation: under limit | SK05 | 100-char desc → unchanged |
+| Truncation: at 1536 | SK05 | 2000-char desc → truncated to ≤1536 |
+| Substitution: $ARGUMENTS | SK11 | Body with =$ARGUMENTS= + args ="foo bar"= → ="foo bar"= |
+| Substitution: $1 | SK11 | Body with =$1= + args ="foo bar"= → ="bar"= |
+| Substitution: missing $ARGUMENTS | §4.4 | Body without =$ARGUMENTS= + non-empty args → appended |
+| Precedence: enterprise > personal | SK13 | Two skills same name, priorities 0 and 1 → priority 0 wins |
+| Precedence: same scope tiebreak | SK04 | Two skills same name same scope → lexicographic |
+
+** 8.3 Integration tests (=test-skills-integration.scm=)
+
+Use =(mkdtemp!)= or manual temp dir creation. Populate with:
+
+#+begin_example
+/tmp/sage-test-skills/
+  enterprise/
+    greeting/
+      SKILL.md    → name: greeting, description: "say hello"
+  personal/
+    greeting/
+      SKILL.md    → name: greeting, description: "personal hello"
+    deploy/
+      SKILL.md    → name: deploy, description: "deploy to prod"
+#+end_example
+
+Override env vars (=SAGE_ENTERPRISE_SKILLS_DIR=, =SAGE_PERSONAL_SKILLS_DIR=)
+to point at temp dirs. Call =skills-scan!=. Assert:
+- =greeting= resolves to enterprise version (priority 0 wins)
+- =deploy= exists and has personal scope
+- Total skills count = 2
+
+Exercise =skill-invoke= with =$ARGUMENTS= expansion.
+
+Clean up temp dirs after test.
+
+* 9. Build sequence (phased)
+
+** Phase 1 — Core parser (no REPL integration)
+
+- [ ] Create =src/sage/skills.scm= with module skeleton, state, exports
+- [ ] Implement =parse-skill-md= (frontmatter splitter, BOM)
+- [ ] Implement =parse-yaml-flat= (scalar, boolean, arrays, hooks)
+- [ ] Implement =validate-skill-name=, =normalize-allowed-tools=, =truncate-listing-text=
+- [ ] Write =tests/test-skills.scm= covering all parser/validation functions
+- [ ] =gmake check= passes
+
+** Phase 2 — Scanner and registry
+
+- [ ] Implement =resolve-scope-paths= (all 6 scopes including universal + claude-compat)
+- [ ] Implement =scan-scope-dir= with SK01-SK12 guards
+- [ ] Implement =merge-skill-registries= with precedence
+- [ ] Implement =compute-skills-char-budget= and =skills-system-prompt-listing=
+- [ ] Implement =skills-scan!=, =skills-reload!=, =skills-reinit!=
+- [ ] Write integration tests with temp dirs
+- [ ] =gmake check= passes
+
+** Phase 3 — Invocation pipeline
+
+- [ ] Implement =substitute-variables=
+- [ ] Implement =preprocess-shell-commands= (inline form, policy disable, caps)
+- [ ] Implement =run-skill-shell-command= with 10s timeout
+- [ ] Implement =invoke-skill=
+- [ ] Implement =make-skill-handler= and =register-skill-command!=
+- [ ] Implement =deregister-skill-commands!=
+- [ ] Add invocation tests (=$ARGUMENTS=, =!`echo hello`=)
+- [ ] =gmake check= passes
+
+** Phase 4 — Hooks, overrides, management commands
+
+- [ ] Implement =register-skill-hooks!= / =unregister-skill-hooks!=
+- [ ] Implement override stubs with WARN logging
+- [ ] Implement =fork-skill-subagent= (subprocess path)
+- [ ] Register =/skills=, =/skill-show= management commands
+- [ ] Implement =skills-list=, =skill-show=, =skill-invoke=, =skills-paths=, =skills-scope-set!=
+- [ ] =gmake check= passes
+
+** Phase 5 — repl.scm integration
+
+- [ ] Add =(sage skills)= to =#:use-module= (=repl.scm:29=)
+- [ ] Add =(sage skills)= to =*reload-stateful-modules*= (=repl.scm:492=)
+- [ ] Insert =skills-scan!= call after =mcp-init= (=repl.scm:1313=)
+- [ ] Insert system-prompt listing injection
+- [ ] Insert =skills-reinit!= in =--hard= chain (=repl.scm:519=)
+- [ ] Update =cmd-help= display
+- [ ] Full =gmake check=; confirm no regressions
+
+** Phase 6 — Hardening
+
+- [ ] Property-based test: random malformed YAML never crashes (SK22)
+- [ ] Test SK12 symlink escape rejection
+- [ ] Test SK10 file size guard (>512 KB)
+- [ ] Test SK24 budget scaling
+- [ ] Test =/skills reload= (no REPL restart needed)
+- [ ] Test =SAGE_CLAUDE_COMPAT=1= adds =~/.claude/skills/= to scan paths
+- [ ] Test =SAGE_DISABLE_SKILL_SHELL=1= policy enforcement
+
+* 10. Boundary states (acceptance criteria)
+
+These are the falsification targets from the beads issues.
+
+| Boundary state | Falsification |
+|----------------|---------------|
+| =(skills-list)= returns non-empty alist when ≥1 scope dir has valid SKILL.md | Any valid SKILL.md placed in =~/.config/sage/skills/<name>/SKILL.md= is invisible to the REPL |
+| SKILL.md symlinked into =~/.agents/skills/<name>/SKILL.md= appears in =(skills-list)= | Skills placed only in =~/.agents/skills/= are not discovered |
+| =(skill-parse-frontmatter port)= returns alist for all valid field types | Malformed YAML crashes the REPL instead of WARN + skip (SK09, SK22) |
+| =/commit foo bar= expands =$ARGUMENTS= to ="foo bar"= in rendered prompt | =$ARGUMENTS= literal appears in LLM-visible prompt after invocation |
+
+* 11. Key codebase references
+
+Verified line numbers (as of commit =165351b=):
+
+| What | File | Lines | Signature |
+|------|------|-------|-----------|
+| =*commands*= alist | =repl.scm= | 762-797 | =(define *commands* `(("/help" . ,cmd-help) ...))= |
+| =handle-command= | =repl.scm= | 1059-1088 | =(define (handle-command input))= — does =(assoc-ref *commands* cmd)= |
+| =*reload-stateful-modules*= | =repl.scm= | 492-501 | list of module names |
+| =--hard= reinit chain | =repl.scm= | 518-523 | =tools-reinit! → hooks-reinit! → load-custom-commands! → telemetry-init= |
+| =repl-start= | =repl.scm= | 1285-1350 | init sequence: config → tools → telemetry → mcp → custom-commands |
+| =mcp-init= call site | =repl.scm= | 1311-1313 | =(mcp-init)= |
+| =(load-custom-commands!)= call | =repl.scm= | 1316-1319 | after mcp-init |
+| =xdg-config-home= | =config.scm= | 173 | =(or (getenv "XDG_CONFIG_HOME") ...)= |
+| =safe-path?= | =tools.scm= | 97-106 | rejects =..=, checks workspace containment |
+| =canonicalize-path-safe= | =tools.scm= | 133-136 | =(catch #t (lambda () (canonicalize-path path)) ...)= |
+| =capture-argv-in-dir= | =tools.scm= | 171-197 | =primitive-fork + execlp= pattern |
+| =hook-register= | =hooks.scm= | 53 | =(hook-register event name handler)= |
+| =hook-unregister= | =hooks.scm= | — | =(hook-unregister event name)= |
+| =session-add-message= | =session.scm= | 21 | =(session-add-message role content)= |
+| =session-current-name= | =session.scm= | 33 | returns current session name string |
+| =string-replace-substring= | =util.scm= | 30 | exported, chain for substitution |
+| =json-read-string= | =util.scm= | 132 | available but not needed (YAML, not JSON) |
+| Test pattern | =test-hooks.scm= | 1-12 | shebang, add-to-load-path, load test-harness, use-modules |
