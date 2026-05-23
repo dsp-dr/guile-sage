@@ -1,0 +1,21 @@
+CPRR
+====
+Attribution: Claude Opus 4.7 (1M ctx), pair w/ Aidan Pace. Triggered by
+  "git pull + ensure harness runs and tests pass".
+
+Conjecture: gmake check failed at test-image-gen (15/19) not from a
+  guile-sage regression but because this 16GiB Mac mini cannot load the
+  MLX image models. Confirmed via server log: flux2-klein faults mid-gen
+  ("mlx subprocess has exited unexpectedly", VAE decode) → HTTP 200 empty
+  body; z-image-turbo → HTTP 500 (needs 11.9GiB, has 11.3).
+
+Validation: `guile -L src tests/test-image-gen.scm` → 15/15, exit 0,
+  live tests SKIP w/ accurate reason. Full `gmake check` → "All tests
+  passed.", exit 0 (previously exit 2; tests after image-gen now run).
+
+Tests: probe gate exercised on a host where generation genuinely fails;
+  fixture-validation path unchanged and still PASS.
+
+Research: Ollama 0.21.0 returns 200 + Content-Length:0 when the image
+  runner subprocess dies; client 0.24.0 `ollama list` mis-renders empty
+  vs server /api/tags (which correctly lists the models).
