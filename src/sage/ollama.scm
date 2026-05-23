@@ -482,6 +482,16 @@
       (status-done elapsed)
 
       (cond
+       ;; A 200 with an empty/blank body means the image runner produced
+       ;; nothing — typically the MLX subprocess crashed or OOMed mid-
+       ;; generation. Surface that plainly instead of letting json-read /
+       ;; string-ref blow up with a cryptic out-of-range error.
+       ((and (= code 200)
+             (string-null? (string-trim-both resp-body)))
+        (log-error "ollama" "Image API returned empty body"
+                   `(("host" . ,(ollama-image-host))
+                     ("model" . ,(ollama-image-model))))
+        (error "Image API returned empty body (HTTP 200) — the model runner likely crashed or ran out of memory"))
        ((= code 200)
         (catch #t
           (lambda ()
