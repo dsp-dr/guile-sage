@@ -19,6 +19,7 @@
   #:use-module (sage provenance)
   #:use-module (sage scratch)
   #:use-module (sage version)
+  #:use-module (sage netpolicy)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -552,6 +553,27 @@ this is a local replacement that mirrors the curl call pattern."
         hex))
     (lambda (key . args) "hash-unavailable")))
 
+;;; compliance-get: GET U with the active UA; return the body string on
+;;; HTTP 200, else #f. Used for robots.txt / llms.txt pre-flight
+;;; consultation (small files, short timeout).
+(define (compliance-get u)
+  (let* ((body-tmp (format #f "/tmp/sage-cmpl-~a-~a" (getpid) (random 1000000)))
+         (code (capture-argv-in-dir
+                "/tmp"
+                "curl" "-sSL"
+                "-A" (fetch-ua)
+                "--max-time" "8"
+                "--max-filesize" "262144"
+                "-o" body-tmp
+                "-w" "%{http_code}"
+                u))
+         (ok (and code (string=? (string-trim-both code) "200")))
+         (body (if (and ok (file-exists? body-tmp))
+                   (call-with-input-file body-tmp get-string-all)
+                   #f)))
+    (when (file-exists? body-tmp) (delete-file body-tmp))
+    body))
+
 (define (fetch-url-execute args)
   (let ((url (assoc-ref args "url")))
     (cond
@@ -560,6 +582,40 @@ this is a local replacement that mirrors the curl call pattern."
      ((not (fetch-url-scheme-ok? url))
       (format #f "Error: only http:// and https:// URLs are permitted (got: ~a)" url))
      (else
+      ;; Under a declared bot identity (Walsh-Research, or SAGE_FETCH_COMPLIANCE),
+      ;; run the compliance pre-flight first: consult robots.txt (and enforce
+      ;; it) and discover llms.txt. Outside compliance mode, pre is #f and
+      ;; behaviour is unchanged.
+      (let* ((ua (fetch-ua))
+             (pre (and (compliance-mode? ua)
+                       (compliance-preflight url ua compliance-get))))
+        (when pre
+          (log-info "compliance" "pre-flight"
+                    `(("url" . ,url)
+                      ("token" . ,(assoc-ref pre "token"))
+                      ("robots" . ,(if (assoc-ref pre "robots?")
+                                       (if (assoc-ref pre "allowed") "allow" "disallow")
+                                       "absent"))
+                      ("llms" . ,(if (assoc-ref pre "llms-url") "present" "absent"))
+                      ("consulted" . ,(string-join (assoc-ref pre "consulted") ", "))
+                      ("crawl-delay" . ,(or (assoc-ref pre "crawl-delay") 0)))))
+        (if (and pre (not (assoc-ref pre "allowed")))
+            ;; robots.txt disallows this path for our declared identity:
+            ;; refuse without fetching the content.
+            (string-append
+             "<fetch-result"
+             " source=\"" (fetch-attr-escape url) "\""
+             " http-code=\"0\""
+             " trust=\"blocked\""
+             " compliance=\"" (fetch-attr-escape (assoc-ref pre "token")) "\""
+             " robots=\"disallow\""
+             " user-agent=\"" (fetch-attr-escape ua) "\">"
+             "<compliance-block>"
+             (fetch-attr-escape (assoc-ref pre "reason"))
+             " (per " (fetch-attr-escape (assoc-ref pre "robots-url")) "). "
+             "Operating under a declared bot identity; honoring robots.txt (RFC 9309)."
+             "</compliance-block></fetch-result>")
+      ;; Allowed (or not in compliance mode) -- fetch as usual.
       ;; Two-file curl: body goes to -o, headers to -D, and -w writes
       ;; "<content-type>\n<http-code>\n" to stdout so capture-argv-in-dir
       ;; returns just the metadata. Accept header prefers markdown,
@@ -571,7 +627,7 @@ this is a local replacement that mirrors the curl call pattern."
              (meta (capture-argv-in-dir
                     "/tmp"
                     "curl" "-sSL"
-                    "-A" (fetch-ua)
+                    "-A" ua
                     "-H" "Accept: text/markdown, text/plain;q=0.9, text/html;q=0.8, */*;q=0.5"
                     "--max-time" (number->string *fetch-timeout-secs*)
                     "--max-filesize" (number->string *fetch-max-bytes*)
@@ -612,8 +668,14 @@ this is a local replacement that mirrors the curl call pattern."
          " sha256=\"" sha "\""
          " fetched-at=\"" ts "\""
          " trust=\"untrusted\""
+         (if pre
+             (string-append
+              " compliance=\"" (fetch-attr-escape (assoc-ref pre "token")) "\""
+              " robots=\"" (if (assoc-ref pre "robots?") "allow" "absent") "\""
+              " llms=\"" (if (assoc-ref pre "llms-url") "present" "absent") "\"")
+             "")
          " storage=\"" (if inline? "inline" "scratch") "\""
-         " user-agent=\"" (fetch-attr-escape (fetch-ua)) "\">"
+         " user-agent=\"" (fetch-attr-escape ua) "\">"
          (if inline?
              (string-append "<![CDATA[" (fetch-cdata-safe body) "]]>")
              (string-append
@@ -623,7 +685,7 @@ this is a local replacement that mirrors the curl call pattern."
               "Body stored in scratch. Retrieve more with: "
               "scratch_get sha=" sha " offset=0 len=2000"
               "</preview-truncated>"))
-         "</fetch-result>"))))))
+         "</fetch-result>"))))))))
 
 ;;; format-edit-diff: Produce a small unified-diff-style summary for
 ;;; edit_file's return value. Shows ~2 lines of context before the
