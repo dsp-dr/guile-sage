@@ -18,6 +18,7 @@
   #:use-module (sage usage-stats)
   #:use-module (sage provenance)
   #:use-module (sage scratch)
+  #:use-module (sage version)
   #:use-module (srfi srfi-1)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
@@ -469,8 +470,26 @@ that care about the exit code (git_push, git_commit) can surface it."
 ;;; - CDATA is split on any occurrence of "]]>" in the body so we never
 ;;;   emit invalid XML even if the source contains the terminator.
 
-(define *fetch-ua*
-  "guile-sage/0.1 (+https://github.com/dsp-dr/guile-sage; Guile Scheme AI agent)")
+;; Default outbound User-Agent: identifies guile-sage and points at the
+;; public repo so sites can recognise and (if they wish) target us in
+;; robots.txt. Operators running under a declared bot identity override
+;; it via SAGE_FETCH_UA — e.g. the wal.sh "Walsh-Research" compliance UA
+;; (https://wal.sh/research/bots/compliance-spec R1). The product token
+;; before the first space is the robots.txt match key.
+(define *fetch-ua-default*
+  (string-append "guile-sage/" (version-string)
+                 " (+https://github.com/dsp-dr/guile-sage; Guile Scheme AI agent)"))
+
+;; Resolve the User-Agent lazily at fetch time: SAGE_FETCH_UA wins when
+;; set and non-blank, else the public-repo default. config-get is used
+;; (not bare getenv) because .env entries live in the *config* hash, not
+;; the process environment.
+(define (fetch-ua)
+  (let ((override (config-get "FETCH_UA")))
+    (if (and (string? override)
+             (not (string-null? (string-trim-both override))))
+        override
+        *fetch-ua-default*)))
 (define *fetch-max-bytes* 1048576)
 (define *fetch-timeout-secs* 10)
 ;; Bodies larger than *fetch-inline-threshold* are stored in the
@@ -552,7 +571,7 @@ this is a local replacement that mirrors the curl call pattern."
              (meta (capture-argv-in-dir
                     "/tmp"
                     "curl" "-sSL"
-                    "-A" *fetch-ua*
+                    "-A" (fetch-ua)
                     "-H" "Accept: text/markdown, text/plain;q=0.9, text/html;q=0.8, */*;q=0.5"
                     "--max-time" (number->string *fetch-timeout-secs*)
                     "--max-filesize" (number->string *fetch-max-bytes*)
@@ -594,7 +613,7 @@ this is a local replacement that mirrors the curl call pattern."
          " fetched-at=\"" ts "\""
          " trust=\"untrusted\""
          " storage=\"" (if inline? "inline" "scratch") "\""
-         " user-agent=\"" (fetch-attr-escape *fetch-ua*) "\">"
+         " user-agent=\"" (fetch-attr-escape (fetch-ua)) "\">"
          (if inline?
              (string-append "<![CDATA[" (fetch-cdata-safe body) "]]>")
              (string-append

@@ -427,6 +427,42 @@
       (unless (string-contains result "not found")
         (error "should report not-found" result)))))
 
+;;; ============================================================
+;;; fetch_url User-Agent resolution  (bd: guile-sage-ubh)
+;;; ============================================================
+;;;
+;;; Default points at the public repo; SAGE_FETCH_UA overrides it so an
+;;; operator can run under a declared bot identity (e.g. the wal.sh
+;;; Walsh-Research compliance UA). Blank overrides fall back.
+
+(format #t "~%--- Fetch User-Agent ---~%")
+
+(run-test "fetch-ua defaults to public-repo UA"
+  (lambda ()
+    (unsetenv "SAGE_FETCH_UA")
+    (let ((ua ((@@ (sage tools) fetch-ua))))
+      (unless (string-contains ua "guile-sage/")
+        (error "default UA must identify guile-sage" ua))
+      (unless (string-contains ua "github.com/dsp-dr/guile-sage")
+        (error "default UA must point at the public repo" ua)))))
+
+(run-test "SAGE_FETCH_UA overrides the default verbatim"
+  (lambda ()
+    (setenv "SAGE_FETCH_UA"
+            "Mozilla/5.0 (compatible; Walsh-Research/1.0; +https://wal.sh/bot/)")
+    (let ((ua ((@@ (sage tools) fetch-ua))))
+      (unless (string=? ua "Mozilla/5.0 (compatible; Walsh-Research/1.0; +https://wal.sh/bot/)")
+        (error "SAGE_FETCH_UA must be used verbatim" ua)))
+    (unsetenv "SAGE_FETCH_UA")))
+
+(run-test "blank SAGE_FETCH_UA falls back to default"
+  (lambda ()
+    (setenv "SAGE_FETCH_UA" "   ")
+    (let ((ua ((@@ (sage tools) fetch-ua))))
+      (unless (string-contains ua "guile-sage/")
+        (error "blank override must fall back to default" ua)))
+    (unsetenv "SAGE_FETCH_UA")))
+
 ;;; Summary
 
 (test-summary)
