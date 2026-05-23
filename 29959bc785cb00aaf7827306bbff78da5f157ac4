@@ -1,0 +1,25 @@
+CPRR
+====
+Attribution: Claude Opus 4.7 (1M ctx), pair w/ Aidan Pace. Request:
+  "default UA points to public repo; when I run it use the Walsh-Research
+  UA, per wal.sh compliance-spec."
+
+Conjecture: a lazy env-resolved UA (config-get FETCH_UA) gives a clean
+  public default while letting the operator's gitignored .env supply the
+  Walsh-Research identity, with no committed PII/identity leakage.
+
+Validation: spec R1 fetched directly (WebFetch ECONNREFUSED; curl OK) —
+  required UA is exactly "Mozilla/5.0 (compatible; Walsh-Research/1.0;
+  +https://wal.sh/bot/)", matches request. Verified resolution three
+  ways: default → guile-sage/1.0.1 (+repo); real env override → exact UA;
+  .env override (config-load-dotenv) → exact UA.
+
+Tests: 3 new in test-tools.scm (default/verbatim-override/blank-fallback)
+  → 45/45; full `gmake check` → "All tests passed.", exit 0.
+
+Research: config-load-dotenv stores into *config* hash, NOT setenv, so
+  getenv alone can't see .env — config-get is the correct accessor.
+  Compliance contract R2-R9 (robots.txt RFC9309, /.well-known blocklist,
+  Crawl-delay, Retry-After backoff) is NOT yet implemented → guile-sage-0bi
+  filed and blocked-on-ubh; the Walsh-Research UA is non-conformant until
+  that lands.
