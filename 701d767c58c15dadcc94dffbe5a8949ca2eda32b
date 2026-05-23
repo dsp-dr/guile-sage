@@ -1,0 +1,31 @@
+CPRR
+====
+Attribution: Claude Opus 4.7 (1M ctx), pair w/ Aidan Pace. Sequence:
+  "confirm it calls llms.txt for the compliance-spec & are we compliant"
+  -> "identifying as Walsh-Research should trigger compliance"
+  -> "add beads and implement; flag we're a harness following the spec".
+
+Conjecture: claiming the Walsh-Research identity (SAGE_FETCH_UA) without
+  honoring the contract is non-conformant; the contract's first gate
+  (R2 robots.txt) + llms.txt discovery is a self-contained, testable
+  slice worth shipping before the heavier R3/R4/R5.
+
+Validation:
+  - BEFORE: live debug run + direct fetch_url showed ONE GET to the exact
+    URL, no robots/llms, trust=untrusted -> not compliant, no llms.txt.
+  - AFTER (live, wal.sh): compliance-spec -> robots=allow llms=present,
+    fetched; dogfood-disallow -> trust=blocked, no content; escape hatch
+    SAGE_FETCH_COMPLIANCE=0 fetches normally. Debug log records
+    "[compliance] pre-flight ... consulted=…/robots.txt, …/llms.txt".
+  - wal.sh has a named "User-agent: Walsh-Research / Disallow:
+    /research/bots/dogfood-disallow" group; RFC9309 says a named group
+    suppresses "*", so the wildcard ?w= rules don't apply to us.
+
+Tests: test-netpolicy.scm 21/21 (token, gating, split-url, robots
+  longest-match incl named-vs-* and wildcard/$ patterns, crawl-delay,
+  preflight via stub getter). Full `gmake check` -> "All tests passed.".
+
+Research: robots fetch reuses curl pattern w/ active UA, 8s timeout,
+  256KB cap, per-host cache so we never amplify load on hosts we are
+  trying to be polite to. llms.txt = llmstxt.org convention (NOT in the
+  wal.sh spec) — fetched as guidance, never blocks.
