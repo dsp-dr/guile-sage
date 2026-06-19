@@ -1,9 +1,31 @@
 #+TITLE: guile-sage: Sandboxing, egress, and connection modes
 #+OPTIONS: toc:2
+#+PROPERTY: header-args:sh :var LITELLM_HOST=(getenv "LITELLM_HOST")
 
 Sage talks to one model backend at a time, selected by =SAGE_PROVIDER=. You can
 run it directly on the host, or confined in a sandbox. This note covers the three
 connection modes, how to run sage in a sandbox, and the egress each mode needs.
+
+The examples are runnable. Rather than hardcode an address, they reference
+=$LITELLM_HOST=.
+
+* Setup — the =LITELLM_HOST= contract
+
+By convention any =*_HOST= value is a *DNS-resolvable name or an IP literal*, with
+an optional =:port=. That contract is what keeps these docs portable and free of
+hardcoded addresses: the examples name a host, your environment resolves it. The
+=#+PROPERTY= line at the top passes =LITELLM_HOST= from your environment into every
+shell block; set it once, with a sensible local default:
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"     # _HOST := DNS name or IP, optional :port
+echo "LITELLM_HOST=$LITELLM_HOST"
+#+end_src
+
+In Emacs, =C-c C-c= runs the block with the value org pulled from your environment;
+from a shell, =export LITELLM_HOST=your-gateway:4000= first (e.g. a LAN name like
+=mini.lan:4000=). Every block below begins with the same =: "${LITELLM_HOST:=…}"=
+guard so it also runs standalone.
 
 * Connection modes
 
@@ -13,7 +35,7 @@ full set). Three shapes, cheapest-isolation first:
 | Mode | =SAGE_PROVIDER= | Endpoint var | Secret in env | Egress target |
 |------+-----------------+--------------+---------------+---------------|
 | Direct Ollama (local) | =ollama= | =SAGE_OLLAMA_HOST= (default =http://localhost:11434=) | none | localhost only |
-| Via LiteLLM gateway | =openai= | =SAGE_OPENAI_BASE= (e.g. =http://<litellm-host>:4000/v1=) | *proxy key only* | the proxy host:port |
+| Via LiteLLM gateway | =openai= | =SAGE_OPENAI_BASE= (= =http://$LITELLM_HOST/v1=) | *proxy key only* | =$LITELLM_HOST= |
 | Direct provider | =gemini= / =anthropic= / =openai= | provider default / =SAGE_OPENAI_BASE= | *real provider key* | provider API host |
 
 **Prefer the LiteLLM gateway** when you want one endpoint, cost metering,
@@ -22,18 +44,18 @@ In gateway mode sage holds only the low-privilege proxy key (=SAGE_OPENAI_API_KE
 = the proxy key), never the upstream provider key; the proxy injects the real key
 at egress. This is the property that makes sandboxing meaningful.
 
-#+begin_src sh
-# Direct Ollama (local, no key)
-SAGE_PROVIDER=ollama SAGE_OLLAMA_HOST=http://localhost:11434
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"
 
 # Via LiteLLM (proxy key only; model name selects the upstream)
-SAGE_PROVIDER=openai \
-SAGE_OPENAI_BASE=http://<litellm-host>:4000/v1 \
-SAGE_OPENAI_API_KEY=sk-litellm-local \
-SAGE_MODEL=gemini-2.5-flash        # or ollama-llama3.2, gemini-2.5-pro, ...
+export SAGE_PROVIDER=openai
+export SAGE_OPENAI_BASE="http://$LITELLM_HOST/v1"
+export SAGE_OPENAI_API_KEY=sk-litellm-local
+export SAGE_MODEL=gemini-2.5-flash        # or ollama-llama3.2, gemini-2.5-pro, ...
+echo "$SAGE_PROVIDER -> $SAGE_OPENAI_BASE (model $SAGE_MODEL)"
 
-# Direct provider (real key in env — only when not going through the gateway)
-SAGE_PROVIDER=gemini GEMINI_API_KEY=...
+# Direct Ollama (local, no key):     SAGE_PROVIDER=ollama SAGE_OLLAMA_HOST=http://localhost:11434
+# Direct provider (real key in env): SAGE_PROVIDER=gemini GEMINI_API_KEY=...
 #+end_src
 
 * Running in a sandbox
@@ -46,25 +68,35 @@ The sage process is a good sandbox candidate: give it the model endpoint and the
 Deny reads of credential stores and writes into =$HOME=; run with a *keyless*
 environment (=env -i= → only the proxy key reaches sage). Profile:
 
-#+begin_src scheme
-;; sage-sandbox.sb
+SBPL (seatbelt's profile language) has no =getenv= / =string-append=, so paths
+are passed in as parameters with =-D NAME=value= and read back with =(param
+"NAME")= — keeping the profile free of any hardcoded user path:
+
+#+begin_src scheme :tangle sage-sandbox.sb
+;; sage-sandbox.sb — paths come from sandbox-exec -D params (see the sh block)
 (version 1)
 (allow default)
 (deny file-read*
-  (subpath "/Users/<you>/.aws") (subpath "/Users/<you>/.config/gcloud")
-  (subpath "/Users/<you>/.ssh") (subpath "/Users/<you>/.ollama")
+  (subpath (param "AWS"))
+  (subpath (param "GCLOUD"))
+  (subpath (param "SSH"))
+  (subpath (param "OLLAMA"))
   (regex #"/\.env$"))
-(deny file-write* (subpath "/Users/<you>"))
+(deny file-write* (subpath (param "HOME")))
 (allow file-write* (subpath "/tmp") (subpath "/private/var/folders"))
 #+end_src
 
 #+begin_src sh
-sandbox-exec -f sage-sandbox.sb env -i \
-  HOME=/Users/<you> PATH=/opt/homebrew/bin:/usr/bin:/bin GUILE_AUTO_COMPILE=0 \
-  SAGE_PROVIDER=openai SAGE_OPENAI_BASE=http://<litellm-host>:4000/v1 \
+: "${LITELLM_HOST:=localhost:4000}"
+sandbox-exec \
+  -D HOME="$HOME" -D AWS="$HOME/.aws" -D GCLOUD="$HOME/.config/gcloud" \
+  -D SSH="$HOME/.ssh" -D OLLAMA="$HOME/.ollama" \
+  -f sage-sandbox.sb env -i \
+  HOME="$HOME" PATH=/opt/homebrew/bin:/usr/bin:/bin GUILE_AUTO_COMPILE=0 \
+  SAGE_PROVIDER=openai SAGE_OPENAI_BASE="http://$LITELLM_HOST/v1" \
   SAGE_OPENAI_API_KEY=sk-litellm-local SAGE_MODEL=gemini-2.5-flash \
   SAGE_DATA_DIR=/tmp/sage SAGE_CACHE_DIR=/tmp/sage/cache SAGE_CONFIG_DIR=/tmp/sage/config \
-  guile -L src -l scripts/<your-entry>.scm
+  guile -L src -l scripts/your-entry.scm
 #+end_src
 
 Verified: confined sage lists gateway models but is *denied* the credential store
@@ -75,15 +107,15 @@ credential property — pair them.
 ** FreeBSD — Bastille jail (validated)
 
 Run sage in a Bastille jail; restrict egress with =pf= NAT so the jail can reach
-only the gateway host:port. The jail has no access to host credential files — it
-holds only the proxy key. Native, no container runtime.
+only =$LITELLM_HOST=. The jail has no access to host credential files — it holds
+only the proxy key. Native, no container runtime.
 
-Validated full stack: *Bastille jail → pf NAT → LiteLLM proxy (<litellm-host>:4000)
-→ Gemini*, with guile-sage generating a haiku about jails from inside a jail. The
+Validated full stack: *Bastille jail → pf NAT → LiteLLM proxy (=$LITELLM_HOST=) →
+Gemini*, with guile-sage generating a haiku about jails from inside a jail. The
 credential boundary held: the jail never saw a provider secret.
 
-The pattern is language-agnostic — anything that can HTTP POST to the proxy works
-from inside the jail. Runtimes validated against the gateway from a jail:
+The pattern is language-agnostic — anything that can HTTP POST to =$LITELLM_HOST=
+works from inside the jail. Runtimes validated against the gateway from a jail:
 
 | Runtime      | Tool          | Status                          |
 |--------------+---------------+---------------------------------|
@@ -97,14 +129,14 @@ makes the call.
 
 ** Linux / container — Docker, podman, or =colima= (headless macOS)
 
-Run sage in a container whose network policy permits only the gateway. Mount no
+Run sage in a container whose network policy permits only =$LITELLM_HOST=. Mount no
 host secrets; pass the proxy key via env.
 
 ** Process-level — Deno / WASM (for tool code)
 
-For untrusted *tool* code rather than sage itself: Deno
-(=--allow-net=<litellm-host>:4000=, no =--allow-env=) or Pyodide (WASM, host-mediated
-fetch) give a keyless, network-pinned execution context.
+For untrusted *tool* code rather than sage itself: Deno (=--allow-net=$LITELLM_HOST=,
+no =--allow-env=) or Pyodide (WASM, host-mediated fetch) give a keyless,
+network-pinned execution context.
 
 * Egress configuration
 
@@ -114,15 +146,16 @@ policy, and (if applicable) the LiteLLM credential's own allowed-hosts.
 | Mode | Allow egress to |
 |------+-----------------|
 | Direct Ollama | =localhost:11434= (no external egress) |
-| LiteLLM gateway | the proxy only, e.g. =<litellm-host>:4000= |
+| LiteLLM gateway | =$LITELLM_HOST= only |
 | Direct Gemini | =generativelanguage.googleapis.com:443= |
 | Direct Anthropic | =api.anthropic.com:443= |
 | Direct OpenAI | =api.openai.com:443= |
 
-Gateway mode collapses egress to a single internal host — the simplest allowlist,
-and the upstream provider hosts are reached by the *proxy*, not by sage.
+Gateway mode collapses egress to a single host (=$LITELLM_HOST=) — the simplest
+allowlist, and the upstream provider hosts are reached by the *proxy*, not by sage.
 
 * See also
 
 - =.env.template= — full provider/key variable reference
 - =src/sage/openai.scm= — the openai-compat client (=SAGE_OPENAI_BASE=, =SAGE_OPENAI_API_KEY=, =SAGE_MODEL=)
+- =src/sage/sandbox.scm= — =(sandbox-confined?)=, =(sandbox-confinement-report)=
