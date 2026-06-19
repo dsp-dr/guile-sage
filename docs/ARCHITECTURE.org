@@ -137,6 +137,8 @@ SHOW_LEGEND()
 | ollama         | =ollama.scm=    | Ollama API client                           | =ollama-chat[-streaming]=, =ollama-parse-tool-call=      |
 | openai         | =openai.scm=    | OpenAI-compat client (LiteLLM, vLLM)       | =openai-chat-with-tools=, =openai-chat=                 |
 | gemini         | =gemini.scm=    | Google AI Gemini native client              | =gemini-chat-with-tools=, =gemini-chat=                 |
+| netpolicy      | =netpolicy.scm= | Bot-compliance pre-flight (robots.txt, llms.txt) | =ua-robots-token=, robots/llms gates              |
+| sandbox        | =sandbox.scm=   | Execution-context / confinement awareness   | =sandbox-context=, =sandbox-confined?=, =sandbox-confinement-report= |
 | mcp            | =mcp.scm=       | MCP SSE client                              | =mcp-init=, =mcp-call-tool=, =mcp-shutdown!=            |
 | tools          | =tools.scm=     | Tool registry + dispatch                    | =register-tool=, =execute-tool=, =tools-to-schema=      |
 | telemetry      | =telemetry.scm= | OTLP/HTTP counter emission                  | =telemetry-init=, =inc-counter!=, =telemetry-flush!=    |

@@ -1,4 +1,4 @@
-#+TITLE: Sandboxing, egress, and connection modes
+#+TITLE: guile-sage: Sandboxing, egress, and connection modes
 #+OPTIONS: toc:2
 
 Sage talks to one model backend at a time, selected by =SAGE_PROVIDER=. You can
@@ -13,7 +13,7 @@ full set). Three shapes, cheapest-isolation first:
 | Mode | =SAGE_PROVIDER= | Endpoint var | Secret in env | Egress target |
 |------+-----------------+--------------+---------------+---------------|
 | Direct Ollama (local) | =ollama= | =SAGE_OLLAMA_HOST= (default =http://localhost:11434=) | none | localhost only |
-| Via LiteLLM gateway | =openai= | =SAGE_OPENAI_BASE= (e.g. =http://192.168.86.22:4000/v1=) | *proxy key only* | the proxy host:port |
+| Via LiteLLM gateway | =openai= | =SAGE_OPENAI_BASE= (e.g. =http://<litellm-host>:4000/v1=) | *proxy key only* | the proxy host:port |
 | Direct provider | =gemini= / =anthropic= / =openai= | provider default / =SAGE_OPENAI_BASE= | *real provider key* | provider API host |
 
 **Prefer the LiteLLM gateway** when you want one endpoint, cost metering,
@@ -28,7 +28,7 @@ SAGE_PROVIDER=ollama SAGE_OLLAMA_HOST=http://localhost:11434
 
 # Via LiteLLM (proxy key only; model name selects the upstream)
 SAGE_PROVIDER=openai \
-SAGE_OPENAI_BASE=http://192.168.86.22:4000/v1 \
+SAGE_OPENAI_BASE=http://<litellm-host>:4000/v1 \
 SAGE_OPENAI_API_KEY=sk-litellm-local \
 SAGE_MODEL=gemini-2.5-flash        # or ollama-llama3.2, gemini-2.5-pro, ...
 
@@ -61,7 +61,7 @@ environment (=env -i= → only the proxy key reaches sage). Profile:
 #+begin_src sh
 sandbox-exec -f sage-sandbox.sb env -i \
   HOME=/Users/<you> PATH=/opt/homebrew/bin:/usr/bin:/bin GUILE_AUTO_COMPILE=0 \
-  SAGE_PROVIDER=openai SAGE_OPENAI_BASE=http://192.168.86.22:4000/v1 \
+  SAGE_PROVIDER=openai SAGE_OPENAI_BASE=http://<litellm-host>:4000/v1 \
   SAGE_OPENAI_API_KEY=sk-litellm-local SAGE_MODEL=gemini-2.5-flash \
   SAGE_DATA_DIR=/tmp/sage SAGE_CACHE_DIR=/tmp/sage/cache SAGE_CONFIG_DIR=/tmp/sage/config \
   guile -L src -l scripts/<your-entry>.scm
@@ -78,7 +78,7 @@ Run sage in a Bastille jail; restrict egress with =pf= NAT so the jail can reach
 only the gateway host:port. The jail has no access to host credential files — it
 holds only the proxy key. Native, no container runtime.
 
-Validated full stack: *Bastille jail → pf NAT → LiteLLM proxy (192.168.86.22:4000)
+Validated full stack: *Bastille jail → pf NAT → LiteLLM proxy (<litellm-host>:4000)
 → Gemini*, with guile-sage generating a haiku about jails from inside a jail. The
 credential boundary held: the jail never saw a provider secret.
 
@@ -103,7 +103,7 @@ host secrets; pass the proxy key via env.
 ** Process-level — Deno / WASM (for tool code)
 
 For untrusted *tool* code rather than sage itself: Deno
-(=--allow-net=192.168.86.22:4000=, no =--allow-env=) or Pyodide (WASM, host-mediated
+(=--allow-net=<litellm-host>:4000=, no =--allow-env=) or Pyodide (WASM, host-mediated
 fetch) give a keyless, network-pinned execution context.
 
 * Egress configuration
@@ -114,7 +114,7 @@ policy, and (if applicable) the LiteLLM credential's own allowed-hosts.
 | Mode | Allow egress to |
 |------+-----------------|
 | Direct Ollama | =localhost:11434= (no external egress) |
-| LiteLLM gateway | the proxy only, e.g. =192.168.86.22:4000= |
+| LiteLLM gateway | the proxy only, e.g. =<litellm-host>:4000= |
 | Direct Gemini | =generativelanguage.googleapis.com:443= |
 | Direct Anthropic | =api.anthropic.com:443= |
 | Direct OpenAI | =api.openai.com:443= |

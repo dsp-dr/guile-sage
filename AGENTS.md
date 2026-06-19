@@ -405,6 +405,8 @@ src/sage/
   ollama.scm        Ollama native API client (/api/chat)
   openai.scm        OpenAI-compat client (LiteLLM, vLLM, etc.)
   gemini.scm        Google AI Gemini client
+  netpolicy.scm     Bot-compliance pre-flight (robots.txt / llms.txt) for outbound fetches
+  sandbox.scm       Execution-context / confinement awareness (sandbox-confined?)
   mcp.scm           MCP SSE client (skills-hub, tools/list, tools/call)
   tools.scm         Tool registry (33+ built-in, safe/unsafe split, fetch_url, edit_file diff)
   scratch.scm       Content-addressed scratch store for large tool outputs
