@@ -85,34 +85,64 @@ observed "for free."
 | Streaming on (Gemini)                  | *SEGV*    | =[streaming gemini-2.5-flash]= then SIGSEGV --- crashes the TUI       |
 | MCP startup with SSE servers in config | *SEGV*    | =mcp-init= -> =sse-open-connection= -> =primitive-fork= in a multi-threaded Guile -> SIGSEGV before the banner |
 
-* Open issues these tests surfaced
+* First-principles finding: Guile spawn-primitive safety
 
-1. *=mcp-init= segfault* --- =sse-open-connection= uses =primitive-fork= in a
-   process that already has Guile's background threads running. Forking a
-   multi-threaded process and doing non-async-signal-safe work in the child is
-   undefined behaviour. The =catch #t= around =mcp-init= cannot help: a SIGSEGV
-   is not a Scheme exception. Current workaround: =SAGE_MCP_DISABLE=1=.
-   Real fix: replace the fork+exec with =open-pipe*= / =system*=
-   (=posix_spawn=), or gate MCP behind a single-threaded launcher.
+The two segfaults shared one root cause, established by isolating each
+subprocess primitive on this platform (FreeBSD =guile3= 3.0.10, BDW-GC, with
+Guile's finalizer + signal-delivery threads already running). The experiment
+(=guile3 -c '<prim>'=, exit code observed):
 
-2. *Streaming segfault* --- the streaming chat path crashes (reproduced on
-   Gemini). Likely the same fork/thread or a buffer/port issue in the SSE
-   reader. Current workaround: =SAGE_STREAMING=0= (non-streaming drives the
-   full agent loop, tools included, with no crash). Re-enable per session with
-   =/stream=.
+| Primitive                       | Result | Why                                              |
+|---------------------------------+--------+--------------------------------------------------|
+| =(system "…")=                  | OK     | pure libc =system(3)=; child never touches Guile |
+| =(system* …)=                   | SEGV   | Guile-native spawn; forks the GC'd, threaded VM  |
+| =(open-pipe* …)=                | SEGV   | same                                             |
+| =(open-input-pipe …)=           | SEGV   | same                                             |
+| =(primitive-fork)= + exec/exit  | OK*    | survives ONLY if the child execs/exits before    |
+|                                 |        | allocating or running a finalizer                |
 
-3. *Raw error leakage on auth failure* --- backend 4xx/auth errors should map to
-   a single-line user message (e.g. "❌ Gemini: invalid API key (401)") with
-   the raw body logged, not printed. The trailing =) #f)= indicates an
-   unhandled throw value reaching the display path.
+*Conjecture (validated):* forking a process that already runs Guile's
+background threads + BDW-GC and then doing any GC-allocating work in the child
+corrupts the heap → SIGSEGV. =mkdir -p= via =primitive-fork=+=execlp= survives
+because the child execs immediately; =mcp-init='s curl-via-=system*= and
+streaming's =open-input-pipe= did not.
 
-4. *Unbounded probe on a dropping host* --- =provider-list-models= should carry
-   a short connect timeout so a black-holed host degrades like a refused one
-   (fast fallback) instead of appearing to hang at startup.
+*Boundary (now honoured in code):* in long-lived, multi-threaded Guile, shell
+out only via libc =(system …)= — never =system*=/=open-pipe*=/=open-input-pipe=.
+For streaming, =(system "curl … > FIFO &")= + =(open-input-file FIFO)= gives
+true incremental reads with no Guile-native fork. A SIGSEGV is uncatchable, so
+=catch #t= is not a safety net — the only defence is not forking the VM.
+
+* Resolved --- 2026-06-21
+
+| Fault                          | Fix                                                                 | Verified |
+|--------------------------------+---------------------------------------------------------------------+----------|
+| =mcp-init= SIGSEGV (#1)        | =sse-open-connection=: libc =system= + FIFO, no =primitive-fork=/=system*= | startup reaches banner with SSE servers in =~/.claude.json= |
+| Streaming SIGSEGV (#2)         | =http-post-streaming-curl=: =open-input-pipe= -> libc =system= + FIFO; strip SSE =data:= prefix | streamed tokens render, REPL ALIVE |
+| Raw error leak / =) #f)= (#3)  | provider maps non-200 -> clean =[Gemini …: msg]=; REPL display shows one line, logs raw; streaming falls back to non-streaming on empty | bad key shows clean auth-failure line, no JSON |
+| Unbounded probe hang (#4)      | all HTTP via =curl --connect-timeout 5=; native (timeout-less) path dropped | black-holed host returns in ~5s, not a hang |
+
+* Boundary policy (consistency target across providers)
+
+The behaviours above must be *identical* whichever backend is active
+(ollama / gemini / openai-shape). The contract:
+
+- *Timeout:* every request carries =--connect-timeout 5= + a bounded
+  =--max-time=; the model probe degrades to defaults on timeout.
+- *Error handling:* non-200 -> a single clean =[<provider> <label>: <msg>]=
+  line, full body logged, REPL stays live. No raw body, no Scheme value.
+- *Backoff:* transient failures (code 0 / 429 / 5xx) retry with exponential
+  backoff (capped); permanent ones (401/403/404) do not.
+- *Debounce:* repeated identical failures within the backoff window are
+  suppressed rather than re-hammered (cf. =telemetry= flush backoff).
+
+Cross-provider parity for error handling + backoff is tracked as follow-up;
+gemini is the reference implementation.
 
 * Re-running
 
 Each fault is reproduced by the skeleton above with the matching injection.
 The segfault detector (=pgrep -f repl-start= -> ALIVE/DEAD) is the key
 assertion: under a PTY a crash prints =Segmentation fault= into the pane, and
-the process disappears.
+the process disappears. The spawn-primitive matrix re-runs standalone with
+=guile3 -c '<prim>'= and reading =$?= (139 = SIGSEGV).
