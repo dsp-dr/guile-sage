@@ -28,6 +28,7 @@
             json-empty-object
             as-list
             string-replace-substring
+            shell-escape
             make-temp-file
             parse-curl-header-dump
             ;; HTTP debug logging (SAGE_DEBUG_HTTP=1)
@@ -390,7 +391,7 @@ Cloudflare AI Gateway (cf-aig-authorization)."
                                       (shell-escape (cdr h))))
                             headers)
                        " "))
-         (cmd (format #f "curl -s -w '\\n%{http_code}' ~a '~a' > '~a'"
+         (cmd (format #f "curl -s --connect-timeout 5 --max-time 60 -w '\\n%{http_code}' ~a '~a' > '~a'"
                       header-args
                       (shell-escape url)
                       out-file)))
@@ -467,7 +468,7 @@ Cloudflare AI Gateway (cf-aig-authorization)."
                                             (shell-escape (cdr h))))
                                   headers))
                        " "))
-         (cmd (format #f "curl -s --max-time ~a -w '\\n%{http_code}' -X POST ~a -d '@~a' '~a' > '~a'"
+         (cmd (format #f "curl -s --connect-timeout 5 --max-time ~a -w '\\n%{http_code}' -X POST ~a -d '@~a' '~a' > '~a'"
                       timeout header-args in-file
                       (shell-escape url)
                       out-file)))
@@ -483,11 +484,12 @@ Cloudflare AI Gateway (cf-aig-authorization)."
 
 ;;; http-get: Use curl for HTTPS (gnutls cert issues), native for HTTP
 (define* (http-get url #:key (headers '()))
+  ;; curl for both http and https: native http-request has no connect
+  ;; timeout, so a black-holed host (e.g. an Ollama box that drops packets)
+  ;; hangs the model probe at startup. curl --connect-timeout fails fast.
   (let ((result (catch #t
                   (lambda ()
-                    (if (https? url)
-                        (http-get-curl url #:headers headers)
-                        (http-get-native url #:headers headers)))
+                    (http-get-curl url #:headers headers))
                   (lambda (key . args)
                     (cons 0 (format #f "HTTP error: ~a ~a" key args))))))
     (when (provenance-enabled?)
@@ -510,9 +512,7 @@ Cloudflare AI Gateway (cf-aig-authorization)."
        ("body" . ,(http-debug-truncate (or body "")))))
     (let* ((result (catch #t
                      (lambda ()
-                       (if (https? url)
-                           (http-post-curl url body #:headers headers)
-                           (http-post-native url body #:headers headers)))
+                       (http-post-curl url body #:headers headers))
                      (lambda (key . args)
                        (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
            (now (gettimeofday))
@@ -548,9 +548,7 @@ Cloudflare AI Gateway (cf-aig-authorization)."
        ("body" . ,(http-debug-truncate (or body "")))))
     (let* ((result (catch #t
                      (lambda ()
-                       (if (https? url)
-                           (http-post-curl url body #:headers headers #:timeout timeout)
-                           (http-post-native url body #:headers headers)))
+                       (http-post-curl url body #:headers headers #:timeout timeout))
                      (lambda (key . args)
                        (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
            (now (gettimeofday))
@@ -736,8 +734,16 @@ Cloudflare AI Gateway (cf-aig-authorization)."
 ;;; Also captures response headers via -D for guardrail visibility.
 (define* (http-post-streaming-curl url body on-chunk
                                    #:key (timeout 30) (headers '()))
+  ;; NOTE: we deliberately use libc (system ...) + a FIFO rather than
+  ;; (open-input-pipe ...). On some Guile builds (e.g. FreeBSD guile3
+  ;; 3.0.10) every Guile-native subprocess primitive — open-input-pipe,
+  ;; open-pipe*, system* — SIGSEGVs because it forks a process that already
+  ;; has Guile's finalizer/signal threads + BDW-GC running. libc system()
+  ;; is a pure C call and is safe. curl writes the SSE stream into the FIFO;
+  ;; open-input-file blocks until curl starts writing, giving true streaming.
   (let* ((tmp-file (make-temp-file "sage-stream"))
-         (header-file (format #f "/tmp/sage-stream-hdrs-~a" (getpid)))
+         (header-file (string-append tmp-file "-hdrs"))
+         (fifo-path (string-append tmp-file "-fifo"))
          (dummy (call-with-output-file tmp-file
                   (lambda (port) (display body port))))
          (header-args (string-join
@@ -748,18 +754,31 @@ Cloudflare AI Gateway (cf-aig-authorization)."
                                             (shell-escape (cdr h))))
                                   headers))
                        " "))
-         (cmd (format #f "curl -sN --connect-timeout ~a -D '~a' -X POST ~a -d '@~a' '~a'"
+         (mkfifo-ok
+          (begin
+            (when (file-exists? fifo-path) (delete-file fifo-path))
+            (system (format #f "mkfifo '~a'" (shell-escape fifo-path)))))
+         (cmd (format #f "curl -sN --connect-timeout ~a -D '~a' -X POST ~a -d '@~a' '~a' > '~a' &"
                       timeout header-file header-args tmp-file
-                      (shell-escape url)))
-         (pipe (open-input-pipe cmd))
+                      (shell-escape url) (shell-escape fifo-path)))
+         (started (system cmd))
+         (pipe (open-input-file fifo-path))
          (final-chunk #f))
     (catch #t
       (lambda ()
         (let loop ()
           (let ((line (read-line pipe)))
             (unless (eof-object? line)
-              (let ((trimmed (string-trim-both line)))
-                (unless (string-null? trimmed)
+              (let* ((trimmed0 (string-trim-both line))
+                     ;; SSE framing (e.g. Gemini ?alt=sse): payload lines are
+                     ;; "data: {json}". Strip the prefix so the JSON parses;
+                     ;; NDJSON backends (Ollama) have no prefix and are
+                     ;; unaffected. "[DONE]" sentinels carry no JSON.
+                     (trimmed (if (string-prefix? "data:" trimmed0)
+                                  (string-trim-both (substring trimmed0 5))
+                                  trimmed0)))
+                (unless (or (string-null? trimmed)
+                            (string=? trimmed "[DONE]"))
                   (catch #t
                     (lambda ()
                       (let ((chunk (json-read-string trimmed)))
@@ -772,7 +791,9 @@ Cloudflare AI Gateway (cf-aig-authorization)."
               (loop)))))
       (lambda (key . args)
         #f))
-    (close-pipe pipe)
+    (catch #t (lambda () (close-port pipe)) (lambda args #f))
+    (catch #t (lambda () (when (file-exists? fifo-path) (delete-file fifo-path)))
+           (lambda args #f))
     ;; Extract guardrail header from response headers if present
     (let ((guardrails
            (catch #t
