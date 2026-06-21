@@ -228,7 +228,7 @@ For Cloudflare AI Gateway configurations:
             (error "Failed to parse API response" resp-body))))
        ((= code 0)
         (log-error "openai" "API connection failed" `(("error" . ,resp-body)))
-        (error "API connection failed" resp-body))
+        (openai-error-response 0 resp-body))
        ((= code 400)
         ;; LiteLLM guardrail / content policy violation
         (let ((msg (openai-error-message resp-body)))
@@ -242,7 +242,7 @@ For Cloudflare AI Gateway configurations:
        (else
         (log-error "openai" "Chat request failed"
                    `(("code" . ,code) ("error" . ,resp-body)))
-        (error "Chat request failed" code resp-body))))))
+        (openai-error-response code resp-body))))))
 
 ;;; openai-chat-streaming: Streaming chat via SSE.
 (define* (openai-chat-streaming model messages on-token #:key (tools '()))
@@ -339,7 +339,7 @@ For Cloudflare AI Gateway configurations:
             (error "Failed to parse API response" resp-body))))
        ((= code 0)
         (log-error "openai" "API connection failed" `(("error" . ,resp-body)))
-        (error "API connection failed" resp-body))
+        (openai-error-response 0 resp-body))
        ((= code 400)
         ;; LiteLLM guardrail / content policy violation
         (let ((msg (openai-error-message resp-body)))
@@ -352,7 +352,7 @@ For Cloudflare AI Gateway configurations:
        (else
         (log-error "openai" "Chat request failed"
                    `(("code" . ,code) ("error" . ,resp-body)))
-        (error "Chat request failed" code resp-body))))))
+        (openai-error-response code resp-body))))))
 
 ;;; ============================================================
 ;;; Response Normalisation
@@ -467,3 +467,21 @@ For Cloudflare AI Gateway configurations:
                 (or (assoc-ref err "message") body)
                 (or err body)))))
     (lambda args (or body "(unparseable response)"))))
+
+;;; openai-error-response: Clean, normalised assistant message for a non-200
+;;; (or unparseable) response. Mirrors gemini-/ollama-error-response so every
+;;; provider fails identically — one "[Provider <label>: <msg>]" line, never a
+;;; raw body or a thrown Scheme value. Keeps the REPL alive.
+(define (openai-error-response code body)
+  (let ((msg (openai-error-message body))
+        (label (cond ((= code 0)    "connection failed")
+                     ((= code 401)  "authentication failed (invalid key)")
+                     ((= code 403)  "authentication failed (forbidden)")
+                     ((= code 429)  "rate limited")
+                     ((>= code 500) "server error")
+                     (else (format #f "request failed (HTTP ~a)" code)))))
+    `(("message" . (("role" . "assistant")
+                    ("content" . ,(format #f "[Provider ~a: ~a]" label msg))))
+      ("done" . ,#t)
+      ("prompt_eval_count" . 0)
+      ("eval_count" . 0))))

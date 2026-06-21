@@ -171,6 +171,24 @@
                 body))))
     (lambda args (or body "(unparseable response)"))))
 
+;;; ollama-error-response: Clean, normalised assistant message for a non-200
+;;; (or unparseable) response. Mirrors gemini-error-response so every provider
+;;; surfaces failures identically: a single "[Ollama <label>: <msg>]" line,
+;;; never a raw body or a thrown Scheme value. Keeps the REPL alive.
+(define (ollama-error-response code body)
+  (let ((msg (ollama-error-message body))
+        (label (cond ((= code 0)    "connection failed")
+                     ((= code 401)  "authentication failed")
+                     ((= code 403)  "authentication failed (forbidden)")
+                     ((= code 429)  "rate limited")
+                     ((>= code 500) "server error")
+                     (else (format #f "request failed (HTTP ~a)" code)))))
+    `(("message" . (("role" . "assistant")
+                    ("content" . ,(format #f "[Ollama ~a: ~a]" label msg))))
+      ("done" . ,#t)
+      ("prompt_eval_count" . 0)
+      ("eval_count" . 0))))
+
 ;;; ollama-chat: Send chat completion request
 ;;; Arguments:
 ;;;   model - Model name string
@@ -219,7 +237,7 @@
             (error "Failed to parse API response" resp-body))))
        ((= code 0)
         (log-error "ollama" "API connection failed" `(("error" . ,resp-body)))
-        (error "API connection failed" resp-body))
+        (ollama-error-response 0 resp-body))
        ((= code 404)
         ;; Model not found locally — common after `ollama rm`. Surface
         ;; a clean message instead of a generic chat-request failure
@@ -231,7 +249,7 @@
           (error 'model-not-found model msg)))
        (else
         (log-error "ollama" "Chat request failed" `(("code" . ,code) ("error" . ,resp-body)))
-        (error "Chat request failed" code resp-body))))))
+        (ollama-error-response code resp-body))))))
 
 ;;; ollama-chat-streaming: Send streaming chat request
 ;;; Calls on-token with each content fragment as it arrives.
@@ -353,7 +371,7 @@
             (error "Failed to parse API response" resp-body))))
        ((= code 0)
         (log-error "ollama" "API connection failed" `(("error" . ,resp-body)))
-        (error "API connection failed" resp-body))
+        (ollama-error-response 0 resp-body))
        ((= code 404)
         ;; Model not found locally — common after `ollama rm`. Surface
         ;; a clean message instead of a generic chat-request failure
@@ -365,7 +383,7 @@
           (error 'model-not-found model msg)))
        (else
         (log-error "ollama" "Chat request failed" `(("code" . ,code) ("error" . ,resp-body)))
-        (error "Chat request failed" code resp-body))))))
+        (ollama-error-response code resp-body))))))
 
 ;;; ollama-parse-tool-call: Extract tool call from Ollama response message
 ;;; Checks native tool_calls first, falls back to ```tool content parsing
