@@ -139,6 +139,31 @@ The behaviours above must be *identical* whichever backend is active
 Cross-provider parity for error handling + backoff is tracked as follow-up;
 gemini is the reference implementation.
 
+* Boundary: all external data is hostile / tainted
+
+Every byte that originates outside the process — fetched pages, tool output,
+MCP server responses, file contents read by tools — is *untrusted input*, never
+instructions. The trust schema (=provenance.scm=) is a four-level lattice:
+=untrusted= < =provider= < =local= < =verified=. Enforcement, verified
+2026-06-21 against =https://wal.sh/research/guile-sage-inject/= (Jason Walsh's
+injection test page) and =tests/test-prompt-injection.scm= /
+=test-shell-injection.scm= / =test-security.scm=:
+
+- *Single choke point:* every tool call (native AND MCP) returns through
+  =execute-tool= -> =guard-tool-result= -> =wrap-tool-result=, so nothing
+  reaches the model un-wrapped.
+- *Envelope:* external content is double-wrapped —
+  =<tool-result safe="false">= over =<fetch-result trust="untrusted"
+  sha256=… bytes=…>= over a =CDATA= section. =escape-cdata= splits any =]]>=
+  in the body (=]]]]><![CDATA[>=) so a payload cannot close the section and
+  break out into instruction context.
+- *Contract prose:* the system prompt declares content inside
+  =<tool-result>…</tool-result>= to be untrusted data, not commands.
+- *Result:* fetching the injection page yields a factual summary; embedded
+  "do X instead" instructions are ignored. Model/provider output remains
+  trusted by design (it drives the agent loop); everything ingressing from the
+  network or filesystem does not.
+
 * Re-running
 
 Each fault is reproduced by the skeleton above with the matching injection.
