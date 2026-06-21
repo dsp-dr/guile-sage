@@ -1,0 +1,118 @@
+#+TITLE: guile-sage --- Chaos / Fault-Injection Testing for the TUI
+#+AUTHOR: guile-sage research
+#+DATE: 2026-06-21
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose and scope
+
+The unit and contract suites (=gmake check=, =gmake lint-contracts=) verify
+behaviour with cooperative inputs. They do *not* tell us how the interactive
+REPL behaves when the world misbehaves: the model backend is down, a key is
+revoked, the network drops packets mid-stream. This document describes how we
+fault-inject against the *running TUI* --- chaos testing, but for an
+interactive terminal program rather than a service --- and records what each
+injected fault actually produced.
+
+The guiding contract: *a backend failure must degrade to a clean, actionable
+error message and a live prompt. It must never segfault, hang indefinitely, or
+leak raw protocol/Scheme internals to the user.*
+
+* Why a TUI needs its own harness
+
+A REPL reads from a terminal, not a pipe. Two consequences:
+
+1. =echo "..." | sage= does not exercise the real readline read-loop, and a
+   raw pipe makes a startup crash look like a clean exit. You need a PTY.
+2. Output is drawn to a screen (banners, prompts, ANSI), so assertions are made
+   by *capturing the screen*, not by diffing stdout.
+
+So the harness drives a detached =tmux= session: =send-keys= to type, and
+=capture-pane= to read back the rendered screen. This is the same loop a human
+would run, scriptable and non-interactive.
+
+#+begin_src sh :results output
+# Skeleton: launch the TUI under tmux, inject input, capture the screen.
+tmux kill-session -t sage 2>/dev/null
+tmux new-session -d -s sage -x 200 -y 50 -n repl
+tmux send-keys -t sage:repl \
+  'set -a && . ./.env && set +a && SAGE_YOLO_MODE=1 \
+   guile3 -L src -c "(use-modules (sage repl)) (repl-start)"' Enter
+sleep 13                                   # let the init chain + model probe run
+tmux send-keys -t sage:repl 'hello there' Enter
+sleep 10
+tmux capture-pane -t sage:repl -p | sed '/^[[:space:]]*$/d' | tail -14
+pgrep -f repl-start >/dev/null && echo ALIVE || echo DEAD   # segfault detector
+tmux send-keys -t sage:repl '/exit' Enter
+#+end_src
+
+** Gotcha: =.env= wins over the shell environment
+
+=repl-start= calls =config-load-dotenv=, which *re-reads =.env= and overrides
+inherited shell variables*. So you cannot inject a fault with
+=GEMINI_API_KEY=broken sage= --- the dotenv reload restores the real value. To
+inject config faults you must edit =.env= itself (back it up, mutate, restore):
+
+#+begin_src sh
+cp .env .env.realbak
+# ... edit the key/host to the faulty value, run the test ...
+mv .env.realbak .env
+#+end_src
+
+* Fault dimensions
+
+| Dimension            | Injection                                              | Expected                                  |
+|----------------------+-------------------------------------------------------+-------------------------------------------|
+| Backend unreachable  | point host at a dead address (refused vs. dropped)    | fast clean fallback, REPL still starts    |
+| Bad / revoked key    | replace key in =.env= with garbage                    | clean "auth failed" message, prompt lives |
+| Mid-session failure  | break the backend while the REPL is at the prompt      | error on next turn, session recoverable   |
+| Streaming path       | leave streaming on, send a prompt                      | streamed tokens, no crash                 |
+| MCP discovery        | have SSE servers in =~/.claude.json=, run startup      | connect or fail-soft, no crash            |
+
+* Findings --- 2026-06-21 run
+
+Provider under test: Gemini direct (=generativelanguage.googleapis.com=), with
+a LAN Ollama (=$OLLAMA_HOST:11434=) and a LiteLLM gateway (=$LITELLM_HOST=) both unavailable
+during the session --- which is itself how several of these faults were
+observed "for free."
+
+| Fault                                  | Result    | Behaviour                                                              |
+|----------------------------------------+-----------+-----------------------------------------------------------------------|
+| Ollama host down, *connection refused* | OK        | probe fails fast, logged "Failed to probe models, using defaults", REPL starts |
+| Ollama host down, *packets dropped*    | POOR      | =provider-list-models= blocks on the TCP timeout (~tens of seconds) before falling back --- no banner meanwhile, looks hung |
+| Bad Gemini key                         | *BUG*     | no crash (process survives), but the raw Google API JSON error and a leaked Scheme value =) #f)= are dumped to the screen instead of a clean message |
+| LiteLLM key, no model access           | OK (curl) | =key_model_access_denied= surfaced as a normal HTTP error            |
+| Streaming on (Gemini)                  | *SEGV*    | =[streaming gemini-2.5-flash]= then SIGSEGV --- crashes the TUI       |
+| MCP startup with SSE servers in config | *SEGV*    | =mcp-init= -> =sse-open-connection= -> =primitive-fork= in a multi-threaded Guile -> SIGSEGV before the banner |
+
+* Open issues these tests surfaced
+
+1. *=mcp-init= segfault* --- =sse-open-connection= uses =primitive-fork= in a
+   process that already has Guile's background threads running. Forking a
+   multi-threaded process and doing non-async-signal-safe work in the child is
+   undefined behaviour. The =catch #t= around =mcp-init= cannot help: a SIGSEGV
+   is not a Scheme exception. Current workaround: =SAGE_MCP_DISABLE=1=.
+   Real fix: replace the fork+exec with =open-pipe*= / =system*=
+   (=posix_spawn=), or gate MCP behind a single-threaded launcher.
+
+2. *Streaming segfault* --- the streaming chat path crashes (reproduced on
+   Gemini). Likely the same fork/thread or a buffer/port issue in the SSE
+   reader. Current workaround: =SAGE_STREAMING=0= (non-streaming drives the
+   full agent loop, tools included, with no crash). Re-enable per session with
+   =/stream=.
+
+3. *Raw error leakage on auth failure* --- backend 4xx/auth errors should map to
+   a single-line user message (e.g. "❌ Gemini: invalid API key (401)") with
+   the raw body logged, not printed. The trailing =) #f)= indicates an
+   unhandled throw value reaching the display path.
+
+4. *Unbounded probe on a dropping host* --- =provider-list-models= should carry
+   a short connect timeout so a black-holed host degrades like a refused one
+   (fast fallback) instead of appearing to hang at startup.
+
+* Re-running
+
+Each fault is reproduced by the skeleton above with the matching injection.
+The segfault detector (=pgrep -f repl-start= -> ALIVE/DEAD) is the key
+assertion: under a PTY a crash prints =Segmentation fault= into the pane, and
+the process disappears.
