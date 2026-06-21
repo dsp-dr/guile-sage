@@ -127,17 +127,22 @@ true incremental reads with no Guile-native fork. A SIGSEGV is uncatchable, so
 The behaviours above must be *identical* whichever backend is active
 (ollama / gemini / openai-shape). The contract:
 
-- *Timeout:* every request carries =--connect-timeout 5= + a bounded
+- *Timeout* (done): every request carries =--connect-timeout 5= + a bounded
   =--max-time=; the model probe degrades to defaults on timeout.
-- *Error handling:* non-200 -> a single clean =[<provider> <label>: <msg>]=
-  line, full body logged, REPL stays live. No raw body, no Scheme value.
-- *Backoff:* transient failures (code 0 / 429 / 5xx) retry with exponential
-  backoff (capped); permanent ones (401/403/404) do not.
-- *Debounce:* repeated identical failures within the backoff window are
-  suppressed rather than re-hammered (cf. =telemetry= flush backoff).
-
-Cross-provider parity for error handling + backoff is tracked as follow-up;
-gemini is the reference implementation.
+- *Error handling* (done, all three providers): non-200 -> a single clean
+  =[<provider> <label>: <msg>]= line, full body logged, REPL stays live. No raw
+  body, no Scheme value. =gemini-=/=ollama-=/=openai-error-response= are the
+  parallel implementations; permanent (401/403/404) vs transient (0/429/5xx) is
+  distinguished in the label.
+- *Backoff* (done): =http-post-with-timeout= (the chat path) retries =429= and
+  =5xx= with exponential backoff (0.5s, 1s, …; =SAGE_HTTP_MAX_RETRIES=, default
+  2). Connection failures (code 0) and the startup probe (=http-get=) are NOT
+  retried — each retry costs a full =--connect-timeout=, so a down host fails
+  fast and surfaces a clean message immediately (consistent with #4).
+- *Debounce* (partial): the exponential spacing keeps a flapping backend from
+  being re-hammered within a single request. Cross-request suppression of
+  repeated identical failures (cf. =telemetry= =in-flush-backoff?=) remains a
+  follow-up.
 
 * Boundary: all external data is hostile / tainted
 

@@ -535,6 +535,24 @@ Cloudflare AI Gateway (cf-aig-authorization)."
 
 ;;; http-post-with-timeout: POST with explicit timeout in seconds
 ;;; Native for HTTP (timeout ignored -- local network), curl for HTTPS
+;;; Retryable outcomes: rate limits (429) and 5xx — the server is reachable but
+;;; temporarily failing, so backoff helps. NOT retried: 4xx (permanent;
+;;; 401/403/404) and connection failures (code 0). A code-0 host is effectively
+;;; down for this attempt, and each retry costs another full --connect-timeout
+;;; (5s) for no gain — so we fail it fast (same philosophy as the #4 probe) and
+;;; let the provider surface a clean "connection failed" message immediately.
+;;; See docs/CHAOS-TESTING.org boundary policy.
+(define (http-retryable-code? code)
+  (or (= code 429)
+      (and (>= code 500) (< code 600))))
+
+;;; Backoff is applied to chat requests (http-post-with-timeout) only — NEVER
+;;; to the startup model probe (http-get), which must fail fast (#4). Tune or
+;;; disable with SAGE_HTTP_MAX_RETRIES (default 2; 0 = off).
+(define (http-max-retries)
+  (let ((v (getenv "SAGE_HTTP_MAX_RETRIES")))
+    (or (and v (string->number v)) 2)))
+
 (define* (http-post-with-timeout url body timeout #:key (headers '()))
   (let ((start (gettimeofday)))
     (http-debug-log!
@@ -546,11 +564,25 @@ Cloudflare AI Gateway (cf-aig-authorization)."
        ("headers" . ,(list->vector (http-debug-headers->display headers)))
        ("body_size" . ,(string-length (or body "")))
        ("body" . ,(http-debug-truncate (or body "")))))
-    (let* ((result (catch #t
-                     (lambda ()
-                       (http-post-curl url body #:headers headers #:timeout timeout))
-                     (lambda (key . args)
-                       (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
+    (let* ((max-retries (http-max-retries))
+           ;; Retry transient failures with exponential backoff (0.5s, 1s, 2s,
+           ;; …). Permanent codes return on the first attempt. The spacing also
+           ;; debounces a flapping backend rather than re-hammering it.
+           (result
+            (let loop ((attempt 0))
+              (let* ((r (catch #t
+                          (lambda ()
+                            (http-post-curl url body #:headers headers #:timeout timeout))
+                          (lambda (key . args)
+                            (cons 0 (format #f "HTTP error: ~a ~a" key args)))))
+                     (code (if (pair? r) (car r) 0)))
+                (if (and (http-retryable-code? code) (< attempt max-retries))
+                    (begin
+                      ;; (sage util) has no logging dep; the retry is captured
+                      ;; by http-debug-log! / provenance below.
+                      (usleep (* 500000 (expt 2 attempt)))
+                      (loop (1+ attempt)))
+                    r))))
            (now (gettimeofday))
            (elapsed-ms (+ (* 1000 (- (car now) (car start)))
                           (quotient (- (cdr now) (cdr start)) 1000)))
