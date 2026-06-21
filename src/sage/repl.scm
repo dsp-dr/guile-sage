@@ -1254,7 +1254,16 @@ N chars + a single-line marker showing the elided byte count."
             (format #t "  Try:  ollama pull ~a~%" bad-model)
             (format #t "  Or:   /exit and restart with SAGE_MODEL=<other-model>~%~%")))
          (else
-          (format #t "Error: ~a ~a~%" key args)))))
+          ;; Clean one-line surface. args may carry a raw provider body; show
+          ;; only the leading human-readable message, never the full payload
+          ;; or a stray Scheme value. Full detail is in the logs.
+          (let* ((msg (cond ((and (pair? args) (string? (car args))) (car args))
+                            ((pair? args) (format #f "~a" (car args)))
+                            (else "request failed")))
+                 (trimmed (if (> (string-length msg) 200)
+                              (string-append (substring msg 0 200) "…")
+                              msg)))
+            (format #t "~%\x1b[31m❌ ~a: ~a\x1b[0m~%~%" key trimmed))))))
 
     ;; Check context window thresholds after response. Use the session
     ;; model (the model that actually accrued these tokens). Session

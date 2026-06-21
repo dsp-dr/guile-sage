@@ -217,25 +217,13 @@
             (log-error "gemini" "Failed to parse API response"
                        `(("body_preview" . ,(substring resp-body 0
                                                         (min 200 (string-length resp-body))))))
-            (error "Failed to parse API response" resp-body))))
-       ((= code 0)
-        (log-error "gemini" "API connection failed" `(("error" . ,resp-body)))
-        (error "API connection failed" resp-body))
-       ((= code 400)
-        (let ((msg (gemini-error-message resp-body)))
-          (log-warn "gemini" "Bad request" `(("error" . ,msg)))
-          `(("message" . (("role" . "assistant")
-                          ("content" . ,(format #f "[Gemini error: ~a]" msg))))
-            ("done" . ,#t)
-            ("prompt_eval_count" . 0)
-            ("eval_count" . 0))))
-       ((= code 403)
-        (log-error "gemini" "Authentication failed" `(("body" . ,resp-body)))
-        (error "Gemini API key invalid or missing" resp-body))
+            (gemini-error-response 200 resp-body))))
        (else
+        ;; Any non-200: log full detail, surface a clean one-line message to
+        ;; the user, and keep the REPL alive. Never throw the raw body.
         (log-error "gemini" "Chat request failed"
                    `(("code" . ,code) ("error" . ,resp-body)))
-        (error "Chat request failed" code resp-body))))))
+        (gemini-error-response code resp-body))))))
 
 ;;; gemini-chat-streaming: Streaming chat via SSE.
 ;;; Gemini streaming uses :streamGenerateContent?alt=sse
@@ -250,13 +238,23 @@
          (body (json-write-string request))
          (start-time (current-time))
          (accumulated-content "")
-         (accumulated-tool-calls #f))
+         (accumulated-tool-calls #f)
+         (stream-error #f))
 
     (log-api-request model ":streamGenerateContent" #:tokens (length messages))
 
     (let ((result (http-post-streaming
                    url body
                    (lambda (chunk)
+                     ;; A non-2xx (e.g. bad key) returns {"error":{...}} on the
+                     ;; stream instead of candidates. Capture it so we can
+                     ;; surface a clean message instead of silently emitting
+                     ;; nothing.
+                     (let ((err (and (list? chunk) (assoc-ref chunk "error"))))
+                       (when err
+                         (set! stream-error
+                               (or (and (pair? err) (assoc-ref err "message"))
+                                   "request failed"))))
                      ;; Gemini streaming: each chunk is a candidate response
                      (let* ((candidates (or (assoc-ref chunk "candidates") '()))
                             (first-cand (and (pair? candidates) (car candidates)))
@@ -280,6 +278,26 @@
                    #:timeout *request-timeout*
                    #:headers (gemini-auth-headers))))
 
+      (when (and stream-error (string-null? accumulated-content))
+        (log-error "gemini" "Streaming request failed"
+                   `(("error" . ,stream-error)))
+        (let ((emsg (format #f "[Gemini error: ~a]" stream-error)))
+          (set! accumulated-content emsg)
+          (on-token emsg)))
+      ;; If the stream produced nothing at all (no content, no tool calls, no
+      ;; parseable error chunk), the failure was likely a non-2xx whose body
+      ;; the line parser couldn't assemble (e.g. a bad key returns multi-line
+      ;; JSON). Fall back to one non-streaming request, which has full error
+      ;; handling, so the user sees a clean message instead of silence.
+      (when (and (string-null? accumulated-content)
+                 (not accumulated-tool-calls)
+                 (not stream-error))
+        (let* ((resp (gemini-chat model messages))
+               (msg (assoc-ref resp "message"))
+               (content (and msg (assoc-ref msg "content"))))
+          (when (and content (string? content) (not (string-null? content)))
+            (set! accumulated-content content)
+            (on-token content))))
       (let ((elapsed (- (time-second (current-time)) (time-second start-time))))
         ;; Build normalised tool_calls from Gemini functionCall format
         (let ((norm-tcs (gemini-normalise-tool-calls accumulated-tool-calls)))
@@ -330,22 +348,12 @@
             (log-error "gemini" "Failed to parse API response"
                        `(("body_preview" . ,(substring resp-body 0
                                                         (min 200 (string-length resp-body))))))
-            (error "Failed to parse API response" resp-body))))
-       ((= code 0)
-        (log-error "gemini" "API connection failed" `(("error" . ,resp-body)))
-        (error "API connection failed" resp-body))
-       ((= code 400)
-        (let ((msg (gemini-error-message resp-body)))
-          (log-warn "gemini" "Bad request" `(("error" . ,msg)))
-          `(("message" . (("role" . "assistant")
-                          ("content" . ,(format #f "[Gemini error: ~a]" msg))))
-            ("done" . ,#t)
-            ("prompt_eval_count" . 0)
-            ("eval_count" . 0))))
+            (gemini-error-response 200 resp-body))))
        (else
+        ;; Any non-200: clean message, no raw body, REPL stays alive.
         (log-error "gemini" "Chat request failed"
                    `(("code" . ,code) ("error" . ,resp-body)))
-        (error "Chat request failed" code resp-body))))))
+        (gemini-error-response code resp-body))))))
 
 ;;; ============================================================
 ;;; Response Normalisation
@@ -450,3 +458,22 @@
                 (or (assoc-ref err "message") body)
                 (or err body)))))
     (lambda args (or body "(unparseable response)"))))
+
+;;; gemini-error-response: Build a clean, normalised assistant message for a
+;;; non-200 response. Never throws — keeps the REPL alive and never leaks the
+;;; raw provider body or a stray Scheme value to the screen. Full detail is
+;;; logged separately by the caller.
+(define (gemini-error-response code body)
+  (let ((msg (gemini-error-message body))
+        (label (cond ((= code 0)    "connection failed")
+                     ((= code 401)  "authentication failed (invalid/expired API key)")
+                     ((= code 403)  "authentication failed (forbidden)")
+                     ((= code 404)  "model not found")
+                     ((= code 429)  "rate limited")
+                     ((>= code 500) "server error")
+                     (else (format #f "request failed (HTTP ~a)" code)))))
+    `(("message" . (("role" . "assistant")
+                    ("content" . ,(format #f "[Gemini ~a: ~a]" label msg))))
+      ("done" . ,#t)
+      ("prompt_eval_count" . 0)
+      ("eval_count" . 0))))
