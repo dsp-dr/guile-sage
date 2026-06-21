@@ -225,49 +225,30 @@ The caller reads SSE events from this port via sse-read-event."
              ;; Clean up any stale FIFO from a previous crash
              (_ (when (file-exists? fifo-path)
                   (delete-file fifo-path)))
-             ;; bd: guile-sage-9j7/07f — argv-based mkfifo via
-             ;; primitive-fork + execlp (no /bin/sh).
-             (_ (let ((pid (primitive-fork)))
-                  (cond
-                   ((= pid 0)
-                    (catch #t
-                      (lambda () (execlp "mkfifo" "mkfifo" fifo-path))
-                      (lambda args (primitive-exit 127))))
-                   (else (waitpid pid)))))
-             ;; bd: guile-sage-9j7/07f — construct the curl invocation
-             ;; as a sh -c script where URL and FIFO are positional
-             ;; parameters ($1, $2) and headers are passed as extra
-             ;; argv. Positional parameters are NOT re-interpreted as
-             ;; shell syntax, so metachars in URL/headers become literal
-             ;; bytes to curl. We use sh only because backgrounding (&)
-             ;; and output redirection (>) need a shell.
+             ;; We use libc (system ...) rather than primitive-fork/execlp or
+             ;; system*. On some Guile builds (FreeBSD guile3 3.0.10) forking a
+             ;; process that already runs Guile's finalizer/signal threads +
+             ;; BDW-GC SIGSEGVs; that crash is uncatchable and took down the
+             ;; whole REPL during mcp-init. libc system() is a pure C call and
+             ;; is safe. URL/header values from ~/.claude.json are wrapped in
+             ;; single quotes via shell-escape so metachars stay literal.
              (timeout-str (number->string timeout))
-             (header-flags
-              ;; Two argv slots per header: -H and "Name: Value".
-              (let loop ((hs headers) (acc '()))
-                (cond
-                 ((null? hs) (reverse acc))
-                 (else
-                  (loop (cdr hs)
-                        (cons (format #f "~a: ~a" (caar hs) (cdar hs))
-                              (cons "-H" acc)))))))
-             (n-headers (length header-flags))
-             (header-refs
-              (let loop ((i 3) (remaining n-headers) (acc '()))
-                (if (zero? remaining)
-                    (reverse acc)
-                    (loop (+ i 1) (- remaining 1)
-                          (cons (format #f "\"$~a\"" i) acc)))))
-             (sh-script
-              (string-append
-               "exec curl -sN --connect-timeout '" timeout-str "' "
-               "-H 'Accept: text/event-stream' "
-               (string-join header-refs " ")
-               " \"$1\" > \"$2\" &"))
-             (argv (append (list "/bin/sh" "-c" sh-script "sage-sse"
-                                 url fifo-path)
-                           header-flags)))
-        (apply system* argv)
+             (header-args
+              (string-join
+               (map (lambda (h)
+                      (format #f "-H '~a: ~a'"
+                              (shell-escape (format #f "~a" (car h)))
+                              (shell-escape (format #f "~a" (cdr h)))))
+                    headers)
+               " "))
+             (mkfifo-ok
+              (system (format #f "mkfifo '~a'" (shell-escape fifo-path))))
+             (cmd
+              (format #f
+                      "curl -sN --connect-timeout '~a' -H 'Accept: text/event-stream' ~a '~a' > '~a' &"
+                      timeout-str header-args
+                      (shell-escape url) (shell-escape fifo-path))))
+        (system cmd)
         ;; open-input-file blocks until curl starts writing to the FIFO.
         ;; This is the correct behaviour — it synchronizes the reader
         ;; with the writer without polling.
@@ -699,14 +680,19 @@ SAGE_MCP_TEST_AUTH from the environment. Returns #f when unset."
       (let ((url (getenv "SAGE_MCP_TEST_URL"))
             (auth (getenv "SAGE_MCP_TEST_AUTH")))
         (and url
-             (let* ((auth-arg (if auth
-                                  (format #f " -H 'Authorization: Bearer ~a'" auth)
+             ;; libc (system ...) + temp file, not open-input-pipe (which
+             ;; SIGSEGVs on some Guile builds — see sse-open-connection).
+             (let* ((out-file (make-temp-file "sage-mcp-reach"))
+                    (auth-arg (if auth
+                                  (format #f " -H 'Authorization: Bearer ~a'"
+                                          (shell-escape auth))
                                   ""))
-                    (cmd (format #f "curl -s --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}'~a -H 'Accept: text/event-stream' ~a"
-                                 auth-arg url))
-                    (pipe (open-input-pipe cmd))
-                    (output (get-string-all pipe)))
-               (close-pipe pipe)
+                    (cmd (format #f "curl -s --connect-timeout 2 --max-time 3 -o /dev/null -w '%{http_code}'~a -H 'Accept: text/event-stream' '~a' > '~a'"
+                                 auth-arg (shell-escape url)
+                                 (shell-escape out-file)))
+                    (rc (system cmd))
+                    (output (call-with-input-file out-file get-string-all)))
+               (catch #t (lambda () (delete-file out-file)) (lambda a #f))
                (equal? (string-trim-both output) "200")))))
     (lambda (key . args) #f)))
 
