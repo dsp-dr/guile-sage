@@ -259,6 +259,31 @@ It is safe to re-run: existing models are left in place and the team is reused
 hardcodes no secrets and no addresses — everything comes from the environment,
 which is what keeps it committable and =lint-docs=-clean.
 
+* 9. Confirmed behaviour & gotchas
+
+Verified live against a real gateway (2026-06-22). These are the things that
+trip up a first setup — what *other teams* onboarding guile-sage should know:
+
+- *The access trap is resolved by listing model NAMES in the team's =models=.*
+  Models registered without a team (=model_info.team_id = -=) are reachable by a
+  team-scoped key *only if the team's =models= array names them*. A team with no
+  models granted yields =key_model_access_denied= for everything, even with a
+  valid key — that was the original failure. Fix: =POST /team/new= (or
+  =/team/model/add=) with explicit names, then the team's keys inherit access.
+  An unscoped key (=models:["all-proxy-models"]=, no =team_id=) also works.
+- *Gemini reasoning tokens eat small =max_tokens=.* =gemini-2.5-flash= spends
+  budget on =reasoning_tokens= first; with =max_tokens=8= you get
+  =content: null= (=finish_reason: length=) and it *looks* broken. Use
+  =max_tokens >= 64= for visible text. sage's own =SAGE_TOKEN_LIMIT= /
+  per-request caps should account for this.
+- *Ollama models route but need the model pulled upstream.* A team key reaches
+  =ollama-qwen2.5-coder=, but if the upstream Ollama hasn't pulled it you get
+  =OllamaException - model '…' not found= (HTTP 500). That's backend
+  availability, not access — =ollama pull <model>= on the Ollama host.
+- *Master vs virtual key.* Admin/provisioning calls need the *master* key
+  (=$LITELLM_MASTER_KEY=); sage only ever holds the *virtual* key. A virtual key
+  calling an admin route returns "not allowed to call this route".
+
 * Endpoint cheat-sheet
 
 | Task                     | Endpoint                        |
