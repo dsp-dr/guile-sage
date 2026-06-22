@@ -170,3 +170,58 @@ Only scenario 1 was run during the validation sweep; it exposed the
 hardcoded =guile3= bug (already filed). The remaining scenarios
 (2..N) need to run against a build where the chaos script honors
 =$GUILE= so that "ALIVE" verdicts are real and not false-positive.
+
+* Q11 — _queue location decision: =docs/_queue/= vs XDG (efrit-style)
+  :PROPERTIES:
+  :CUSTOM_ID: q11-queue-location
+  :STATUS: addressed
+  :KIND: design-decision
+  :OWNER: claude-agent
+  :END:
+
+Position (recorded 2026-06-22): *hybrid*.
+
+- =docs/_queue/= (committed, versioned, in repo): items that need
+  human PR review or collaboration — follow-up work, RFC drafts,
+  audit gaps. This is the cross-agent / cross-session contract
+  surface. *This is where Q01-Q10 live.*
+- =$XDG_STATE_HOME/sage/_queue/= (per-user, ephemeral): in-progress
+  agent scratch, draft annotations not ready for PR, mid-audit
+  partial verdicts, anything that should NOT outlive the session.
+  Sandbox-friendly because XDG paths are workspace-external.
+
+Same rule as the wal.sh distinction: =_queue= public-but-not-shipped
+vs =_drafts= private-and-private. Our split maps =docs/_queue/= →
+shared draft; XDG path → private draft.
+
+Implementation note: nothing in =src/sage/= writes to either yet.
+When the ledger writer (Q06) lands, the agent-private scratch can
+live under XDG, and only PR-worthy items get promoted into
+=docs/_queue/= (mirroring the publish boundary in
+[[file:../ANNOTATION-SYSTEMS.org][ANNOTATION-SYSTEMS.org §1]]).
+
+* Q12 — SBPL localhost-narrowing leaks to LAN (experimental finding)
+  :PROPERTIES:
+  :CUSTOM_ID: q12-sbpl-localhost-leak
+  :STATUS: open
+  :KIND: spec-and-impl
+  :OWNER: any-agent
+  :END:
+
+Empirically verified in [[file:../rfc/003-ephemeral-key-sandbox.org]] §8:
+the SBPL allow rule =(allow network-outbound (remote tcp
+"localhost:*"))= LEAKED to the LAN — direct curl to
+=192.168.86.22:4000= returned HTTP 200 from inside the sandbox even
+though the rule was meant to restrict to loopback. This validates the
+§3 footnote ("coarse / unreliable") and rules out localhost-narrowed
+allow as a confinement primitive.
+
+Action items:
+1. Update =docs/SANDBOX-AND-EGRESS.org= macOS section to forbid the
+   pattern.
+2. Bind LiteLLM (or a fronting broker) to =127.0.0.1= only and
+   switch the sandbox→broker hop to a *unix domain socket* with
+   peer-cred check — that path was *not* tested in §8 but is the
+   Claude Code prior-art pattern (§6.1).
+3. Build the negative test (curl 192.168.86.22:4000 inside sandbox
+   MUST return 000) into =gmake chaos-net=.

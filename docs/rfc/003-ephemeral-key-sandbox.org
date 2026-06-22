@@ -301,7 +301,125 @@ the LiteLLM broker here does.
 - Should the broker live *behind* LiteLLM (LiteLLM mints its own ephemeral keys
   on an authenticated request) to remove the master key from the host entirely?
 
-* 8. References
+* 8. Experiment log — 2026-06-22 (mini, Darwin 25.4.0)
+  :PROPERTIES:
+  :CUSTOM_ID: experiment-log-2026-06-22
+  :VALIDATED_AT: 2026-06-22T04:45Z
+  :VALIDATED_BY: claude-agent (interactive sbx: probe)
+  :VERDICT: corrected
+  :FINDING: §3 macOS footnote confirmed empirically; localhost-narrowed allow leaked to LAN.
+  :END:
+
+Ran the §2 control flow up to phase 3 (sandbox + egress) against the
+local LiteLLM at =$LITELLM_HOST= = =192.168.86.22:4000=. Did NOT mint a
+real ephemeral key (broker master key intentionally out of scope for
+this run); validated reachability against the unauthed
+=/health/liveliness= endpoint as a placeholder. Workspace
+=tmp/sbx-exp/=.
+
+** 8.1 Setup
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-setup
+   :END:
+
+- =sandbox-exec= present at =/usr/bin/sandbox-exec= (deprecated-but-present,
+  matches §3 caveat).
+- Localhost TCP bridge stood up as a 14-line Python =asyncio= forwarder:
+  =127.0.0.1:14000= → =192.168.86.22:4000=. Represents the §2 "broker
+  socket / tmpfs key injection" idea simplified to a TCP shim for this
+  probe.
+- Probe script: =sh= one-liner doing 4 checks — read =/etc/hosts= (sanity),
+  read =$HOME/.zsh_history= (FS confinement target), curl LAN proxy
+  direct, curl loopback shim.
+
+** 8.2 Baseline (no sandbox)
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-baseline
+   :END:
+
+| Probe | Result |
+|-------+--------|
+| =/etc/hosts= | readable (=##\n# Host Database\n# localho=) |
+| =$HOME/.zsh_history= | readable (shell history exposed) |
+| direct =192.168.86.22:4000/health/liveliness= | HTTP 200 |
+| loopback =127.0.0.1:14000/health/liveliness= | HTTP 200 (shim alive) |
+
+** 8.3 SBPL profile variants tested
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-variants
+   :END:
+
+| # | Profile shape | FS=HOME | net direct | net loopback | Note |
+|---+---------------+---------+------------+--------------+------|
+| 1 | =(allow default) (deny file-read* HOME) (deny network*)= | denied ✓ | 000 ✓ | 000 ✓ | **Tightest network-deny works; baseline reproducible.** |
+| 2 | =(deny default)= + explicit allow-list for =/usr=, =/System=, etc. | denied ✓ | 000 ✓ | 000 ✓ | Equivalent — confirms profile shape doesn't matter for full network-deny. |
+| 3 | variant 1 + =(allow network* (local tcp "localhost:14000"))= | denied ✓ | 000 ✓ | **000 ✗** | Port-specific localhost allow *did not* pass through to the shim — silently no-op or wrong syntax. |
+| 4 | variant 1 + =(allow network-outbound (remote tcp "localhost:*"))= | denied ✓ | **200 ✗** | 200 ✓ | **Critical: allow rule leaked LAN access** — direct =192.168.86.22:4000= returned 200. §3 footnote confirmed: localhost narrowing is unreliable. |
+| 5 | variant 1 + =(allow network-outbound (remote ip "127.0.0.1:14000"))= | n/a | n/a | n/a | =sandbox-exec= rejected at parse: ="host must be * or localhost in network address"= — bare-IP narrowing is *not* supported. |
+
+** 8.4 Findings → RFC updates
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-findings
+   :END:
+
+1. *FS confinement is rock-solid* via =(deny file-read* (subpath
+   "/Users/jwalsh"))= overlaid on =(allow default)=. =$HOME/.zsh_history=
+   reads return =Operation not permitted= from inside the sandbox; cwd-
+   scoped reads continue to work. The §3 "fs = workspace only" contract
+   is realizable on macOS today.
+2. *Full network-deny is reliable* — =(deny network*)= zeroes every
+   outbound, both LAN and loopback (variants 1 and 2). This is the
+   safe-default we should ship.
+3. *Localhost-narrowing is the §3 trap.* Variant 4 looked correct
+   (allow only =remote tcp "localhost:*"=) but in practice matched
+   arbitrary remote destinations — the LAN LiteLLM was reachable
+   through the rule. *We should not rely on per-host SBPL allow
+   rules.*
+4. *Port-specific syntax parses* (variant 5: =(remote ip
+   "127.0.0.1:14000")= rejected; =localhost:<port>= is the only legal
+   shape) — but variant 3 shows port-specific rules don't reliably
+   pass traffic either.
+5. *Decision drift on macOS:* the workable patterns are:
+   - *Bind the broker to localhost only* (don't expose on the LAN);
+     then =(deny network*)= + a unix-domain socket from sandbox to
+     broker. Mirrors Claude Code (§6.1).
+   - *Wrap with a per-process egress proxy* the agent's HTTP client
+     must traverse — and verify *every* client (Guile HTTP, =curl=,
+     any SDK) honors it. The proxy-bypass class of bugs (cf. v2.1.90
+     SOCKS5/null-byte) is realer on macOS than the doc made it look.
+
+** 8.5 What the experiment did NOT prove
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-gaps
+   :END:
+
+- *No ephemeral key was minted.* This run avoided the LiteLLM master
+  key entirely. The =POST /key/generate= → =Bearer <ephemeral>= path
+  must be exercised with a real broker before the §4 lifecycle can be
+  claimed validated. Suggested next probe: stand the broker up as a
+  short-lived process that holds the master key in tmpfs, calls
+  =/key/generate= for a 5-minute TTL key, hands the key to the sandbox
+  over a one-shot UDS, then issues =/key/delete= on exit.
+- *The negative tests in §5 are not yet automated.* Reuse-after-revoke,
+  budget-cap-exceeded, prompt-injection→exfil, and provider-key-leak
+  tests need to land in =gmake chaos-net= via the toxiproxy harness.
+- *No FreeBSD verification run.* The Bastille jail + =pf= path is
+  prior-art-validated (wal.sh "Sandboxing AI Coding Agents") but not
+  reproduced here.
+
+** 8.6 Reproducer
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-reproducer
+   :END:
+
+Profile + probe + tunnel committed under =tmp/sbx-exp/= (workspace-
+scoped, gitignored if present; otherwise treat as a one-shot
+artifact). To replay: stand a localhost TCP forwarder to
+=$LITELLM_HOST=, run the probe under each profile variant, observe
+HTTP codes per the §8.3 table. =gmake chaos-net= will host the
+automated version once the §5 boundaries are scripted.
+
+* 9. References
 
 - [[file:002-sandbox-egress-credentials.org][RFC-002 — sandbox egress credentials]] (deferred; this advances it)
 - [[file:../SANDBOX-AND-EGRESS.org][SANDBOX-AND-EGRESS.org]] — connection modes + platform sandboxing
