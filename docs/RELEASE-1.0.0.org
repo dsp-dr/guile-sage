@@ -1,4 +1,4 @@
-#+TITLE: guile-sage — v1.0.0 release notes (draft)
+#+TITLE: guile-sage — v1.0.0 release notes
 #+AUTHOR: guile-sage
 #+DATE: 2026-04-20
 #+OPTIONS: toc:2 num:nil

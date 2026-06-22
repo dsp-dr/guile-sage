@@ -7,7 +7,7 @@ This directory contains Architecture Decision Records (ADRs) for guile-sage.
 | ADR | Title | Status |
 |-----|-------|--------|
 | [0001](0001-guile-scheme-runtime.md) | Guile Scheme as Runtime | Accepted |
-| [0002](0002-ollama-first-provider.md) | Ollama as Primary Provider | Accepted |
+| [0002](0002-ollama-first-provider.md) | Ollama as Primary Provider | Superseded (multi-provider shipped) |
 | [0003](0003-security-model.md) | Security Model - Safe/Unsafe Tools | Accepted |
 | [0004](0004-command-synergy.md) | CLI/REPL/API Command Synergy | Accepted |
 | [0005](0005-context-compaction.md) | Context Compaction Strategy | Accepted |

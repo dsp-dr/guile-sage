@@ -188,11 +188,11 @@ and the verification command:
 ** 6.2 Model tier defaults
    :PROPERTIES:
    :CUSTOM_ID: drift-tier-defaults
-   :STATUS: open
+   :STATUS: closed
    :VERDICT: corrected
-   :FINDING: lines 552–555: standard model and ceilings wrong.
+   :FINDING: The §9 pseudocode block still showed fast/standard ceilings 2000/6000 and the removed model qwen2.5-coder:7b while the attestation claimed "all landed" — caught by the L7 doc-governance review 2026-06-22. Now landed: ARCHITECTURE.org §9 reads 4000/8000 + llama3.2:latest (both tiers), matching the env-var table and code.
    :EXEC_VERDICT: verified
-   :EXEC_FINDING: src/sage/model-tier.scm shows standard=llama3.2:latest (NOT qwen2.5-coder:7b — removed per guile-28p) and ceilings 4000/8000 (NOT 2000/6000).
+   :EXEC_FINDING: src/sage/model-tier.scm:41-53 — both tiers llama3.2:latest, ceilings fast=4000 standard=8000.
    :END:
 
 ** 6.3 Context-window thresholds
@@ -301,7 +301,10 @@ What's harder /here/ than in the source piece:
   :STATUS: open
   :END:
 
-1. [ ] Land the four corrections from §6 in =docs/ARCHITECTURE.org=.
+1. [X] Land the four corrections from §6 in =docs/ARCHITECTURE.org= — DONE:
+   module-count, context-thresholds and git_fetch landed earlier; the
+   tier-defaults block (§6.2) landed 2026-06-22 after the L7 review caught the
+   attestation claiming "all landed" while the body was still wrong.
 2. [ ] Add =:CUSTOM_ID:= to every heading in
    =docs/ARCHITECTURE.org=, =docs/MCP-CONTRACT.org=,
    =docs/HOOKS-CONTRACT.org=, =docs/SKILLS-CONTRACT.org=,
@@ -319,10 +322,12 @@ What's harder /here/ than in the source piece:
    =CONTRIBUTING.org= + =AGENTS.md= (gmake, engineering boundaries, test
    table, version), and documented the transport/error/taint boundaries in
    =ARCHITECTURE.org= §14–16. See also =docs/LITELLM-SETUP.org=.
-7. [ ] Land the four §6 corrections in =ARCHITECTURE.org= — still OPEN: this
-   session added §14–16 but did not yet fix the module-count / tier-default /
-   context-threshold / safe-tools drifts recorded in §6.1–6.4.
+7. [X] All four §6 drifts now landed (see item 1). §14–16 boundaries added
+   this session; the lingering tier-defaults drift closed 2026-06-22.
 8. [ ] Triage the §10 methodology gaps with upstream (=walsh-kx1=).
+9. [ ] OSS doc-governance backlog from the L7 review (beads): ADR-0002
+   superseded, CHANGELOG + RELEASE-1.1.0, =#+STATUS= standardization, GitHub
+   health files + SPDX.
 
 * 10. Downstream methodology gaps (field report)
   :PROPERTIES:

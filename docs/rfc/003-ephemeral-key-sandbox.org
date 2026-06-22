@@ -1,6 +1,7 @@
 #+TITLE: guile-sage RFC-003 — Pure sandboxing with ephemeral LiteLLM keys
 #+AUTHOR: guile-sage
 #+DATE: 2026-06-22
+#+STATUS: Draft / conceptual (advances RFC-002; methodology deferred to experiments)
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 

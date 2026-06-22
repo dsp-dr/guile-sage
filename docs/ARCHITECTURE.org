@@ -569,8 +569,8 @@ requests manually.
 #+BEGIN_SRC
 resolve-model-for-tokens(current_tokens, available_tiers)
   │
-  ├── tokens < fast_ceiling (2000)?     → fast tier (llama3.2:latest)
-  ├── tokens < standard_ceiling (6000)? → standard tier (qwen2.5-coder:7b)
+  ├── tokens < fast_ceiling (4000)?     → fast tier (llama3.2:latest)
+  ├── tokens < standard_ceiling (8000)? → standard tier (llama3.2:latest)
   └── else                              → last tier (heaviest available)
 #+END_SRC
 

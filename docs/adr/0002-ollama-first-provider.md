@@ -1,7 +1,14 @@
 # ADR-0002: Ollama as Primary Provider
 
 ## Status
-Accepted
+
+Accepted (historical, v0.1). **Superseded 2026-06-22** by shipped multi-provider
+support — the "multi-provider planned for v0.6" transition in the Decision below
+has happened: `gemini` and `openai`-shape (LiteLLM gateway, Cloudflare AI
+Gateway) providers are implemented (`src/sage/provider.scm`,
+`src/sage/{gemini,openai}.scm`, `docs/LITELLM-SETUP.org`). This ADR records the
+original Ollama-first decision; a dedicated multi-provider ADR is queued. Ollama
+remains the *default*, not the *sole*, provider.
 
 ## Context
 Need to choose LLM provider(s) for the initial release. Options:

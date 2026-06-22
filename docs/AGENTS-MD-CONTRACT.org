@@ -1,6 +1,7 @@
 #+TITLE: guile-sage — AGENTS.md Discovery and Behavioral Configuration Contract
 #+AUTHOR: guile-sage research
 #+DATE: 2026-04-18
+#+STATUS: Forward-looking — partially implemented (discovery + directives exist; structured parsing and the /agents command are NOT yet built; see §"speculative")
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 
