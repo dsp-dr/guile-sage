@@ -1,0 +1,110 @@
+#+TITLE: guile-sage --- Toxiproxy as the Concrete Chaos Implementation
+#+AUTHOR: guile-sage research
+#+DATE: 2026-06-22
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+* Purpose
+
+=docs/CHAOS-TESTING.org= defines the boundary policy (timeouts, error handling,
+backoff, debounce, hostile-input taint) and a tmux PTY harness that injects
+faults by *removing the real backend* (host down, bad key). That is observable
+but not deterministic or scriptable. This spec pins *Toxiproxy* (Shopify) as the
+concrete network-fault injector that makes those faults deterministic,
+reproducible, and CI-gateable. Toxiproxy is the chosen tool; the comparison
+below records why it is sufficient and where it must be supplemented.
+
+* Why Toxiproxy (feature comparison)
+
+Surveyed 2026-06-22. The axis that matters for sage: it needs *L4 connection
+faults* (validate connect-timeout fast-fail and mid-stream resets) and, for one
+boundary, *L7 status injection* (429/5xx backoff).
+
+| Tool        | Layer | Conn faults (latency/reset/timeout/bw) | HTTP 429/5xx body | HTTPS | Runtime  | FreeBSD pkg | Determinism        |
+|-------------+-------+----------------------------------------+-------------------+-------+----------+-------------+--------------------|
+| *Toxiproxy* | L4    | yes (latency, timeout, reset_peer, bandwidth, slow_close, slicer) | *no* | conn-level only | Go | *yes* (=toxiproxy-server/-cli 2.12.0=) | HTTP control API; per-proxy toxics |
+| Trixter     | L4    | yes (+ corruption, seed-replay)        | no                | conn-level | Rust | no       | random-seed replay |
+| mitmproxy   | L7    | partial (delays via addon)             | *yes* (scripted)  | yes (MITM CA) | Python (pip) | no  | scripted addons    |
+| WireMock    | L7    | delays only                            | *yes*             | yes   | JVM      | no          | stub files         |
+| Hoverfly    | L7    | delays                                 | *yes*             | yes   | Go       | no          | capture/replay     |
+| ipfw+dummynet | L3/4 | yes (kernel)                          | no                | n/a   | FreeBSD kernel | builtin | needs root/doas |
+
+*Decision:* Toxiproxy. It is the only purpose-built fault proxy *packaged on
+FreeBSD* (=pkg install toxiproxy-server toxiproxy-cli=), has a clean HTTP control
+API for scripted/CI use, and covers every connection-level boundary sage cares
+about. Its one gap — L4 means it cannot synthesize a 429/5xx response *body* —
+is covered by putting a tiny mock (or the in-stack LiteLLM, which can be
+configured to fail) behind the proxy for the backoff scenario only.
+
+* Architecture: where Toxiproxy plugs in
+
+Sage's entire egress is libc-=curl= driven by =*_HOST= env vars (see
+=src/sage/util.scm=). So Toxiproxy inserts with *zero code change* — repoint the
+host var at a local Toxiproxy listener that upstreams to the real backend.
+
+#+BEGIN_SRC
+  sage (curl --connect-timeout 5)
+     │   SAGE_OLLAMA_HOST=http://127.0.0.1:21434
+     ▼
+  toxiproxy  proxy "ollama"  127.0.0.1:21434 ──upstream──▶ $OLLAMA_HOST:11434
+     ▲  toxics: latency | timeout | reset_peer | bandwidth | slow_close
+     └─ control API on 127.0.0.1:8474 (toxiproxy-cli / REST)
+#+END_SRC
+
+* Boundary → toxic mapping (the assertions)
+
+| # | Toxic (toxiproxy-cli)                                   | Boundary asserted                                  | Pass condition (tmux harness)                |
+|---+---------------------------------------------------------+----------------------------------------------------+----------------------------------------------|
+| 1 | =latency -a latency=8000= on ollama proxy               | probe connect-timeout fast-fail (#4)               | banner appears in ~5s, not 8s; REPL ALIVE    |
+| 2 | =timeout -a timeout=0= (black-hole)                     | dead-host clean error, no hang                     | clean "[… connection failed: …]", ALIVE      |
+| 3 | =reset_peer -a timeout=1500= mid-stream                 | streaming FIFO survives reset (#2)                 | partial output then clean return; *no SIGSEGV* |
+| 4 | =slicer= + =bandwidth=                                  | SSE =data:= chunk reassembly under fragmentation   | full answer renders; ALIVE                   |
+| 5 | mock/LiteLLM 503 behind proxy (L7)                      | 429/5xx exponential backoff                        | =SAGE_HTTP_MAX_RETRIES= retries observed in logs |
+
+The segfault detector remains =pgrep -f repl-start= → ALIVE/DEAD.
+
+* Implementation plan
+
+** Components
+
+1. =scripts/toxiproxy-chaos.sh= — opt-in driver: =up= (start server + register
+   proxies/toxics), =scenario <n>= (apply a toxic + run the matching tmux
+   assertion), =down= (remove toxics, stop server). Pure libc shell + the
+   =toxiproxy-cli=; no change to sage itself.
+2. =gmake chaos-net= — runs the driver against a configured backend. *Not* part
+   of =check= / =lint= / default build — it needs a running backend and the
+   =toxiproxy= package, so it stays opt-in.
+3. Guard: the target no-ops with a clear message if =toxiproxy-server= is absent
+   (=pkg install toxiproxy-server toxiproxy-cli=).
+
+** Cadence — run at minor releases, not every build
+
+Connection chaos is slow (real sleeps, real backends) and needs the toxiproxy
+package, so it does NOT belong in the per-push =test.yml=. Policy:
+
+- *Local:* =gmake chaos-net= on demand by a developer.
+- *CI:* =.github/workflows/release.yml= runs =chaos-net= only on *minor* tags
+  (=vX.Y.0=, i.e. patch component 0) before cutting the release; patch releases
+  (=vX.Y.Z=, Z>0) skip it. This matches "run at minor patch changes." The job is
+  *advisory* (=continue-on-error=) until the CI toxiproxy install + a CI-local
+  mock backend are hardened, so a chaos hiccup never blocks a release.
+
+** Release flow
+
+#+BEGIN_SRC sh
+  gmake minor          # bump-version.sh: X.Y.Z -> X.(Y+1).0, edits version.scm
+  # commit the bump, push main
+  gmake tag            # git tag -a vX.(Y+1).0
+  git push origin vX.(Y+1).0
+  # tag push triggers release.yml: test -> (minor only) chaos-net -> gh release create
+  # OR run locally: gmake release
+#+END_SRC
+
+* Limitations (honest)
+
+- L4 only: 429/5xx body injection needs the mock/LiteLLM sidecar (scenario 5).
+- HTTPS (Gemini) gets connection-level toxics only; response-shaping there needs
+  an L7 MITM (out of scope — LiteLLM/Ollama cover the L7 scenarios).
+- Real sleeps make the suite slow; hence minor-release cadence, not per-push.
+- CI toxiproxy availability on =ubuntu-latest= is via the upstream release
+  binary/Docker, not apt — wired in =release.yml=, advisory until proven.

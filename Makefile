@@ -26,7 +26,7 @@ GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench presentation eval tmux-session tmux-kill eval-provenance demo
+.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench presentation eval tmux-session tmux-kill eval-provenance demo chaos-net
 
 all: $(OBJECTS)
 
@@ -51,6 +51,13 @@ check:
 		$(GUILE) -L $(SRCDIR) $$test || exit 1; \
 	done
 	@echo "All tests passed."
+
+# Deterministic network-fault validation via toxiproxy. OPT-IN: not part of
+# `check` — it needs the toxiproxy package and a reachable backend, and runs
+# real network sleeps. Cadence is minor releases (see release.yml). No-ops with
+# a SKIP message if toxiproxy is absent. Spec: docs/CHAOS-TOXIPROXY-SPEC.org.
+chaos-net:
+	@sh scripts/toxiproxy-chaos.sh all
 
 clean:
 	find . -name "*.go" -delete
