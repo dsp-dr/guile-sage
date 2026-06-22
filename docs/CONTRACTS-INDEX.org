@@ -1,0 +1,87 @@
+#+TITLE: guile-sage — Contracts, Specs & Schemas Index
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-22
+#+OPTIONS: toc:2 num:nil ^:nil
+#+STARTUP: overview
+
+Single entry point to the documents that govern guile-sage behaviour. Three
+kinds of doc:
+
+- *Living guides* — describe the current implementation; must be kept in sync.
+- *Contracts* — behavioural boundaries with (where they exist) an invariant
+  test that fails if the contract is broken.
+- *Specs / schemas* — formats and forward-looking designs (some not yet
+  implemented; flagged as such).
+
+Point-in-time *reports* live under =docs/reports/= and are never edited after
+creation. Diagrams follow
+[[https://wal.sh/research/diagram-style-guide#org010b7ab][wal.sh/research/diagram-style-guide]].
+
+* Engineering boundaries (hard constraints)
+
+The non-negotiables, with the full rationale + reproducible experiments in
+[[file:CHAOS-TESTING.org][CHAOS-TESTING.org]]:
+
+1. *Build/test:* =gmake= only (BSD =make= no-ops the GNU Makefile); runtime
+   =guile3=/=guild3=; gates =gmake check / lint-code / lint-org / lint-contracts
+   / lint-docs= (the last fails on hardcoded RFC1918 IPs in living docs).
+2. *Subprocess safety:* never =system*= / =open-pipe*= / =open-input-pipe=
+   (they SIGSEGV in long-lived multi-threaded Guile); libc =(system …)= only.
+3. *HTTP resilience:* curl =--connect-timeout 5=; probe fails fast; chat retries
+   429/5xx with backoff (=SAGE_HTTP_MAX_RETRIES=).
+4. *Provider errors:* normalize to =[<provider> <label>: <msg>]=, never throw a
+   raw body.
+5. *Taint:* all external bytes are untrusted; route via =execute-tool= →
+   =guard-tool-result= → =wrap-tool-result=.
+6. *.env precedence:* =config-load-dotenv= overrides shell env — edit =.env=.
+
+* Living guides
+
+| Document | Focus | Update when |
+|----------+-------+-------------|
+| [[file:ARCHITECTURE.org][ARCHITECTURE.org]] | C4 diagrams, modules, transport/error/taint boundaries (§14–16) | any module or boundary changes |
+| [[file:DEPLOYMENT.org][DEPLOYMENT.org]] | install, provider matrix, resilience env vars, scenarios, troubleshooting | install/provider/env changes |
+| [[file:SANDBOX-AND-EGRESS.org][SANDBOX-AND-EGRESS.org]] | connection modes, sandboxing, credential boundaries | egress/sandbox model changes |
+| [[file:TOOLS-GUIDE.org][TOOLS-GUIDE.org]] | tool catalog + examples | any tool added/removed |
+| [[file:COMMANDS.org][COMMANDS.org]] | slash-command reference | any =/command= change |
+| [[file:TELEMETRY.org][TELEMETRY.org]] | OTLP metrics, counters, verification | counters/endpoints change |
+| [[file:TIMING-PROTOCOL.org][TIMING-PROTOCOL.org]] | benchmark methodology | model/provider defaults change |
+| [[file:EU-AI-ACT-GUARDRAILS.org][EU-AI-ACT-GUARDRAILS.org]] | LiteLLM guardrail setup (Article 5) | guardrail policy changes |
+| [[file:ROADMAP.org][ROADMAP.org]] | epics + status | planning |
+
+* Contracts
+
+| Contract | Governs | Invariant test |
+|----------+---------+----------------|
+| [[file:MCP-CONTRACT.org][MCP-CONTRACT.org]] | MCP SSE + JSON-RPC invariants | =test-mcp.scm= |
+| [[file:HOOKS-CONTRACT.org][HOOKS-CONTRACT.org]] | hook lifecycle (Pre/PostToolUse) | =test-hooks.scm= |
+| [[file:HOOKS-CONFIG-CONTRACT.org][HOOKS-CONFIG-CONTRACT.org]] | hook configuration parsing | =test-hooks-config.scm= |
+| [[file:HOOK-NEGATIVE-CONTRACTS.org][HOOK-NEGATIVE-CONTRACTS.org]] | things the agent MUST NOT do (vetoes) | =test-negative-contracts.scm= |
+| [[file:AGENTS-MD-CONTRACT.org][AGENTS-MD-CONTRACT.org]] | AGENTS.md discovery/parsing | =test-agents-md.scm=, =test-agents-md-directives.scm= |
+| [[file:SKILLS-CONTRACT.org][SKILLS-CONTRACT.org]] | skill tool schema + dispatch | (no dedicated test yet) |
+| [[file:LSP-CONTRACT.org][LSP-CONTRACT.org]] | LSP server protocol | (forward-looking; no test yet) |
+| [[file:LSP-CLIENT-CONTRACT.org][LSP-CLIENT-CONTRACT.org]] | LSP client behaviour | (forward-looking; no test yet) |
+| [[file:LSP-TRANSPORT-CONTRACT.org][LSP-TRANSPORT-CONTRACT.org]] | LSP transport (stdio/SSE) | (forward-looking; no test yet) |
+
+Taint, timeout, backoff and provider-error contracts are specified in
+[[file:CHAOS-TESTING.org][CHAOS-TESTING.org]] (Boundary policy) and covered by
+=test-prompt-injection.scm=, =test-shell-injection.scm=, =test-security.scm=,
+=test-eval-sandbox.scm=, =test-provider.scm=.
+
+* Specs & schemas
+
+| Document | Describes | Status / usage |
+|----------+-----------+----------------|
+| [[file:CHAOS-TESTING.org][CHAOS-TESTING.org]] | fault-injection boundary contract + tmux PTY harness | active; manual + spawn matrix |
+| [[file:CHAOS-TOXIPROXY-SPEC.org][CHAOS-TOXIPROXY-SPEC.org]] | automated network-fault harness | =gmake chaos-net= (opt-in, toxiproxy) |
+| [[file:EVAL-CASE-SCHEMA.org][EVAL-CASE-SCHEMA.org]] | evaluation case JSON schema | =tests/eval/= |
+| [[file:SKILLS-IMPL-SPEC.org][SKILLS-IMPL-SPEC.org]] | skill implementation details | implemented in =src/sage/mcp.scm= |
+| [[file:PLUGINS-SPEC.org][PLUGINS-SPEC.org]] | plugin system design | forward-looking |
+
+* Navigating
+
+- Implementing a feature → [[file:ARCHITECTURE.org][ARCHITECTURE.org]] + the relevant contract.
+- Deploying / configuring → [[file:DEPLOYMENT.org][DEPLOYMENT.org]] + [[file:../.env.template][.env.template]].
+- Adding a tool → [[file:TOOLS-GUIDE.org][TOOLS-GUIDE.org]] + register in =src/sage/tools.scm=.
+- Touching transport / errors / spawn → re-read the boundaries above and [[file:CHAOS-TESTING.org][CHAOS-TESTING.org]].
+- Why a past decision was made → =docs/reports/= and =git notes=.
