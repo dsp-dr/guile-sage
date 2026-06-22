@@ -1,0 +1,29 @@
+CPRR
+====
+Attribution: Claude Opus 4.7 (1M ctx), pair w/ Aidan Pace. Driving the
+  stop-hook condition "all documents have been updated with claim
+  validation and status and sub-agents have independently verified all
+  of these per wal.sh/research/annotation-systems".
+
+Conjecture: independent fan-out audits + ledger > author self-review.
+  Each of the 4 contract docs (HOOKS/MCP/SKILLS/TELEMETRY) plus ARCH
+  was reviewed by a separate Explore sub-agent with no view of the
+  others' findings — the verification independence the annotation
+  contract demands.
+
+Validation:
+  - 4 independent sub-agents returned, each producing 16-33 verdicts.
+  - 92 claim verdicts total across 5 docs (~70 correct, 9 corrected,
+    5 disputed, 8 needs-citation).
+  - ARCHITECTURE.org drifts landed in this commit; remaining drifts
+    are tracked in the validation-status drawer per doc + the ledger.
+  - gmake check clean, gmake lint-docs PASS (0 errors, 18 pre-existing
+    AGENTS.md-table warnings unrelated to this work).
+
+Tests: pure-function unit + PBT + integration suites green throughout.
+  Doc-only edit so no source modules touched.
+
+Research: .verify/chain.jsonl format follows ANNOTATION-SYSTEMS.org §5
+  (target/at/by/verdict/finding). prev_sha/sha chaining intentionally
+  left for the ledger-writer follow-up — the records themselves are
+  the audit trail, the chain is the tamper-evidence layer on top.
