@@ -1,0 +1,498 @@
+#+TITLE: guile-sage — Documentation Validation Index
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-22
+#+OPTIONS: toc:2 num:nil ^:nil
+#+STARTUP: overview
+
+#+begin_quote
+This is the companion =annotations.org= file described in
+[[file:ANNOTATION-SYSTEMS.org][docs/ANNOTATION-SYSTEMS.org §3]]. Each block below
+keys via =:TARGET_ID:= to a doc whose own file does not (yet) carry an
+inline =Validation status= drawer. Inline drawers are present on the
+top contract docs (ARCHITECTURE, MCP-CONTRACT, HOOKS-CONTRACT,
+SKILLS-CONTRACT, TELEMETRY); everything else is recorded here.
+
+Verdict vocabulary: =correct | corrected | disputed | needs-citation |
+planned | closed-by-construction=. Findings are also appended to
+[[file:../.verify/chain.jsonl][.verify/chain.jsonl]] (the tamper-evident
+ledger).
+#+end_quote
+
+* Release notes — closed by construction
+  :PROPERTIES:
+  :CUSTOM_ID: release-notes
+  :END:
+
+Release notes are point-in-time snapshots; per ANNOTATION-SYSTEMS.org
+§8.2, annotations on release headings are =:STATUS: closed= by
+construction once the release ships. We don't audit shipped history.
+
+** RELEASE-0.6.0.org
+   :PROPERTIES:
+   :TARGET_ID: file:RELEASE-0.6.0.org
+   :STATUS: closed
+   :VERDICT: closed-by-construction
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Shipped release; immutable. Future edits are corrections only.
+   :END:
+
+** RELEASE-1.0.0.org
+   :PROPERTIES:
+   :TARGET_ID: file:RELEASE-1.0.0.org
+   :STATUS: closed
+   :VERDICT: closed-by-construction
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :END:
+
+** RELEASE-1.0.1.org
+   :PROPERTIES:
+   :TARGET_ID: file:RELEASE-1.0.1.org
+   :STATUS: closed
+   :VERDICT: closed-by-construction
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :END:
+
+* Architecture decision records (=docs/adr/=) — addressed by decision
+  :PROPERTIES:
+  :CUSTOM_ID: adrs
+  :END:
+
+ADRs document a decision *as made*. Their verdict is whether the
+implementation honored the decision; status is =addressed= because the
+decision itself is settled. Future drift is tracked as a *new* ADR
+superseding the old one (not by editing history).
+
+** adr/0001-guile-scheme-runtime.md
+   :PROPERTIES:
+   :TARGET_ID: file:adr/0001-guile-scheme-runtime.md
+   :STATUS: addressed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Project does use GNU Guile 3.0; verified by Makefile GUILE detection + `guile --version` returning 3.0.11.
+   :END:
+
+** adr/0002-ollama-first-provider.md
+   :PROPERTIES:
+   :TARGET_ID: file:adr/0002-ollama-first-provider.md
+   :STATUS: addressed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Default SAGE_PROVIDER=ollama confirmed in src/sage/config.scm:61 (*default-ollama-host*) and .env.template line 9.
+   :END:
+
+** adr/0003-security-model.md
+   :PROPERTIES:
+   :TARGET_ID: file:adr/0003-security-model.md
+   :STATUS: addressed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Safe-tools allow-list + YOLO gate confirmed in src/sage/tools.scm *safe-tools* and check-permission. See ARCHITECTURE.org §6 (validated drawer).
+   :END:
+
+** adr/0004-command-synergy.md
+   :PROPERTIES:
+   :TARGET_ID: file:adr/0004-command-synergy.md
+   :STATUS: addressed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :END:
+
+** adr/0005-context-compaction.md
+   :PROPERTIES:
+   :TARGET_ID: file:adr/0005-context-compaction.md
+   :STATUS: addressed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: 5 compaction strategies confirmed in src/sage/compaction.scm; auto-compact at 80% confirmed in src/sage/session.scm session-maybe-compact!.
+   :END:
+
+** adr/README.md
+   :PROPERTIES:
+   :TARGET_ID: file:adr/README.md
+   :STATUS: closed
+   :VERDICT: closed-by-construction
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Index file listing ADRs; correctness is mechanical.
+   :END:
+
+* Request-for-comments specs (=docs/rfc/=) — forward-looking
+  :PROPERTIES:
+  :CUSTOM_ID: rfcs
+  :END:
+
+RFCs are spec proposals; verdict is whether the spec is internally
+consistent and matches any implementation that has begun.
+
+** rfc/001-plugin-contract.org
+   :PROPERTIES:
+   :TARGET_ID: file:rfc/001-plugin-contract.org
+   :STATUS: open
+   :VERDICT: planned
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Plugin system not yet implemented (tracked in bead guile-sage-bmy: "Implement plugin system per RFC-001").
+   :BLOCKING_BEAD: guile-sage-bmy
+   :END:
+
+** rfc/002-sandbox-egress-credentials.org
+   :PROPERTIES:
+   :TARGET_ID: file:rfc/002-sandbox-egress-credentials.org
+   :STATUS: open
+   :VERDICT: needs-citation
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Sandbox confinement awareness landed (src/sage/sandbox.scm exists); credential egress policy still spec-only.
+   :END:
+
+* Reports (=docs/reports/=) — historical, frozen
+  :PROPERTIES:
+  :CUSTOM_ID: reports
+  :END:
+
+Every file in =docs/reports/= is a dated snapshot (stress-test logs,
+methodology notes, briefings). Their truth value is /pinned to the
+moment of capture/. We mark all of them =closed-by-construction= as a
+class rather than per-file — appropriate for historical archives.
+
+** reports/* (20+ files)
+   :PROPERTIES:
+   :TARGET_ID: file:reports/
+   :STATUS: closed
+   :VERDICT: closed-by-construction
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Dated reports (2026-01-24 to 2026-01-26 + later). Per ANNOTATION-SYSTEMS.org §8.2, point-in-time snapshots are frozen; corrections live in new reports, not amendments.
+   :END:
+
+* Operational + reference docs — lightweight verdicts
+  :PROPERTIES:
+  :CUSTOM_ID: operational
+  :END:
+
+These describe operational concerns (chaos testing, telemetry, command
+surface, eval). A lightweight verdict reflects a sanity check against
+the code; full claim-by-claim audits are queued for follow-up sweeps.
+
+** CHAOS-TESTING.org
+   :PROPERTIES:
+   :TARGET_ID: file:CHAOS-TESTING.org
+   :STATUS: addressed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Doc describes scripts/toxiproxy-chaos.sh; harness verified up + scenario 1 exercised. Known issue: hardcoded `guile3` (no fallback to `guile`) — filed bead. See ANNOTATION-SYSTEMS.org §6.
+   :END:
+
+** CHAOS-TOXIPROXY-SPEC.org
+   :PROPERTIES:
+   :TARGET_ID: file:CHAOS-TOXIPROXY-SPEC.org
+   :STATUS: addressed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Scenarios in spec match scripts/toxiproxy-chaos.sh sub-commands; up/down/scenario N/all surface verified.
+   :END:
+
+** CLI-COMPARISON.org
+   :PROPERTIES:
+   :TARGET_ID: file:CLI-COMPARISON.org
+   :STATUS: closed
+   :VERDICT: closed-by-construction
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Cross-CLI feature comparison — point-in-time observation, not a contract about guile-sage internals.
+   :END:
+
+** COMMANDS.org
+   :PROPERTIES:
+   :TARGET_ID: file:COMMANDS.org
+   :STATUS: open
+   :VERDICT: corrected
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-ops (independent sub-agent)
+   :FINDING: Core v0.1 commands /save /load /sessions /reset /stats /model /models /tools /version /exit /help VERIFIED present in repl.scm *commands* table. /yolo marked v0.1 ✓ but NOT implemented (no cmd-yolo). /plan and /ask (v0.5) not implemented. Custom commands path spec says .sage/commands/*.scm; actual is ~/.config/sage/commands.scm (commands.scm:36-37).
+   :END:
+
+** EU-AI-ACT-GUARDRAILS.org
+   :PROPERTIES:
+   :TARGET_ID: file:EU-AI-ACT-GUARDRAILS.org
+   :STATUS: open
+   :VERDICT: needs-citation
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Regulatory mapping doc; claim-bearing about which guardrails are implemented vs spec. Lightweight check: telemetry + sandbox-awareness modules exist; finer audit deferred.
+   :END:
+
+** EVAL-CASE-SCHEMA.org
+   :PROPERTIES:
+   :TARGET_ID: file:EVAL-CASE-SCHEMA.org
+   :STATUS: open
+   :VERDICT: corrected
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-ops (independent sub-agent)
+   :FINDING: v1 schema live in tests/eval/traffic-cases.json + scripts/eval-sage.sh (verified meta.version="1.0", TC01-TC20 cases). v2 fields expect_tool_min_count/expect_tool_order/requires_model_tier documented but NOT implemented in eval-sage.sh (grep finds zero occurrences). check_tool_min_count/check_tool_order pseudocode aspirational. TC21 chain-planning case correctly marked speculative. Tracked in bead guile-sage-50n.
+   :END:
+
+** ROADMAP.org
+   :PROPERTIES:
+   :TARGET_ID: file:ROADMAP.org
+   :STATUS: open
+   :VERDICT: planned
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Forward-looking by construction; "verified" means alignment with open beads, not shipped reality.
+   :END:
+
+** TOOLS-GUIDE.org
+   :PROPERTIES:
+   :TARGET_ID: file:TOOLS-GUIDE.org
+   :STATUS: open
+   :VERDICT: needs-citation
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Tool surface guide. Tools-count claim (22+) verified true in ARCH §2 audit (actual ~36 default tools). Full per-tool verification deferred.
+   :END:
+
+** TIMING-PROTOCOL.org
+   :PROPERTIES:
+   :TARGET_ID: file:TIMING-PROTOCOL.org
+   :STATUS: closed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-ops (independent sub-agent)
+   :FINDING: Protocol fully implemented at scripts/timing-bench.sh. TIMING_BENCH_MODELS default matches verbatim. Phase 1 single-turn metrics (load_duration/prompt_eval_count/eval_count/total_duration) extracted at lines 89-94. Phase 2 tool-calling: native tool_calls field check at line 114-115 (text-formatted calls correctly excluded). Locked-in 2026-04-11 measurements (llama3.2 10/10, qwen2.5-coder 0/10) are the source of truth driving the model-tier defaults — verified against src/sage/model-tier.scm.
+   :END:
+
+** PRESENTATION.org
+   :PROPERTIES:
+   :TARGET_ID: file:PRESENTATION.org
+   :STATUS: closed
+   :VERDICT: closed-by-construction
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Slide-deck source; exports to PRESENTATION.html. Frozen post-export per §8.2.
+   :END:
+
+* Contract docs awaiting deep audit
+  :PROPERTIES:
+  :CUSTOM_ID: contracts-pending
+  :END:
+
+These have inline drawers landing in a follow-up commit once the
+relevant sub-agent returns.
+
+** LSP-CONTRACT.org
+   :PROPERTIES:
+   :TARGET_ID: file:LSP-CONTRACT.org
+   :STATUS: open
+   :VERDICT: planned
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-lsp (independent sub-agent)
+   :FINDING: src/sage/lsp.scm does NOT exist; all claims forward-looking. 5 reuse claims verified correct (serverInfo.version from src/sage/version.scm; check-permission + *safe-tools* in src/sage/tools.scm; mcp-make-request/notification in src/sage/mcp.scm:97-113; json helpers in src/sage/util.scm:26-29). 14 invariants L01-L14 well-formed, internally consistent. Bead: guile-sage-7wm.
+   :BLOCKING_BEAD: guile-sage-7wm
+   :END:
+
+** LSP-CLIENT-CONTRACT.org
+   :PROPERTIES:
+   :TARGET_ID: file:LSP-CLIENT-CONTRACT.org
+   :STATUS: open
+   :VERDICT: planned
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-lsp (independent sub-agent)
+   :FINDING: src/sage/lsp-client.scm does NOT exist. 16 invariants LC01-LC16 well-formed. Config path ~/.config/sage/config.json plausible via XDG but unverified (no loader code yet). Reuse claims (mcp-make-request, config.scm find-agents-md/load-agents-md, ice-9 popen) all correct against running code.
+   :BLOCKING_BEAD: guile-sage-7wm
+   :END:
+
+** LSP-TRANSPORT-CONTRACT.org
+   :PROPERTIES:
+   :TARGET_ID: file:LSP-TRANSPORT-CONTRACT.org
+   :STATUS: open
+   :VERDICT: planned
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-lsp (independent sub-agent)
+   :FINDING: src/sage/lsp/transport.scm does NOT exist. 12 invariants LT01-LT12 precise + testable. Content-Length 220-byte sample for initialize accurate per LSP 3.17. utf8-byte-length helper shown as pseudocode (uses standard Guile string->utf8 + bytevector-length). JSON-RPC reuse with mcp.scm verified.
+   :BLOCKING_BEAD: guile-sage-7wm
+   :END:
+
+** AGENTS-MD-CONTRACT.org
+   :PROPERTIES:
+   :TARGET_ID: file:AGENTS-MD-CONTRACT.org
+   :STATUS: open
+   :VERDICT: corrected
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-agents (independent sub-agent)
+   :FINDING: Stale line numbers: doc says config.scm:256-282; actual find-agents-md/load-agents-md at lines 287/303. Behavioral claim "context.scm loads SAGE.md but never calls load-agents-md" verified (repl.scm:600 calls load-agents-context only). Five-path discovery (workspace/XDG project/XDG config/XDG data/~/.sage) verified config.scm:287-298. /agents command + structured parsing (A06-A11) acknowledged unimplemented in §4.
+   :END:
+
+** AGENTS-MD-DIRECTIVES.org
+   :PROPERTIES:
+   :TARGET_ID: file:AGENTS-MD-DIRECTIVES.org
+   :STATUS: open
+   :VERDICT: planned
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-agents (independent sub-agent)
+   :FINDING: src/sage/directives.scm does NOT exist. parse-directives + tool-allow/tool-deny enforcement all aspirational. Invariants AD01-AD10 well-formed but no executable evidence.
+   :END:
+
+** HOOKS-CONFIG-CONTRACT.org
+   :PROPERTIES:
+   :TARGET_ID: file:HOOKS-CONFIG-CONTRACT.org
+   :STATUS: open
+   :VERDICT: disputed
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-agents (independent sub-agent)
+   :FINDING: Describes file-based persistence + 3-scope merge that does NOT exist; src/sage/hooks.scm has only in-memory registry. Event field type: doc says string, code uses symbol (hooks.scm:48 memq 'PreToolUse). hooks-config-load not implemented. PreToolUse/PostToolUse dispatch (lines 84-98) verified correct against hooks.scm:127,159.
+   :END:
+
+** HOOK-NEGATIVE-CONTRACTS.org
+   :PROPERTIES:
+   :TARGET_ID: file:HOOK-NEGATIVE-CONTRACTS.org
+   :STATUS: open
+   :VERDICT: planned
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-agents (independent sub-agent)
+   :FINDING: Proposes 5 negative-contract guards (self-mod/secrets/runaway/scope/test-del) + drift-score tracking; NONE implemented. Hook event names (hook-fire-pre-tool/post-tool with ctx alist) verified correct. NC01-NC12 invariants all forward-looking.
+   :END:
+
+** SANDBOX-AND-EGRESS.org
+   :PROPERTIES:
+   :TARGET_ID: file:SANDBOX-AND-EGRESS.org
+   :STATUS: addressed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-ops (independent sub-agent)
+   :FINDING: 5 of 5 critical claims verified: src/sage/sandbox.scm exports (sandbox-confined?) at line 42 + sandbox-confinement-report at line 41; seatbelt profile confines AWS/GCLOUD/SSH/OLLAMA paths; SAGE_OPENAI_BASE read in src/sage/openai.scm:39; Bastille jail validation status accurate.
+   :END:
+
+** PLUGINS-SPEC.org
+   :PROPERTIES:
+   :TARGET_ID: file:PLUGINS-SPEC.org
+   :STATUS: open
+   :VERDICT: disputed
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent-ops (independent sub-agent)
+   :FINDING: Phase 1 marked [X] in spec but skill discovery from .claude/skills/ NOT actually implemented; custom commands persist to ~/.config/sage/commands.scm (commands.scm:36) not the spec's project-scope .claude/. No `sage plugin list` command, no namespacing, no signature verification. Tracked in bead guile-sage-bmy. Discrepancy noted in _queue/Q05? actually Q03 area.
+   :BLOCKING_BEAD: guile-sage-bmy
+   :END:
+
+** SKILLS-IMPL-SPEC.org
+   :PROPERTIES:
+   :TARGET_ID: file:SKILLS-IMPL-SPEC.org
+   :STATUS: open
+   :VERDICT: planned
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Build plan for src/sage/skills.scm. Internal consistency with SKILLS-CONTRACT.org confirmed in that doc's audit.
+   :BLOCKING_BEAD: guile-sage-6fx
+   :END:
+
+* Annotation system self-reference
+  :PROPERTIES:
+  :CUSTOM_ID: self
+  :END:
+
+** ANNOTATION-SYSTEMS.org
+   :PROPERTIES:
+   :TARGET_ID: file:ANNOTATION-SYSTEMS.org
+   :STATUS: open
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Local adaptation of wal.sh/research/annotation-systems. The doc's preamble already carries a drawer; this index entry exists for completeness.
+   :END:
+
+* Top-level repo docs
+  :PROPERTIES:
+  :CUSTOM_ID: top-level
+  :END:
+
+Files outside =docs/= that carry claims about the project. Validation
+is lightweight unless flagged.
+
+** README.org
+   :PROPERTIES:
+   :TARGET_ID: file:../README.org
+   :STATUS: open
+   :VERDICT: needs-citation
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Project description; same drift risk as ARCH.org (version, module count, feature list). Full audit deferred to next sweep.
+   :END:
+
+** AGENTS.md
+   :PROPERTIES:
+   :TARGET_ID: file:../AGENTS.md
+   :STATUS: open
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Lint-docs (gmake lint-docs) confirms most test files are listed; 8 pre-existing WARN entries (test-netpolicy, test-openai-aig, test-prompt-injection, test-provenance, test-scratch-paging, test-shell-injection, test-usage-stats) not yet in the AGENTS.md test table — known follow-up.
+   :END:
+
+** CLAUDE.md
+   :PROPERTIES:
+   :TARGET_ID: file:../CLAUDE.md
+   :STATUS: closed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Project-instructions file; mandates `bd` workflow + session-close protocol. Verified followed in this session.
+   :END:
+
+** SAGE.md
+   :PROPERTIES:
+   :TARGET_ID: file:../SAGE.md
+   :STATUS: open
+   :VERDICT: needs-citation
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :END:
+
+** SECURITY.md
+   :PROPERTIES:
+   :TARGET_ID: file:../SECURITY.md
+   :STATUS: closed
+   :VERDICT: correct
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Standard security policy file; reporting channel + scope; non-claim-bearing about runtime.
+   :END:
+
+** CODE_OF_CONDUCT.md
+   :PROPERTIES:
+   :TARGET_ID: file:../CODE_OF_CONDUCT.md
+   :STATUS: closed
+   :VERDICT: closed-by-construction
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Boilerplate CoC; no project-runtime claims.
+   :END:
+
+** CONTRIBUTING.org
+   :PROPERTIES:
+   :TARGET_ID: file:../CONTRIBUTING.org
+   :STATUS: open
+   :VERDICT: needs-citation
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: Build/test/PR workflow doc; carries claim-bearing setup instructions. Full audit deferred.
+   :END:
+
+** SPEC.org
+   :PROPERTIES:
+   :TARGET_ID: file:../SPEC.org
+   :STATUS: open
+   :VERDICT: needs-citation
+   :VALIDATED_AT: 2026-06-22T04:00Z
+   :VALIDATED_BY: claude-agent
+   :FINDING: 64KB top-level spec — many claim-bearing sections. Full audit deferred to a dedicated sweep; spot-check against ARCH/MCP/HOOKS/SKILLS/TELEMETRY audits found internal consistency.
+   :END:

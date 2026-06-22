@@ -1,0 +1,172 @@
+#+TITLE: docs/_queue — items needing another agent pass
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-22
+#+OPTIONS: toc:1 num:nil ^:nil
+#+STARTUP: overview
+
+#+begin_quote
+Local mirror of the =wal.sh/_queue= / =wal.sh/_drafts= convention. When
+an audit / annotation pass hits something it can't resolve (too large
+for a single pass, requires a spec change rather than a doc change,
+needs human judgement, blocked on missing tooling) the item lands here
+for a follow-up agent.
+
+This is part of the [[file:../ANNOTATION-SYSTEMS.org][annotation system]]: tracked alongside the inline
+drawers + [[file:../../.verify/chain.jsonl][.verify/chain.jsonl]] + [[file:../VALIDATION-INDEX.org][docs/VALIDATION-INDEX.org]].
+#+end_quote
+
+* Q01 — Deep audit of =SPEC.org=
+  :PROPERTIES:
+  :CUSTOM_ID: q01-spec-deep-audit
+  :STATUS: open
+  :KIND: scope-too-large
+  :OWNER: any-agent
+  :END:
+
+=SPEC.org= is ~64KB and pre-dates the contract split into =MCP-CONTRACT=,
+=HOOKS-CONTRACT=, =SKILLS-CONTRACT=, etc. A full claim-by-claim audit
+will produce hundreds of verdicts. Recommended: section-by-section
+sweep, each section getting its own commit + ledger batch. Cross-check
+against the dedicated contract docs (which carry inline drawers).
+
+* Q02 — Apply per-heading drawers to ARCH/MCP/HOOKS/SKILLS/TELEMETRY
+  :PROPERTIES:
+  :CUSTOM_ID: q02-per-heading-drawers
+  :STATUS: open
+  :KIND: mechanical-extension
+  :OWNER: any-agent
+  :END:
+
+Current state: each of the five top contract docs carries ONE
+=Validation status= preamble drawer summarising the audit + linking the
+ledger. The ANNOTATION-SYSTEMS.org §3 schema also wants =:CUSTOM_ID:= +
+drawer on /every claim-bearing heading/. The audit data needed
+(line, kind, verdict, finding) is already in
+[[file:../../.verify/chain.jsonl][.verify/chain.jsonl]] — applying it
+to each heading is mechanical.
+
+* Q03 — Resolve HOOKS-CONFIG-CONTRACT disputed verdict (spec vs code)
+  :PROPERTIES:
+  :CUSTOM_ID: q03-hooks-config-spec-vs-code
+  :STATUS: open
+  :KIND: needs-spec-decision
+  :OWNER: human-or-design-agent
+  :END:
+
+The sub-agent audit found two real divergences in
+[[file:../HOOKS-CONFIG-CONTRACT.org]]:
+
+1. Event field: spec says =string= ("PreToolUse"); code uses =symbol=
+   ('PreToolUse via memq, hooks.scm:48). Either fix the spec or the
+   code — both are valid, but one of them is wrong.
+2. The contract describes file-based persistence + 3-scope merge
+   (=hooks-config-load=); code has only in-memory registry. Decision
+   needed: ship the persistence layer, or trim the contract.
+
+Not a doc-only fix; needs a design call.
+
+* Q04 — Fix stale line numbers in AGENTS-MD-CONTRACT.org
+  :PROPERTIES:
+  :CUSTOM_ID: q04-agents-md-stale-lines
+  :STATUS: open
+  :KIND: surgical-fix
+  :OWNER: any-agent
+  :END:
+
+Doc cites =src/sage/config.scm:256-282= for =find-agents-md= +
+=load-agents-md=; actual lines are =287-303=. Straightforward
+correction — analogous to the four ARCH.org drifts already landed.
+
+* Q05 — Fix MCP I21 (heterogeneous content drop)
+  :PROPERTIES:
+  :CUSTOM_ID: q05-mcp-i21-content-drop
+  :STATUS: open
+  :KIND: code-change
+  :OWNER: any-agent
+  :END:
+
+[[file:../MCP-CONTRACT.org]] I21 says unknown content block types MUST
+be preserved. =src/sage/mcp.scm:648-653= silently drops anything that
+is not =text=. Either fix the code (recommended — preserve image/
+resource/unknown blocks through) or amend the spec to say "text-only,
+others dropped with warning". Picking the first is the
+contract-correct option.
+
+* Q06 — Implement the ledger writer + =bd reconcile-ledger=
+  :PROPERTIES:
+  :CUSTOM_ID: q06-ledger-writer
+  :STATUS: open
+  :KIND: tooling
+  :OWNER: design-agent
+  :END:
+
+[[file:../ANNOTATION-SYSTEMS.org][docs/ANNOTATION-SYSTEMS.org]] §5
+specifies a tamper-evident JSONL ledger with =prev_sha=/=sha= chaining
+and a =bd reconcile-ledger= command that flags drawer/ledger
+divergence. Today the ledger ([[file:../../.verify/chain.jsonl]]) is
+append-only without chaining; reconciliation is manual.
+
+Needs: canonicalisation rule, SHA-256 chaining at append time, and
+the =bd= subcommand that walks both surfaces.
+
+* Q07 — Verdict vocabulary divergence
+  :PROPERTIES:
+  :CUSTOM_ID: q07-verdict-vocab-drift
+  :STATUS: open
+  :KIND: spec-alignment
+  :OWNER: any-agent
+  :END:
+
+The wal.sh source schema lists =:VERDICT:= ∈ ={correct, corrected,
+disputed, needs-citation}=. We have added two extensions:
+
+- =planned= — for forward-looking specs whose implementation doesn't
+  exist yet (LSP, SKILLS, PLUGINS, AGENTS-MD-DIRECTIVES,
+  HOOK-NEGATIVE-CONTRACTS).
+- =closed-by-construction= — for frozen historical artifacts (release
+  notes, dated reports).
+
+Both are documented in =ANNOTATION-SYSTEMS.org §8.4= and =§6= but
+diverge from upstream. Either upstream the extensions, or rewrite our
+verdicts in the source vocabulary (e.g. =planned= → =needs-citation=
+with finding "implementation pending"; =closed-by-construction= →
+=correct= with finding "historical, frozen").
+
+* Q08 — Inventory and annotate top-level repo docs in their own files
+  :PROPERTIES:
+  :CUSTOM_ID: q08-top-level-annotations
+  :STATUS: open
+  :KIND: mechanical-extension
+  :OWNER: any-agent
+  :END:
+
+[[file:../VALIDATION-INDEX.org]] §"Top-level repo docs" carries
+companion drawers for README.org, AGENTS.md, CLAUDE.md, etc., but the
+files themselves don't have inline drawers. Apply inline drawers
+(HTML-comment shim for .md per ANNOTATION-SYSTEMS.org §4).
+
+* Q09 — Audit per-tool claims in TOOLS-GUIDE.org and COMMANDS.org
+  :PROPERTIES:
+  :CUSTOM_ID: q09-tools-commands-audit
+  :STATUS: open
+  :KIND: claim-audit
+  :OWNER: any-agent
+  :END:
+
+Both files are claim-bearing (tool names, args, /commands surface).
+=TOOLS-GUIDE.org= got a lightweight verdict; =COMMANDS.org= got
+=needs-citation=. A real audit would walk each tool/command name vs
+=src/sage/tools.scm= and =src/sage/repl.scm *commands*=.
+
+* Q10 — Verify =scripts/toxiproxy-chaos.sh= scenarios end-to-end
+  :PROPERTIES:
+  :CUSTOM_ID: q10-chaos-scenarios-e2e
+  :STATUS: open
+  :KIND: integration
+  :OWNER: any-agent
+  :END:
+
+Only scenario 1 was run during the validation sweep; it exposed the
+hardcoded =guile3= bug (already filed). The remaining scenarios
+(2..N) need to run against a build where the chaos script honors
+=$GUILE= so that "ALIVE" verdicts are real and not false-positive.
