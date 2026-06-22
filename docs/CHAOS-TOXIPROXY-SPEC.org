@@ -100,6 +100,37 @@ package, so it does NOT belong in the per-push =test.yml=. Policy:
   # OR run locally: gmake release
 #+END_SRC
 
+* Validated run --- 2026-06-22
+
+Executed from =hydra= (=192.168.86.29=) against the real *LiteLLM gateway*
+=192.168.86.22:4000= (direct ollama =:11434= is firewalled from this host, so
+=CHAOS_PROVIDER=openai= was used — exactly the cross-host case the openai mode
+exists for). toxiproxy built via =go install …/cmd/server@v2.12.0= +
+=…/cmd/cli@v2.12.0=.
+
+#+BEGIN_SRC sh
+  CHAOS_PROVIDER=openai UPSTREAM=192.168.86.22:4000 \
+  TOXI_LISTEN=127.0.0.1:24000 CHAOS_OPENAI_KEY=… CHAOS_MODEL=ollama-qwen2.5-coder \
+  sh scripts/toxiproxy-chaos.sh all
+#+END_SRC
+
+| Scenario                         | Result      |
+|----------------------------------+-------------|
+| #1 proxy disabled (refused)      | REPL ALIVE  |
+| #2 latency 3000ms                | REPL ALIVE  |
+| #3 reset_peer mid-connection     | REPL ALIVE  |
+| #4 bandwidth 64 + slicer         | REPL ALIVE  |
+
+Core boundary upheld under every fault: *no SIGSEGV, clean degradation, prompt
+reached.* The =.env= stash/restore trap left the repo config untouched.
+
+Notes from the run: (1) a =latency= toxic delays the *response*, bounded by curl
+=--max-time=, so it does NOT exercise =--connect-timeout= — scenario #1 disables
+the proxy to get a true connect-level refusal. (2) These scenarios exercise the
+*startup/probe* path; a chat-turn streaming-under-reset assertion needs the
+team-scoped LiteLLM key to gain model access (currently chat is denied; the
+=/v1/models= probe is allowed) or a direct ollama backend.
+
 * Limitations (honest)
 
 - L4 only: 429/5xx body injection needs the mock/LiteLLM sidecar (scenario 5).

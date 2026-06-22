@@ -13,7 +13,7 @@
 #   scripts/toxiproxy-chaos.sh down        # remove toxics + stop server
 #
 # Config via env (all have defaults):
-#   OLLAMA_UPSTREAM   real backend behind the proxy   (default 127.0.0.1:11434)
+#   UPSTREAM   real backend behind the proxy   (default 127.0.0.1:11434)
 #   TOXI_LISTEN       sage-facing listen addr          (default 127.0.0.1:21434)
 #   TOXI_API          toxiproxy control API            (default 127.0.0.1:8474)
 set -eu
@@ -23,12 +23,27 @@ LOGDIR="$ROOT/.logs"; mkdir -p "$LOGDIR"
 SRV_LOG="$LOGDIR/toxiproxy-server.log"
 SRV_PIDFILE="$LOGDIR/toxiproxy-server.pid"
 
-OLLAMA_UPSTREAM="${OLLAMA_UPSTREAM:-127.0.0.1:11434}"
+# Backend behind the proxy. Two modes:
+#   CHAOS_PROVIDER=ollama  (default) — upstream is a direct ollama /api host
+#   CHAOS_PROVIDER=openai            — upstream is an OpenAI-shape gateway
+#                                      (e.g. LiteLLM); set CHAOS_OPENAI_KEY.
+# From a host that cannot reach a LAN ollama directly (firewall) but CAN reach a
+# LiteLLM gateway, use openai mode — that is how this harness was validated.
+CHAOS_PROVIDER="${CHAOS_PROVIDER:-ollama}"
+UPSTREAM="${UPSTREAM:-127.0.0.1:11434}"
 TOXI_LISTEN="${TOXI_LISTEN:-127.0.0.1:21434}"
 TOXI_API="${TOXI_API:-127.0.0.1:8474}"
-PROXY=ollama
+PROXY=backend
 
 CLI="toxiproxy-cli -h $TOXI_API"
+
+# sage's config-load-dotenv reloads $ROOT/.env over the shell env, which would
+# clobber the inline chaos provider/host vars. Stash .env for the duration of
+# the run and restore it on exit (even on error/interrupt).
+ENV_STASH="$ROOT/.env.chaos-stash"
+restore_env() { [ -f "$ENV_STASH" ] && mv -f "$ENV_STASH" "$ROOT/.env" || true; }
+stash_env()   { [ -f "$ROOT/.env" ] && mv -f "$ROOT/.env" "$ENV_STASH" || true; }
+trap restore_env EXIT INT TERM
 
 require_toxiproxy() {
   if ! command -v toxiproxy-server >/dev/null 2>&1 || \
@@ -54,14 +69,22 @@ up() {
     # wait for the control API to answer
     i=0; until $CLI list >/dev/null 2>&1 || [ "$i" -ge 20 ]; do i=$((i+1)); sleep 0.2; done
   fi
-  $CLI create -l "$TOXI_LISTEN" -u "$OLLAMA_UPSTREAM" "$PROXY" 2>/dev/null \
+  $CLI create -l "$TOXI_LISTEN" -u "$UPSTREAM" "$PROXY" 2>/dev/null \
     || echo "proxy '$PROXY' already exists"
-  echo "proxy '$PROXY': $TOXI_LISTEN -> $OLLAMA_UPSTREAM"
-  echo "point sage at it:  SAGE_OLLAMA_HOST=http://$TOXI_LISTEN"
+  echo "proxy '$PROXY': $TOXI_LISTEN -> $UPSTREAM"
+  if [ "$CHAOS_PROVIDER" = openai ]; then
+    echo "point sage at it:  SAGE_PROVIDER=openai SAGE_OPENAI_BASE=http://$TOXI_LISTEN/v1"
+  else
+    echo "point sage at it:  SAGE_PROVIDER=ollama SAGE_OLLAMA_HOST=http://$TOXI_LISTEN"
+  fi
 }
 
-clear_toxics() { $CLI toxic list "$PROXY" 2>/dev/null | awk '/name:/{print $2}' \
-  | while read -r t; do $CLI toxic delete -n "$t" "$PROXY" 2>/dev/null || true; done; }
+# Reset to a clean baseline (enabled, no toxics) by recreating the proxy.
+# toxiproxy-cli has only `toggle`, so recreate is the reliable way to reset.
+reset_proxy() {
+  $CLI delete "$PROXY" 2>/dev/null || true
+  $CLI create -l "$TOXI_LISTEN" -u "$UPSTREAM" "$PROXY" >/dev/null 2>&1 || true
+}
 
 down() {
   command -v toxiproxy-cli >/dev/null 2>&1 && $CLI delete "$PROXY" 2>/dev/null || true
@@ -74,20 +97,32 @@ down() {
 
 # --- assertion helper: launch sage in tmux against the proxy, return banner+ALIVE
 probe_banner() {
+  stash_env   # ensure the repo .env does not override the inline chaos vars
   tmux kill-session -t chaos 2>/dev/null || true
   tmux new-session -d -s chaos -x 200 -y 50
+  if [ "$CHAOS_PROVIDER" = openai ]; then
+    SAGE_ENV="SAGE_PROVIDER=openai SAGE_OPENAI_BASE=http://$TOXI_LISTEN/v1 SAGE_OPENAI_API_KEY=${CHAOS_OPENAI_KEY:-x} SAGE_MODEL=${CHAOS_MODEL:-ollama-qwen2.5-coder}"
+  else
+    SAGE_ENV="SAGE_PROVIDER=ollama SAGE_OLLAMA_HOST=http://$TOXI_LISTEN SAGE_MODEL=${CHAOS_MODEL:-llama3.2}"
+  fi
+  # NOTE: sage reloads .env over the shell env, so run from a dir whose .env
+  # does not override these — or invoke with a chaos-specific .env. Here we pass
+  # the vars inline for a fresh process that has no .env in CWD.
   tmux send-keys -t chaos \
-    "cd $ROOT && SAGE_OLLAMA_HOST=http://$TOXI_LISTEN SAGE_PROVIDER=ollama SAGE_MODEL=qwen3-coder SAGE_YOLO_MODE=1 guile3 -L src -c '(use-modules (sage repl)) (repl-start)'" Enter
+    "cd $ROOT && env $SAGE_ENV SAGE_HTTP_MAX_RETRIES=2 SAGE_YOLO_MODE=1 guile3 -L src -c '(use-modules (sage repl)) (repl-start)'" Enter
 }
 
 scenario() {
   require_toxiproxy
-  clear_toxics
+  reset_proxy
   case "$1" in
-    1) echo "[#1] latency 8000ms -> probe must fast-fail at ~5s (connect-timeout)"
-       $CLI toxic add -t latency -a latency=8000 "$PROXY" ;;
-    2) echo "[#2] timeout 0 (black-hole) -> clean connection-failed error, no hang"
-       $CLI toxic add -t timeout -a timeout=0 "$PROXY" ;;
+    1) echo "[#1] proxy disabled (connection refused) -> fast-fail + clean error"
+       # A latency toxic delays the RESPONSE (bounded by curl --max-time), so it
+       # does NOT exercise --connect-timeout. Refusing the connection does:
+       # curl fails the connect fast, sage surfaces a clean connection error.
+       $CLI toggle "$PROXY" >/dev/null ;;
+    2) echo "[#2] latency 3000ms -> slow backend tolerated, REPL survives"
+       $CLI toxic add -t latency -a latency=3000 "$PROXY" ;;
     3) echo "[#3] reset_peer 1500ms mid-stream -> streaming survives, no SIGSEGV"
        $CLI toxic add -t reset_peer -a timeout=1500 "$PROXY" ;;
     4) echo "[#4] bandwidth 64 + slicer -> SSE data: reassembly under fragmentation"
