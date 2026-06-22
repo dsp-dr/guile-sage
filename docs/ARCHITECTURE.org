@@ -421,13 +421,20 @@ two platform bugs:
 1. *Accept header rejection*: Guile's HTTP header validator rejects
    =Accept: text/event-stream= as an invalid MIME type.
 
-2. *open-input-pipe broken on macOS*: =(open-input-pipe "curl ...")=
-   fails with "Bad file descriptor in execvp" on macOS.
+2. *Guile-native spawn primitives SIGSEGV*: on a long-lived,
+   multi-threaded Guile (BDW-GC + finalizer/signal threads),
+   =system*=, =open-pipe*= and =open-input-pipe= all crash the
+   runtime — uncatchably — because they fork the GC'd, threaded VM.
+   (=open-input-pipe= surfaced first as "Bad file descriptor in
+   execvp" on macOS; the FreeBSD guile3 3.0.10 failure is a hard
+   SIGSEGV.) Only libc =(system …)= is safe. See the spawn-primitive
+   safety matrix in =docs/CHAOS-TESTING.org=.
 
-The workaround creates a FIFO (named pipe) at =/tmp/sage-sse-<pid>=,
-runs =curl -sN= in the background writing to the FIFO, and opens the
-FIFO as an input file port. This synchronizes reader and writer
-without polling.
+The workaround uses libc =(system …)= (never =system*=/=primitive-fork=)
+to =mkfifo= a named pipe at =/tmp/sage-sse-<pid>=, run =curl -sN= in the
+background writing to the FIFO, and then opens the FIFO as an input file
+port. This synchronizes reader and writer without polling. The same
+pattern backs HTTP streaming in =util.scm= (=http-post-streaming-curl=).
 
 #+BEGIN_SRC
     sse-open-connection(url, headers)
