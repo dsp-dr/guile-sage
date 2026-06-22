@@ -31,8 +31,20 @@ See [[file:SECURITY.md][SECURITY.md]] for the private disclosure channel
 * Development Setup
 
 1. Clone the repository
-2. Copy =.env.template= to =.env= and configure
-3. Start REPL: =make repl=
+2. Copy =.env.template= to =.env= and configure.
+   ⚠ =repl-start= calls =config-load-dotenv=, which *re-reads =.env= and
+   overrides inherited shell variables*. So =GEMINI_API_KEY=x sage= will NOT
+   override a value set in =.env= — edit =.env= itself to change/inject config.
+   =.env= is gitignored.
+3. Build, then start the REPL: =gmake build= then =gmake repl=
+
+** Build requirements
+
+- *Use =gmake=, not =make=.* The Makefile is GNU make (=$(shell …)=); BSD
+  =make= mis-parses it and silently produces an empty build. All targets below
+  assume =gmake=.
+- Runtime is =guile3= / =guild3= (the Makefile auto-detects suffixed FreeBSD
+  names, falling back to =guile= / =guild=).
 
 * Project Structure
 
@@ -89,18 +101,45 @@ GIT_AUTHOR_EMAIL="sage@noreply.defrecord.com" \
 git commit -m "message"
 #+end_src
 
+* Engineering boundaries
+
+These are hard constraints; violating them breaks the build or the running TUI.
+Full rationale + the boundary contract: [[file:docs/CHAOS-TESTING.org][docs/CHAOS-TESTING.org]].
+
+- *Subprocess safety — libc =(system …)= only.* In this long-lived,
+  multi-threaded Guile, the native spawn primitives =system*=, =open-pipe*=,
+  and =open-input-pipe= all *SIGSEGV* (they fork the threaded, GC'd VM). Never
+  use them. Shell out via libc =(system "…")=; for streaming use
+  =(system "curl … > FIFO &")= + =(open-input-file FIFO)=.
+- *HTTP resilience.* All HTTP goes through curl with =--connect-timeout 5=; the
+  startup model probe fails fast (no retry); chat retries 429/5xx with
+  exponential backoff (=SAGE_HTTP_MAX_RETRIES=, default 2).
+- *Provider errors* normalize to one clean =[<provider> <label>: <msg>]= line
+  (never throw a raw body). Add new providers with a =*-error-response= helper.
+- *External data is tainted.* Route any new ingress (tool, MCP, fetch) through
+  =execute-tool= → =guard-tool-result= → =wrap-tool-result= so it reaches the
+  model as data, not instructions.
+
 * Testing
 
-Run tests with =make check= or individual tests with:
 #+begin_src bash
-guile3 -L src tests/test-*.scm
+gmake check            # full SRFI-64 suite
+gmake lint-code        # scheme lint
+gmake lint-org         # org-mode lint
+gmake lint-contracts   # contract conformance (tool registry, telemetry, imports)
+gmake lint-docs        # living-docs checks (FAILS on hardcoded RFC1918 IPs)
+gmake chaos-net        # opt-in: toxiproxy network-fault harness (CHAOS-TOXIPROXY-SPEC.org)
 #+end_src
+
+Run a single test file with =guile3 -L src tests/test-<name>.scm=. For
+interactive/TUI behaviour and fault injection, use the tmux PTY harness in
+[[file:docs/CHAOS-TESTING.org][docs/CHAOS-TESTING.org]].
 
 * REPL Testing
 
 Always test in REPL before committing:
 #+begin_src bash
-$ make repl
+$ gmake repl
 > (use-modules (sage ollama))
 > (ollama-list-models)
 #+end_src

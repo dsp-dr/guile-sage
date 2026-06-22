@@ -8,8 +8,18 @@ This file is automatically loaded into sage's context on startup.
   - `README.org`, `CONTRIBUTING.org`, `docs/*.org`
   - Exception: `AGENTS.md` (this file) for tool compatibility
 - **Language**: Guile Scheme (guile3)
-- **Testing**: `make check`
-- **REPL**: `make run` or `guile3 -L src`
+- **Build/Test**: `gmake` (required — BSD `make` mis-parses the GNU Makefile and silently no-ops). `gmake check`, `gmake lint-contracts`, `gmake lint-docs`.
+- **REPL**: `gmake run` or `guile3 -L src`
+
+### Engineering boundaries (hard constraints)
+
+See [docs/CHAOS-TESTING.org](docs/CHAOS-TESTING.org) for full rationale.
+
+- **Subprocess safety**: never use Guile-native `system*`, `open-pipe*`, or `open-input-pipe` — they SIGSEGV in this long-lived, multi-threaded Guile. Use libc `(system …)`; for streaming, `(system "curl … > FIFO &")` + `(open-input-file FIFO)`.
+- **HTTP resilience**: all HTTP via curl `--connect-timeout 5`; probe fails fast; chat retries 429/5xx with backoff (`SAGE_HTTP_MAX_RETRIES`, default 2).
+- **Provider errors** normalize to one clean `[<provider> <label>: <msg>]` line (never throw the raw body).
+- **External data is tainted**: route every tool/MCP/fetch result through `execute-tool` → `guard-tool-result` → `wrap-tool-result`.
+- **`.env` precedence**: `config-load-dotenv` re-reads `.env` and overrides shell env vars — edit `.env` to change config, not the shell.
 
 ---
 
@@ -512,6 +522,22 @@ after acceptance. Record WHY a decision was made.
 | test-ollama.scm | Ollama client + JSON parser |
 | test-log-introspection.scm | Log search/stats tools |
 | test-image-gen.scm | Image generation (flux) |
+| test-config.scm | Configuration resolution + .env precedence |
+| test-openai-aig.scm | OpenAI-shape + Cloudflare AI Gateway |
+| test-netpolicy.scm | robots.txt / llms.txt network policy |
+| test-provenance.scm | Ingress provenance + trust lattice |
+| test-expect-provenance.scm | Provenance record expectations |
+| test-eval-sandbox.scm | eval_scheme sandbox denylist |
+| test-prompt-injection.scm | Prompt-injection / taint defense |
+| test-shell-injection.scm | Shell-injection defense |
+| test-negative-contracts.scm | Negative contracts (hook vetoes) |
+| test-hooks.scm | Hook lifecycle (Pre/PostToolUse) |
+| test-hooks-config.scm | Hook configuration parsing |
+| test-hooks-observer-uat.scm | Hook observer UAT |
+| test-agents-md.scm | AGENTS.md discovery/parsing |
+| test-agents-md-directives.scm | AGENTS.md directive processing |
+| test-scratch-paging.scm | Scratch store paging |
+| test-usage-stats.scm | Usage statistics ledger |
 | test-harness.scm | SRFI-64 compat shim (shared by all tests) |
 
 ## Conventions
@@ -535,7 +561,7 @@ total duration.
 Before deprecating ANY feature, consult `/stats`:
 
 1. **Heavily used** (top of the list, thousands of calls per sprint):
-   leave alone. Examples as of v1.0.0: `git_status`, `search_files`,
+   leave alone. Examples as of v1.1.0: `git_status`, `search_files`,
    `read_file`, `write_file`, `read_logs`, `search_logs`.
 
 2. **Low but non-zero usage**: keep, or consolidate with overlapping
@@ -546,7 +572,7 @@ Before deprecating ANY feature, consult `/stats`:
 
 3. **Zero recorded usage over a meaningful sprint**: candidate for
    deprecation. Flag in the module docstring, emit a WARN on first
-   invocation, plan removal one minor version out. As of v1.0.0
+   invocation, plan removal one minor version out. As of v1.1.0
    the zero-use set included `git_diff`, `git_fetch`, `whoami`,
    `echo_input`, and meta-tools (`reload_module`, `create_tool`,
    `run_tests`) — some zero-use tools are intentional safety
