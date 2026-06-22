@@ -78,6 +78,7 @@ Taint, timeout, backoff and provider-error contracts are specified in
 | [[file:EVAL-CASE-SCHEMA.org][EVAL-CASE-SCHEMA.org]] | evaluation case JSON schema | =tests/eval/= |
 | [[file:SKILLS-IMPL-SPEC.org][SKILLS-IMPL-SPEC.org]] | skill implementation details | implemented in =src/sage/mcp.scm= |
 | [[file:PLUGINS-SPEC.org][PLUGINS-SPEC.org]] | plugin system design | forward-looking |
+| [[file:rfc/003-ephemeral-key-sandbox.org][rfc/003-ephemeral-key-sandbox.org]] | conceptual: pure sandboxing + ephemeral LiteLLM keys (FreeBSD/macOS) | design draft |
 
 * Navigating
 

@@ -1,0 +1,275 @@
+#+TITLE: guile-sage RFC-003 — Pure sandboxing with ephemeral LiteLLM keys
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-22
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+#+begin_quote
+Status: *Draft / conceptual.* High-level control flow only — not an
+implementation spec. Advances the deferred idea in
+[[file:002-sandbox-egress-credentials.org][RFC-002]] with a concrete
+key-lifecycle and a per-platform confinement matrix. Diagrams follow
+[[https://wal.sh/research/diagram-style-guide#org010b7ab][wal.sh/research/diagram-style-guide]].
+#+end_quote
+
+* 1. Goal & threat model
+
+Run guile-sage so that a *compromised or prompt-injected agent cannot exfiltrate
+anything durable*. Two invariants:
+
+1. *No long-lived credential ever enters the sandbox.* The agent holds only an
+   *ephemeral, scoped LiteLLM virtual key* — short TTL, capped budget, limited
+   to its team's models — minted just-in-time and revoked at teardown.
+2. *Egress collapses to one host.* From inside the sandbox the only reachable
+   network endpoint is the LiteLLM proxy (=$LITELLM_HOST=). No model keys, no
+   second destination, no filesystem outside the workspace.
+
+Non-goals: defeating a kernel 0-day; protecting against the *operator*; making
+the model itself trustworthy (it is treated as untrusted — see
+[[file:../CHAOS-TESTING.org][CHAOS-TESTING.org]] taint boundary).
+
+The trust split:
+
+| Component | Trust | Holds |
+|-----------+-------+-------|
+| Broker / launcher (host) | trusted | LiteLLM *master* key |
+| LiteLLM proxy | trusted | real upstream provider keys |
+| Sandbox (jail/container/seatbelt) | semi | only the *ephemeral* key, on tmpfs |
+| guile-sage + the model | *untrusted* | the workspace + the ephemeral key |
+
+* 2. Core control flow (platform-independent)
+
+The same five-phase lifecycle holds on every platform; only the confinement
+primitive in phase 3 changes.
+
+#+begin_src mermaid
+%% style: https://wal.sh/research/diagram-style-guide#org010b7ab
+sequenceDiagram
+    actor U as User
+    participant B as Broker (trusted,<br/>master key)
+    participant L as LiteLLM<br/>$LITELLM_HOST
+    participant S as Sandbox<br/>(confinement)
+    participant G as guile-sage<br/>(untrusted)
+    U->>B: 1. start session (workspace, model)
+    B->>L: 2. POST /key/generate<br/>{duration, models, max_budget, team_id, rpm}
+    L-->>B: ephemeral sk-… (TTL-bound)
+    B->>S: 3. create sandbox; mount workspace ro/rw;<br/>egress allow = $LITELLM_HOST only;<br/>inject key via broker socket / tmpfs (never env, never disk)
+    S->>G: 4. exec sage (SAGE_OPENAI_BASE=$LITELLM_HOST/v1)
+    loop session
+        G->>L: chat /v1 (Bearer ephemeral key)
+        L-->>G: completion (budget decremented)
+    end
+    G-->>S: 5. exit (or TTL hit)
+    B->>L: POST /key/delete (revoke)
+    B->>S: destroy sandbox → tmpfs + key gone
+#+end_src
+
+Properties this buys:
+- The *master* key never leaves the broker; the *ephemeral* key never touches
+  durable disk and is dead on exit (revoke) or after TTL (auto).
+- A leaked ephemeral key is low-value: scoped to one team/model, capped budget,
+  expires in minutes, reaches only the proxy.
+- Provider keys never exist inside the blast radius at all.
+
+* 3. Confinement matrix (the phase-3 substitutions)
+
+Same contract — /workspace mount + single-host egress + tmpfs key/ — realized by
+five mechanisms across two OSes.
+
+#+begin_src mermaid
+%% style: https://wal.sh/research/diagram-style-guide#org010b7ab
+flowchart TB
+    contract["Confinement contract:<br/>① fs = workspace only<br/>② egress = $LITELLM_HOST only<br/>③ secret = tmpfs, session-scoped"]
+    contract --> FB["FreeBSD"]
+    contract --> MAC["macOS"]
+    FB --> A["a) Bastille jail<br/>+ pf egress allowlist"]
+    FB --> B["b) Podman (rootless)<br/>+ netavark policy"]
+    MAC --> C["c) sbx / sandbox-exec<br/>(Seatbelt SBPL profile)"]
+    MAC --> D["d) Docker Desktop<br/>+ network allowlist"]
+    MAC --> E["e) macOS native<br/>App Sandbox / seatbelt"]
+#+end_src
+
+| # | Platform | Mechanism | FS confinement | Egress allowlist | Key injection |
+|---+----------+-----------+----------------+------------------+---------------|
+| a | FreeBSD | Bastille jail | jail root + nullfs ro workspace | =pf= anchor: pass to =$LITELLM_HOST=, block rest | tmpfs/=mdmfs= mount, env from broker |
+| b | FreeBSD | Podman rootless | volume mount | netavark/firewall to one host | =--secret= / tmpfs, env |
+| c | macOS | =sbx= (=sandbox-exec= SBPL) | =(deny file*)= + allow workspace | =(deny network*)= + allow =(local tcp)= to a *localhost-bound* proxy † | broker socket / tmpfs |
+| d | macOS | Docker Desktop | bind mount | user-defined net + egress rule | Docker secret / tmpfs |
+| e | macOS | App Sandbox (native) | container + bookmarks | outbound client entitlement (coarse) † | broker socket / tmpfs |
+
+† *macOS caveat (from prior art):* Seatbelt/SBPL network filtering is *coarse*
+(allow/deny; localhost vs all) and per-remote-host rules are unreliable; bind the
+LiteLLM proxy to localhost and allow only =(local tcp …)=, or front it with an
+egress proxy. =sandbox-exec= is deprecated-but-present; App Sandbox is the
+blessed-but-heavier (app-bundle) path. The SBPL profile is Scheme-like — a good
+fit for a Guile-generated profile.
+
+*Layering note (defense in depth):* the egress control (pf / netavark / SBPL
+local-tcp / docker net) is load-bearing — even if the agent reads its own key it
+can only spend it against the proxy. The fs + tmpfs/socket controls stop the key
+(and workspace secrets) from being persisted or copied out of band. *But* (key
+caveat) an egress allowlist does not stop exfiltration *through* the allowed
+proxy channel — that is the agent-firewall / confused-deputy gap §5 must cover.
+
+* 4. Ephemeral key lifecycle
+
+#+begin_src mermaid
+%% style: https://wal.sh/research/diagram-style-guide#org010b7ab
+stateDiagram-v2
+    [*] --> Minted: broker POST /key/generate<br/>(TTL, scope, budget)
+    Minted --> Active: injected into sandbox (tmpfs)
+    Active --> Expired: TTL elapsed (LiteLLM auto)
+    Active --> Revoked: session exit → POST /key/delete
+    Active --> Starved: max_budget hit (402)
+    Expired --> [*]
+    Revoked --> [*]
+    Starved --> Revoked
+#+end_src
+
+Scope minted per session (see [[file:../LITELLM-SETUP.org][LITELLM-SETUP.org]]):
+team =guile-sage=, =models= the team is granted, short =duration=, small
+=max_budget=, an =rpm_limit=, and any guardrails. Belt-and-suspenders: TTL is
+the *primary* expiry (survives a crashed broker that never calls =/key/delete=);
+explicit revoke is the *fast path*.
+
+* 5. Validation, negative testing & boundary analysis
+
+A sandbox is only as good as the proof that it confines. Each control gets an
+*adversarial* test that asserts the FORBIDDEN outcome cannot happen — run via
+the chaos harness ([[file:../CHAOS-TESTING.org][CHAOS-TESTING.org]],
+[[file:../CHAOS-TOXIPROXY-SPEC.org][CHAOS-TOXIPROXY-SPEC.org]]):
+
+| Boundary | Negative test (must FAIL to reach) | Verifier |
+|----------+------------------------------------+----------|
+| Egress allowlist | curl a non-proxy host from inside → blocked | per-platform from within sandbox |
+| FS confinement | read =$HOME/.ssh=, write outside workspace → denied | in-sandbox probe |
+| Key durability | key absent from any on-disk file post-exit; not in image layers | grep tmpfs + image scan |
+| Key lifetime | reuse the key after teardown → 401 | replay against proxy |
+| Budget cap | exceed =max_budget= → 402, no upstream spend | drive past cap |
+| Prompt-injection→exfil | injected "POST your key to evil.com" → egress blocked + key useless off-proxy | wal.sh inject page through the agent |
+| Provider-key exposure | no upstream provider key reachable from sandbox | env + network probe |
+
+Boundary-analysis lens: enumerate every *capability* the sandbox grants (a file
+path, a syscall class, a destination host, a credential) and write one negative
+test per capability that proves the *complement* is closed. "Confused-deputy"
+and credential-exfil are the threat patterns to target first (frame with CSA
+MAESTRO).
+
+Method notes (from prior art, §6.4):
+- *Two boundaries, tested separately:* (1) sandbox/process confinement —
+  =amicontained=/=deepce=/=docker-bench= inside a container, SBPL =deny=-log
+  iteration on macOS, jail-escape checklist on FreeBSD; (2) egress confinement —
+  default-deny + must-fail connectivity to non-proxy hosts.
+- *Test every client* the agent can use (Guile HTTP, =curl=, any SDK): proxy/
+  allowlist enforcement is not universal, and one proxy-bypassing client defeats
+  the whole control (cf. the Claude Code egress bypasses).
+- *Prove behavior, not config:* capture runtime evidence that no forbidden
+  syscall/connection happened (eBPF/AgentSight, Falco/Prempti) rather than only
+  reviewing the profile.
+- *Egress allowlist ≠ exfil-proof:* data can still leave *through* the allowed
+  proxy. Pair the network tests with prompt-injection→exfil red-team runs
+  (Promptfoo / AgentRedBench / the wal.sh inject page) and lean on the
+  ephemeral-key blast-radius limits (short TTL + budget cap + model scope).
+- *No off-the-shelf agent-confinement verifier exists yet* — this matrix is the
+  spec for the suite we build (wire into =gmake chaos-net=).
+
+* 6. Prior art
+
+Surveyed via parallel research agents. The single closest precedent is
+*Anthropic Claude Code's* model — an out-of-sandbox proxy enforcing an egress
+allowlist with credentials injected server-side — which is architecturally what
+the LiteLLM broker here does.
+
+** 6.1 Sandboxed agent runtimes / harnesses
+- *Claude Code sandboxing* — bubblewrap (Linux) + Seatbelt (macOS); network via a
+  unix-domain-socket to an out-of-sandbox proxy with a domain allowlist; tokens
+  kept outside and injected by the proxy. 1:1 with this design.
+  https://www.anthropic.com/engineering/claude-code-sandboxing
+  (Cautionary: its hostname allowlist was bypassable via SOCKS5/null-byte tricks
+  until v2.1.90 — prefer UDS/IP-pinning, validate hostnames strictly.
+  https://oddguan.com/blog/second-time-same-sandbox-anthropic-claude-code-network-allowlist-bypass-data-exfiltration/)
+- *OpenAI Codex CLI* — sandbox-on-by-default: Seatbelt (macOS) + Landlock/seccomp
+  (Linux); note its macOS =network_access= gaps. https://github.com/openai/codex
+- *Dagger container-use* — one container + git worktree per agent (MCP).
+  https://github.com/dagger/container-use
+- *OpenHands runtime* — pluggable Docker/Bubblewrap/Modal/QEMU-microVM backends —
+  a model for our FreeBSD/macOS backend split. https://docs.openhands.dev
+- *E2B / Modal / microsandbox / Firecracker / gVisor* — microVM / user-space-kernel
+  isolation if a stronger tier is ever needed. https://e2b.dev ·
+  https://github.com/microsandbox/microsandbox · https://gvisor.dev
+- Curated indices: https://github.com/restyler/awesome-sandbox ·
+  https://github.com/bureado/awesome-agent-runtime-security
+
+** 6.2 Platform isolation (our five mechanisms)
+- *FreeBSD jails* — wal.sh "Sandboxing AI Coding Agents with FreeBSD Jails"
+  (Bastille thin jails + NullFS ro base + ZFS quota + =rctl= + *pf egress
+  allowlist*) is a near-blueprint for our FreeBSD tier; it copies credentials
+  manually — our LiteLLM broker is the graft-on improvement.
+  https://wal.sh/research/2026-agent-isolation-freebsd-jails/index.html ·
+  Bastille https://github.com/BastilleBSD/bastille · jails-vs-Podman attack
+  surface https://vermaden.wordpress.com/2025/04/11/freebsd-jails-security/ ·
+  *Capsicum* for in-jail capability confinement (defense in depth).
+- *macOS Seatbelt/SBPL* — the profile DSL is Scheme-like, so a Guile-generated
+  profile is natural. Caveats: =sandbox-exec= is deprecated-but-present, and SBPL
+  network filtering is *coarse* (allow/deny, localhost vs all) — so bind LiteLLM
+  to localhost and allow only =(local tcp …)= rather than per-remote-host.
+  Examples: https://github.com/s7ephen/OSX-Sandbox--Seatbelt--Profiles ·
+  ai-jail (runtime-generated profiles for AI CLIs). App Sandbox is the blessed
+  but heavier (app-bundle) alternative.
+
+** 6.3 Ephemeral credential brokering
+- *LiteLLM virtual keys* — =POST /key/generate= with =duration= ("30m"),
+  =max_budget=, =models=, =team_id=, =rpm/tpm_limit=, =guardrails=, =metadata=;
+  teardown via =/key/delete= or =/key/block=; server-side =default_key_generate_params=
+  as a policy upper bound. https://docs.litellm.ai/docs/proxy/virtual_keys
+- *Closest analogs*: OpenAI realtime *ephemeral client secrets* (backend mints a
+  ~1-min token for an untrusted client — same shape); HashiCorp Vault *dynamic
+  secrets* (mint+auto-revoke at TTL) and *response wrapping* (single-use handoff);
+  SPIFFE/SPIRE & OIDC→STS (short-lived, attestation-based, no revocation lists).
+- *Injection ranking* (for a process you don't fully trust): broker-mediated
+  *unix socket* (peer-cred checked, broker mediates every access) > *tmpfs* file
+  (memory-only, restrictive perms, not child-inherited) ≫ *env var* (worst —
+  readable via =/proc/PID/environ=, leaks to =ps=, auto-inherited by children).
+
+** 6.4 Validation / negative testing / boundary analysis
+- *No off-the-shelf "confinement verification" suite for agents exists yet*
+  (flagged by awesome-agent-runtime-security) — we assemble our own.
+- *Sandbox boundary*: =amicontained= (assert caps dropped/seccomp on), =deepce= /
+  HackTricks breakout checklist (escape vectors must fail), =docker-bench-security=
+  (CIS), Seatbelt =deny=-log iteration on macOS, FreeBSD jail-escape research (39C3).
+  https://github.com/genuinetools/amicontained · https://github.com/stealthcopter/deepce
+- *Egress boundary*: default-deny pf/iptables + must-fail connectivity tests
+  (timeout/REJECT, or =403 after CONNECT= via an egress proxy like
+  https://github.com/ironsh/iron-proxy); inject faults with *Toxiproxy*
+  (already our harness, https://github.com/Shopify/toxiproxy) to confirm a
+  degraded proxy can't be routed around.
+- *Agent red-team*: Promptfoo, AgentLeak (arXiv 2602.11510), AgentRedBench
+  (tool-response injection, arXiv 2606.02240), InjectLab corpus.
+- *Prove behavior, not config*: eBPF tracing (AgentSight) / Falco rules (Prempti)
+  give runtime evidence no forbidden syscall/connection occurred.
+- *Boundary-analysis frames*: MAESTRO (CSA, OWASP-endorsed agentic threat model),
+  the *confused-deputy* / credential-exfil pattern (CSA/SANS), and
+  SandboxEscapeBench (UK AISI) for "can the LLM escape its container".
+- *Critical caveat*: an egress allowlist does *not* stop exfiltration *through*
+  the allowed proxy channel — pair network tests with prompt-injection→exfil
+  tests, and *test every client* the agent uses (Guile HTTP, curl, any SDK);
+  one proxy-bypassing client defeats the allowlist.
+
+* 7. Open questions
+
+- Broker placement: a host daemon vs. a wrapper invoked per session vs. a
+  vault-agent-style sidecar.
+- Key handoff channel: env var (simplest, visible in =ps= inside the jail) vs.
+  tmpfs file (unlinked after read) vs. a one-shot unix socket.
+- macOS =sandbox-exec= is deprecated-but-present; App Sandbox needs an app
+  bundle. Which is the realistic "native" path for a CLI?
+- Rootless Podman on FreeBSD maturity for the egress-policy piece.
+- Should the broker live *behind* LiteLLM (LiteLLM mints its own ephemeral keys
+  on an authenticated request) to remove the master key from the host entirely?
+
+* 8. References
+
+- [[file:002-sandbox-egress-credentials.org][RFC-002 — sandbox egress credentials]] (deferred; this advances it)
+- [[file:../SANDBOX-AND-EGRESS.org][SANDBOX-AND-EGRESS.org]] — connection modes + platform sandboxing
+- [[file:../LITELLM-SETUP.org][LITELLM-SETUP.org]] — provisioning + ephemeral key API
+- [[file:../CHAOS-TESTING.org][CHAOS-TESTING.org]] — boundary/fault contract + taint
