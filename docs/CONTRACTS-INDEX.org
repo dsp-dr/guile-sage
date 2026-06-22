@@ -41,6 +41,7 @@ The non-negotiables, with the full rationale + reproducible experiments in
 |----------+-------+-------------|
 | [[file:ARCHITECTURE.org][ARCHITECTURE.org]] | C4 diagrams, modules, transport/error/taint boundaries (§14–16) | any module or boundary changes |
 | [[file:DEPLOYMENT.org][DEPLOYMENT.org]] | install, provider matrix, resilience env vars, scenarios, troubleshooting | install/provider/env changes |
+| [[file:LITELLM-SETUP.org][LITELLM-SETUP.org]] | literate LiteLLM provisioning (teams/models/keys/guardrails) + =scripts/litellm-provision.sh= | gateway admin API changes |
 | [[file:SANDBOX-AND-EGRESS.org][SANDBOX-AND-EGRESS.org]] | connection modes, sandboxing, credential boundaries | egress/sandbox model changes |
 | [[file:TOOLS-GUIDE.org][TOOLS-GUIDE.org]] | tool catalog + examples | any tool added/removed |
 | [[file:COMMANDS.org][COMMANDS.org]] | slash-command reference | any =/command= change |

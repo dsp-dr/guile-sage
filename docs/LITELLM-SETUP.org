@@ -1,0 +1,277 @@
+#+TITLE: guile-sage — LiteLLM gateway setup (literate)
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-22
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+#+PROPERTY: header-args:sh :var LITELLM_HOST=(getenv "LITELLM_HOST") :results output
+
+A runnable walkthrough for standing up a LiteLLM proxy that fronts guile-sage:
+register models (local Ollama + external providers), create a *team*, grant the
+team its models, mint a scoped *virtual key*, attach *guardrails*, and read
+*spend/tracking* — then point sage at it. Every block is =C-c C-c= runnable in
+Emacs (org-babel) and copy-pasteable to a shell.
+
+*Conventions / safety*
+- =LITELLM_HOST= is a =name-or-IP[:port]= (e.g. =gw.lan:4000=); set it in your
+  environment (sage's gitignored =.env= already does). Docs never hardcode
+  addresses (keeps =gmake lint-docs= green).
+- Admin calls authenticate with the *master key* from =$LITELLM_MASTER_KEY=.
+  This project uses the local placeholder =sk-litellm-local= (set in =.env=) —
+  not a real secret, but don't commit or share it. Never put a real key here.
+- The example *names* are this project's actual setup (team =guile-sage=, models
+  =ollama-qwen2.5-coder= / =gemini-2.5-flash=); the *secret values* are mocks.
+- Discover/verify every endpoint live: =http://$LITELLM_HOST/ui/?page=api-reference=
+  (admin UI) and =http://$LITELLM_HOST/openapi.json= (raw spec).
+- *Automating it?* Jump to § 8 — =scripts/litellm-provision.sh= does §2–§4 in
+  one idempotent pass and writes the key into sage's =.env=.
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"               # name-or-IP[:port]
+: "${LITELLM_MASTER_KEY:=sk-litellm-local}"       # from .env; local placeholder
+echo "gateway = http://$LITELLM_HOST  (master key: ${LITELLM_MASTER_KEY:0:6}…)"
+#+end_src
+
+* 1. Connection topology
+
+#+begin_src mermaid
+%% style: https://wal.sh/research/diagram-style-guide#org010b7ab
+flowchart LR
+    sage["guile-sage\n(SAGE_PROVIDER=openai)"]
+    gw["LiteLLM gateway\n$LITELLM_HOST"]
+    subgraph upstreams
+      ol["Ollama :11434"]
+      gem["Gemini API :443"]
+    end
+    sage -->|"/v1 + virtual key"| gw
+    gw -->|"team-scoped routing"| ol
+    gw -->|"team-scoped routing"| gem
+    gw -.->|"spend logs / guardrails"| db[("LiteLLM DB")]
+#+end_src
+
+The virtual key sage holds reaches only the gateway; real provider keys live in
+the gateway config. See [[file:SANDBOX-AND-EGRESS.org][SANDBOX-AND-EGRESS.org]].
+
+* 2. Register models (=POST /model/new=)
+
+A "model" is a gateway alias mapping a public name → an upstream =litellm_params=.
+
+** Local Ollama
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${OLLAMA_HOST:=ollama-host:11434}"        # mock; your Ollama address
+curl -sS -X POST "http://$LITELLM_HOST/model/new" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<JSON
+{
+  "model_name": "ollama-qwen2.5-coder",
+  "litellm_params": {
+    "model": "ollama/qwen2.5-coder:7b",
+    "api_base": "http://${OLLAMA_HOST}"
+  },
+  "model_info": { "mode": "chat" }
+}
+JSON
+#+end_src
+
+** External provider (Gemini)
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${GEMINI_API_KEY:=MOCK-gemini-api-key}"   # mock; store the real one server-side
+curl -sS -X POST "http://$LITELLM_HOST/model/new" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<JSON
+{
+  "model_name": "gemini-2.5-flash",
+  "litellm_params": {
+    "model": "gemini/gemini-2.5-flash",
+    "api_key": "${GEMINI_API_KEY}"
+  }
+}
+JSON
+#+end_src
+
+Confirm what the proxy now serves:
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+curl -sS "http://$LITELLM_HOST/model/info" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq -r '.data[].model_name' 2>/dev/null
+#+end_src
+
+* 3. Create a team and grant it models
+
+Models registered above have *no team* by default; a team-scoped key cannot use
+them until the team is granted access. (This is exactly the
+=key_model_access_denied= trap: a valid key whose team has no models.)
+
+** Create the team (=POST /team/new=)
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+curl -sS -X POST "http://$LITELLM_HOST/team/new" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<JSON
+{
+  "team_alias": "guile-sage",
+  "models": ["ollama-qwen2.5-coder", "gemini-2.5-flash"],
+  "max_budget": 5.0,
+  "budget_duration": "30d"
+}
+JSON
+# → returns {"team_id": "..."} — capture it as $TEAM_ID
+#+end_src
+
+** Or grant models to an existing team (=POST /team/model/add=)
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${TEAM_ID:=11111111-2222-3333-4444-555555555555}"   # mock team id
+curl -sS -X POST "http://$LITELLM_HOST/team/model/add" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<JSON
+{ "team_id": "${TEAM_ID}", "models": ["gemini-2.5-flash"] }
+JSON
+#+end_src
+
+* 4. Mint a virtual key for sage (=POST /key/generate=)
+
+Scope the key to the team so spend and model access are bounded. (For an
+unscoped key that can reach team-less models, generate it *without* a =team_id=.)
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${TEAM_ID:=11111111-2222-3333-4444-555555555555}"
+curl -sS -X POST "http://$LITELLM_HOST/key/generate" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<JSON
+{
+  "key_alias": "guile-sage",
+  "team_id": "${TEAM_ID}",
+  "models": ["ollama-qwen2.5-coder", "gemini-2.5-flash"],
+  "max_budget": 5.0,
+  "rpm_limit": 60
+}
+JSON
+# → {"key": "sk-…"} — this is the value sage uses as SAGE_OPENAI_API_KEY.
+# Save it now; LiteLLM will not show it again.
+#+end_src
+
+Verify the key can actually reach a model:
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"
+: "${SAGE_VIRTUAL_KEY:=sk-MOCK-virtual-key}"           # the key from above
+curl -sS -X POST "http://$LITELLM_HOST/v1/chat/completions" \
+  -H "Authorization: Bearer $SAGE_VIRTUAL_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"say SAGE_OK"}],"max_tokens":8}'
+#+end_src
+
+* 5. Guardrails (=GET/POST /guardrails*=)
+
+List installed guardrails, then attach one. Concrete guardrail config lives in
+the gateway (see [[file:EU-AI-ACT-GUARDRAILS.org][EU-AI-ACT-GUARDRAILS.org]]);
+here we just wire it through the API.
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+curl -sS "http://$LITELLM_HOST/guardrails/list" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq '.' 2>/dev/null
+#+end_src
+
+Smoke-test a piece of text against a named guardrail (=POST /guardrails/apply_guardrail=):
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${GUARDRAIL_NAME:=pii-masking}"            # mock guardrail id
+curl -sS -X POST "http://$LITELLM_HOST/guardrails/apply_guardrail" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d @- <<JSON
+{ "guardrail_name": "${GUARDRAIL_NAME}", "text": "my email is mock@example.com" }
+JSON
+#+end_src
+
+To make sage *warn* when the active provider is not behind the guardrail proxy,
+set =SAGE_GUARDRAIL_PROXY=http://$LITELLM_HOST= in sage's =.env=.
+
+* 6. Tracking & spend (=GET /spend/*=, =/global/spend/*=)
+
+#+begin_src sh :results output
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+# Recent per-request spend logs
+curl -sS "http://$LITELLM_HOST/spend/logs" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq '.[0:3]' 2>/dev/null
+# Aggregate report by team/key
+curl -sS "http://$LITELLM_HOST/global/spend/report" \
+  -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq '.' 2>/dev/null
+#+end_src
+
+Per-team activity is also under =GET /team/daily/activity=; per-key info under
+=GET /key/info?key=…=. guile-sage additionally emits its own OTLP token/cost
+counters independent of the gateway — see [[file:TELEMETRY.org][TELEMETRY.org]].
+
+* 7. Point guile-sage at the gateway
+
+Put the *virtual key* (not the master key) and a *granted* model into sage's
+gitignored =.env=:
+
+#+begin_src sh :results output :eval no
+# sage .env (gitignored) — mock values
+SAGE_PROVIDER=openai
+SAGE_OPENAI_BASE=http://$LITELLM_HOST/v1
+SAGE_OPENAI_API_KEY=sk-MOCK-virtual-key      # from § 4
+SAGE_MODEL=gemini-2.5-flash                  # must be granted to the key's team
+# optional: warn if a request bypasses the guardrail proxy
+SAGE_GUARDRAIL_PROXY=http://$LITELLM_HOST
+#+end_src
+
+Then =gmake run=. If a model is denied, re-check § 3 (team grant) and § 4 (key
+scope). Full operator reference: [[file:DEPLOYMENT.org][DEPLOYMENT.org]];
+index of all docs: [[file:CONTRACTS-INDEX.org][CONTRACTS-INDEX.org]].
+
+* 8. Automation (=scripts/litellm-provision.sh=)
+
+The goal is *one-command provisioning* of the guile-sage team + models + key, so
+agent work can be (re)stood-up reproducibly. =scripts/litellm-provision.sh=
+runs §2–§4 idempotently: it registers =ollama-qwen2.5-coder= and
+=gemini-2.5-flash=, finds-or-creates the =guile-sage= team and grants it those
+models, then mints a team-scoped virtual key — reading =LITELLM_HOST= and
+=LITELLM_MASTER_KEY= from the environment (sage's =.env= already sets both; the
+local master placeholder is =sk-litellm-local=).
+
+#+begin_src sh :results output :eval no
+# loads LITELLM_HOST + LITELLM_MASTER_KEY from .env, then provisions
+set -a && . ./.env && set +a
+scripts/litellm-provision.sh              # prints the virtual key + the .env lines
+scripts/litellm-provision.sh --write-env  # ...and appends them to ./.env
+#+end_src
+
+It is safe to re-run: existing models are left in place and the team is reused
+(models re-granted), so only a fresh virtual key is minted each run. The script
+hardcodes no secrets and no addresses — everything comes from the environment,
+which is what keeps it committable and =lint-docs=-clean.
+
+* Endpoint cheat-sheet
+
+| Task                     | Endpoint                        |
+|--------------------------+---------------------------------|
+| Register a model         | =POST /model/new=               |
+| List served models       | =GET /model/info=, =GET /v1/models= |
+| Create a team            | =POST /team/new=                |
+| Grant models to a team   | =POST /team/model/add=          |
+| Mint a virtual key       | =POST /key/generate=            |
+| Inspect a key            | =GET /key/info?key=…=           |
+| List / apply guardrails  | =GET /guardrails/list=, =POST /guardrails/apply_guardrail= |
+| Spend logs / report      | =GET /spend/logs=, =GET /global/spend/report= |
+| Set a budget             | =POST /budget/new=              |
+
+Authoritative, always-current list: =http://$LITELLM_HOST/openapi.json= and the
+admin UI at =http://$LITELLM_HOST/ui/?page=api-reference=.

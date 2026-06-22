@@ -68,8 +68,10 @@ single host and keeps real provider keys server-side. Its admin/API-reference UI
 lives at =http://$LITELLM_HOST/ui/?page=api-reference= — use it to confirm which
 model names the proxy serves and which the key's team may access (a team without
 granted models returns =key_model_access_denied= even with a valid key). Set
-=SAGE_MODEL= to a model the gateway lists. See
-[[file:EU-AI-ACT-GUARDRAILS.org][EU-AI-ACT-GUARDRAILS.org]] for guardrail config.
+=SAGE_MODEL= to a model the gateway lists. To *provision* the gateway (register
+models, create the =guile-sage= team, grant models, mint a key) see the literate
+[[file:LITELLM-SETUP.org][LITELLM-SETUP.org]] and =scripts/litellm-provision.sh=;
+for guardrail config see [[file:EU-AI-ACT-GUARDRAILS.org][EU-AI-ACT-GUARDRAILS.org]].
 
 * 4. Network topology
 
