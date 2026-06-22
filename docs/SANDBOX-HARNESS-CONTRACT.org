@@ -1,0 +1,150 @@
+#+TITLE: guile-sage — Sandbox Harness Contract
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-22
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+#+begin_quote
+Status: *STABLE contract, methodology DEFERRED.* This document fixes the
+interface between the *test coordinator* and the five *sandbox harnesses* so the
+build/experiment teams can work independently. The per-platform *methodology*
+(exact pf/SBPL/netavark/docker-net/entitlement rules) is intentionally left to
+each harness team's experiments — see [[file:rfc/003-ephemeral-key-sandbox.org][RFC-003]] for rationale and diagrams.
+Conform to the invariants below; choose your own mechanism details.
+#+end_quote
+
+* 1. Roles
+
+| Role | Who | Trust | Owns |
+|------+-----+-------+------|
+| *Test coordinator* | one shared component | trusted | LiteLLM master key; org→team→user→key provisioning; lifecycle + revocation; audit |
+| *Sandbox harness* (×5) | one team per mechanism | builds the boundary | platform confinement: fs, egress, secret handoff, exec, teardown signal |
+| *guile-sage* | the agent | *untrusted* | the workspace + the ephemeral key |
+
+Harness slots (owners TBD by the teams):
+
+| id | platform | mechanism |
+|----+----------+-----------|
+| =bastille= | FreeBSD | Bastille jail + =pf= |
+| =podman-fbsd= | FreeBSD | rootless Podman + netavark |
+| =sbx= | macOS | =sandbox-exec= / SBPL |
+| =docker-macos= | macOS | Docker Desktop + net policy |
+| =appsandbox= | macOS | native App Sandbox |
+
+* 2. Provisioning chain (coordinator side)
+
+Per session, the coordinator provisions a full identity chain via the LiteLLM
+management API (=http://$LITELLM_HOST/openapi.json=) and revokes the key at
+teardown:
+
+| Step | Endpoint | Yields |
+|------+----------+--------|
+| org | =POST /organization/new= | program identity (=guile-sage=) |
+| team | =POST /team/new= (+ =/team/model/add=) | sandbox class: model grants + budget |
+| user | =POST /user/new= | agent identity (attribution) |
+| key | =POST /key/generate= | ephemeral scoped key |
+| teardown | =POST /key/delete= (or =/key/block=) | revoke |
+
+org/team/user are reused across sessions (idempotent find-or-create); only the
+*key* is per-session and ephemeral.
+
+* 3. Handoff schema (coordinator → harness)
+
+The coordinator hands each harness a =SessionSpec= and a =CredentialBundle=.
+Field names are normative; transport is the harness's choice (must satisfy
+HC-04).
+
+#+begin_src json
+// SessionSpec
+{
+  "session_id": "<uuid>",
+  "harness": "bastille|podman-fbsd|sbx|docker-macos|appsandbox",
+  "workspace": "/abs/path",            // mount target; ro base + rw overlay
+  "proxy_host": "$LITELLM_HOST",       // the ONLY permitted egress
+  "model": "<model the team is granted>",
+  "key_handoff": "socket|tmpfs"        // never env, never disk (HC-04)
+}
+// CredentialBundle (short-lived; never logged, never persisted)
+{
+  "api_base": "http://$LITELLM_HOST/v1",
+  "api_key":  "sk-<ephemeral>",        // scoped: team models, TTL, budget
+  "expires_at": "<iso8601>"
+}
+#+end_src
+
+* 4. Harness obligations (platform-agnostic invariants)
+
+Every harness, regardless of mechanism, MUST guarantee:
+
+- *HC-01 Filesystem* — the agent can read/write only =workspace=; host paths
+  (=$HOME=, =.ssh=, =.gnupg=, credential stores) are unreadable.
+- *HC-02 Egress* — the only reachable network destination is =proxy_host=;
+  every other host/port fails (timeout/REJECT/403). Default-deny.
+- *HC-03 Every client via the proxy* — the constraint binds *all* egress paths
+  (Guile HTTP, =curl=, any SDK/DNS), not just sage's primary client. One
+  proxy-bypassing client voids conformance.
+- *HC-04 Secret hygiene* — the ephemeral key is delivered over a broker socket
+  or a memory-backed tmpfs file (restrictive perms, not child-inherited);
+  *never* an environment variable, *never* on durable disk; gone at teardown.
+- *HC-05 No provider key* — no upstream provider credential is reachable from
+  inside the sandbox (only the ephemeral LiteLLM key exists).
+- *HC-06 Teardown signal* — on agent exit (or coordinator request) the harness
+  destroys the sandbox (tmpfs/socket gone) and notifies the coordinator so the
+  key is revoked. Must run even on crash (trap/OnStop/ExecStopPost).
+- *HC-07 Exec, not inherit* — sage is =exec='d so the credential lives only in
+  its address space and is not inherited by child processes.
+
+* 5. Coordinator obligations
+
+- *CC-01* Mint keys scoped to the session's team models, with a short =duration=
+  (TTL), a =max_budget=, and =rpm/tpm= limits; tag =metadata.session=.
+- *CC-02* Revoke (=/key/delete=) on teardown; an orphan-reaper deletes keys whose
+  session is no longer active. TTL + budget are independent backstops.
+- *CC-03* The master key never leaves the coordinator; the sandbox only ever sees
+  an ephemeral key (CC-01).
+- *CC-04* Attribute spend/audit via org/team/user; expose per-session logs.
+
+* 6. Conformance — negative-test obligations
+
+A harness is *conformant* only when it demonstrably PASSES the negative-test
+matrix in [[file:rfc/003-ephemeral-key-sandbox.org][RFC-003 §5]] — each test asserts a FORBIDDEN outcome cannot
+happen. Minimum set, run from inside the live sandbox and wired into
+=gmake chaos-net=:
+
+| # | Assertion (must be impossible) | Maps to |
+|---+--------------------------------+---------|
+| N1 | reach any non-=proxy_host= destination | HC-02/03 |
+| N2 | read =$HOME/.ssh= or write outside =workspace= | HC-01 |
+| N3 | find the key in any on-disk file / image layer after exit | HC-04 |
+| N4 | use the key after teardown (expect 401) | CC-02 |
+| N5 | exceed =max_budget= without 402 | CC-01 |
+| N6 | reach an upstream provider directly | HC-05 |
+| N7 | injection-driven exfil off the proxy channel | RFC-003 §5 |
+
+Prove with runtime evidence (eBPF/Falco/`pf` counters), not config review.
+
+* 7. Lifecycle interface (abstract)
+
+Each harness implements three operations; signatures are conceptual (the
+language/transport is the team's choice):
+
+- =provision(SessionSpec) -> handle= — create the confined environment.
+- =attach(handle, CredentialBundle) -> exec= — inject the key (HC-04) and run
+  sage against =api_base=.
+- =teardown(handle) -> revoked= — destroy + signal the coordinator (HC-06).
+
+* 8. What is deferred (do NOT standardize yet)
+
+The *mechanism semantics* are the experiment: the exact =pf= anchor / netavark
+policy / SBPL profile / docker network / entitlement set; nullfs-vs-bind-vs-deny
+filesystem shaping; socket-vs-tmpfs handoff details; and whether LiteLLM itself
+mints the key on an authenticated request (removing the master key from the
+host). Each team prototypes, runs §6, and reports back. Only after the five
+experiments do we compare and decide a recommended methodology per platform.
+
+* 9. References
+
+- [[file:rfc/003-ephemeral-key-sandbox.org][RFC-003 — pure sandboxing with ephemeral LiteLLM keys]] (rationale + diagrams)
+- [[file:LITELLM-SETUP.org][LITELLM-SETUP.org]] — the management-API calls + =scripts/litellm-provision.sh=
+- [[file:CHAOS-TESTING.org][CHAOS-TESTING.org]] / [[file:CHAOS-TOXIPROXY-SPEC.org][CHAOS-TOXIPROXY-SPEC.org]] — the harness the negative tests run in
+- [[file:SANDBOX-AND-EGRESS.org][SANDBOX-AND-EGRESS.org]] — connection modes + platform sandboxing

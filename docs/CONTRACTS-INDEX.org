@@ -59,6 +59,7 @@ The non-negotiables, with the full rationale + reproducible experiments in
 | [[file:HOOKS-CONFIG-CONTRACT.org][HOOKS-CONFIG-CONTRACT.org]] | hook configuration parsing | =test-hooks-config.scm= |
 | [[file:HOOK-NEGATIVE-CONTRACTS.org][HOOK-NEGATIVE-CONTRACTS.org]] | things the agent MUST NOT do (vetoes) | =test-negative-contracts.scm= |
 | [[file:AGENTS-MD-CONTRACT.org][AGENTS-MD-CONTRACT.org]] | AGENTS.md discovery/parsing | =test-agents-md.scm=, =test-agents-md-directives.scm= |
+| [[file:SANDBOX-HARNESS-CONTRACT.org][SANDBOX-HARNESS-CONTRACT.org]] | coordinator↔harness interface for the 5 sandboxes (RFC-003); methodology deferred | conformance = RFC-003 §5 negative tests (→ =gmake chaos-net=) |
 | [[file:SKILLS-CONTRACT.org][SKILLS-CONTRACT.org]] | skill tool schema + dispatch | (no dedicated test yet) |
 | [[file:LSP-CONTRACT.org][LSP-CONTRACT.org]] | LSP server protocol | (forward-looking; no test yet) |
 | [[file:LSP-CLIENT-CONTRACT.org][LSP-CLIENT-CONTRACT.org]] | LSP client behaviour | (forward-looking; no test yet) |

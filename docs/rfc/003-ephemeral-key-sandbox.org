@@ -71,6 +71,40 @@ Properties this buys:
   expires in minutes, reaches only the proxy.
 - Provider keys never exist inside the blast radius at all.
 
+** 2.1 Test coordinator — identity provisioning (org → team → user → key)
+
+The broker is realized by a *test coordinator* that owns the LiteLLM side of
+every spin-up. Per session it provisions a full identity chain (not a bare key)
+via the management API (=http://$LITELLM_HOST/openapi.json=) so spend, scope and
+audit attribute to the right agent and sandbox class:
+
+#+begin_src mermaid
+%% style: https://wal.sh/research/diagram-style-guide#org010b7ab
+flowchart LR
+    TC["Test Coordinator<br/>(master key)"]
+    TC -->|"POST /organization/new"| ORG["org = guile-sage"]
+    TC -->|"POST /team/new<br/>+ /team/model/add"| TEAM["team = sandbox class<br/>(bastille|podman|sbx|docker|appsandbox)<br/>models + budget"]
+    TC -->|"POST /user/new"| USER["user = agent identity<br/>(attribution)"]
+    TC -->|"POST /key/generate"| KEY["ephemeral key<br/>TTL + budget + models"]
+    KEY --> H["one of the 5 harnesses"]
+#+end_src
+
+- *org* = the program (guile-sage); *team* = the sandbox class / experiment
+  (carries model grants + budget caps); *user* = the agent identity (attribution);
+  *key* = the ephemeral, scoped credential handed to the sandbox. Teardown
+  revokes the key (=POST /key/delete=); org/team/user persist for audit.
+
+** 2.2 Coordinator drives spin-up; methodology deferred to experiments
+
+The coordinator also signals each harness to apply its environment / filesystem /
+egress constraints — but *those semantics differ per mechanism* (=pf= vs
+netavark vs SBPL vs docker-net vs entitlements; nullfs vs bind-mount vs
+=deny file*=; unix socket vs tmpfs). *This RFC does not pick a methodology.* Each
+of the five harness teams runs its own experiments first; we fix only the shared
+*contract* ([[file:../SANDBOX-HARNESS-CONTRACT.org][SANDBOX-HARNESS-CONTRACT.org]])
+and the negative-test obligations (§5). Experiment findings feed back before any
+per-platform methodology is standardized.
+
 * 3. Confinement matrix (the phase-3 substitutions)
 
 Same contract — /workspace mount + single-host egress + tmpfs key/ — realized by
