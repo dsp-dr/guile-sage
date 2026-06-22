@@ -1,0 +1,335 @@
+#+TITLE: Annotation Systems — guile-sage Local Experience Report
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-22
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+#+BEGIN_QUOTE
+Local adaptation of [[https://wal.sh/research/annotation-systems/][wal.sh/research/annotation-systems/]] (Walsh, 2026-06-14).
+This document is an /experience report/: it captures the issues we hit
+trying to keep guile-sage's documentation aligned with the code, and the
+annotation contract we are adopting to make those drifts /detectable/
+rather than /surprising/.
+:PROPERTIES:
+:CUSTOM_ID: preamble
+:STATUS: open
+:VERIFIED_AT: 2026-06-22T04:00Z
+:VERIFIED_BY: claude-agent
+:VERDICT: corrected
+:FINDING: Annotation contract adopted as docs/ANNOTATION-SYSTEMS.org; first drift exhibit (ARCHITECTURE.org) recorded under §6.
+:END:
+#+END_QUOTE
+
+* 1. Why this exists
+  :PROPERTIES:
+  :CUSTOM_ID: why
+  :STATUS: closed
+  :END:
+
+guile-sage's =docs/= tree is large (37 org/md files at top level alone,
+plus =adr/=, =rfc/=, =reports/=). Many files make /claim-bearing/
+assertions about the running system — module counts, default values,
+port numbers, behavioral guarantees ("fire-and-forget", "never blocks"),
+exported symbols, supported providers. The code is iterated faster than
+the docs; the docs do not own a verifier; nothing reconciles them.
+
+The wal.sh /Annotation Systems for Evolving Documents/ piece (Walsh,
+2026-06-14) frames the same problem in a research-notebook context and
+proposes a concrete primitive: org property drawers on every heading,
+keyed by a stable =:CUSTOM_ID:=, carrying =:STATUS:=, =:VERDICT:=,
+=:VERIFIED_BY:= and =:FINDING:= fields. Verifications append to a
+tamper-evident JSONL chain. Verdicts are reconciled between drawer and
+chain so they cannot silently diverge.
+
+We adopt that contract, with three guile-sage-specific adjustments:
+
+1. The /verifier of last resort/ is not a human reviewer — it is the
+   guile-sage REPL itself running against a code grep, a test run, or
+   an actual fetch. We split =:VERDICT:= (claim review by an agent or
+   human) from =:EXEC_VERDICT:= (an executable assertion run by the
+   harness).
+2. Sub-agent attribution is mandatory because we routinely fan out
+   independent verification (see [[#process]]).
+3. Org headings live next to plain markdown (=AGENTS.md=, =CLAUDE.md=,
+   =adr/*.md=). Property drawers are an org-only feature; for
+   markdown, we use HTML-comment property blocks (see [[#schema-md]]).
+
+* 2. Claim taxonomy
+  :PROPERTIES:
+  :CUSTOM_ID: taxonomy
+  :STATUS: closed
+  :END:
+
+Not every sentence is a claim. Annotations attach only to
+/empirically-falsifiable/ assertions. The architecture audit (§6) sorts
+them into:
+
+| Kind         | Example                                                |
+|--------------+--------------------------------------------------------|
+| ~path~       | "MCP config from =~/.claude.json="                     |
+| ~symbol~     | "Ollama exports =ollama-chat-streaming="               |
+| ~value~      | "Fast tier ceiling = 2000 tokens"                      |
+| ~count~      | "21 source files"                                      |
+| ~port~       | "OTel Collector at =:4318="                            |
+| ~behavior~   | "Telemetry is fire-and-forget"                         |
+| ~contract~   | "All MCP invocations require YOLO mode"                |
+| ~vocabulary~ | "=:VERDICT:= ∈ {correct, corrected, disputed, …}"    |
+
+Prose without one of these tags is /editorial/ and unannotated.
+
+* 3. Schema — org headings
+  :PROPERTIES:
+  :CUSTOM_ID: schema-org
+  :STATUS: closed
+  :END:
+
+Every annotated heading carries a =:CUSTOM_ID:= (stable, kebab-case,
+**never updated when heading text changes** — the ID is the handle,
+the heading text is the label). Annotations live in a property drawer
+on the same heading:
+
+#+BEGIN_SRC org
+* OTel Collector receives OTLP/HTTP JSON
+  :PROPERTIES:
+  :CUSTOM_ID: otel-receiver
+  :STATUS: closed
+  :VERIFIED_AT: 2026-06-22T04:00Z
+  :VERIFIED_BY: claude-agent
+  :VERDICT: correct
+  :EXEC_VERDICT: verified
+  :EXEC_FINDING: grep src/sage/telemetry.scm shows derives :4318/v1/metrics from OTEL_EXPORTER_OTLP_ENDPOINT
+  :END:
+#+END_SRC
+
+Field reference (from the wal.sh spec; we adopt verbatim):
+
+| Field            | Type     | Meaning                                       |
+|------------------+----------+-----------------------------------------------|
+| =:CUSTOM_ID:=    | required | stable kebab-case slug, never renamed         |
+| =:STATUS:=       | enum     | =open \| addressed \| closed=                 |
+| =:REVIEW:=       | string   | "YYYY-MM-DD author: prose note" (optional)    |
+| =:VERIFIED_AT:=  | ISO-8601 | last verification timestamp                   |
+| =:VERIFIED_BY:=  | string   | agent or human identifier                     |
+| =:VERDICT:=      | enum     | =correct \| corrected \| disputed \| needs-citation= |
+| =:FINDING:=      | string   | one-line evidence (multi-line via =:FINDING+:=) |
+| =:EXEC_VERDICT:= | enum     | =verified \| broken \| partial \| skipped=    |
+| =:EXEC_FINDING:= | string   | command + result that executed the check      |
+
+* 4. Schema — markdown
+  :PROPERTIES:
+  :CUSTOM_ID: schema-md
+  :STATUS: open
+  :REVIEW: 2026-06-22 claude-agent: shape proposed; tooling not yet written
+  :END:
+
+For =.md= files (=AGENTS.md=, =CLAUDE.md=, =adr/*.md=) we use an
+HTML-comment block immediately after the heading:
+
+#+BEGIN_SRC markdown
+## Decision: Ollama as first provider
+
+<!-- :annotation:
+custom-id: adr-0002-ollama
+status: closed
+verified-at: 2026-06-22T04:00Z
+verified-by: claude-agent
+verdict: correct
+finding: src/sage/provider.scm defaults to 'ollama
+-->
+#+END_SRC
+
+The HTML-comment is invisible to renderers and trivially greppable
+(=grep -A 10 ":annotation:" docs/=).
+
+* 5. Verification ledger
+  :PROPERTIES:
+  :CUSTOM_ID: ledger
+  :STATUS: open
+  :REVIEW: 2026-06-22 claude-agent: spec only — ledger writer not implemented
+  :END:
+
+Every verification append-writes one JSONL record to
+=.verify/chain.jsonl=:
+
+#+BEGIN_SRC json
+{"target":"docs/ARCHITECTURE.org#module-summary","at":"2026-06-22T04:00Z","by":"claude-agent","verdict":"corrected","finding":"21 vs 27 actual","prev_sha":"abc…","sha":"def…"}
+#+END_SRC
+
+The =prev_sha= chains entries; =sha= is the SHA-256 of the canonicalised
+record. =bd reconcile-ledger= (planned) compares drawer verdicts against
+the ledger and fails CI if they diverge. Tamper-evidence is cheap
+insurance against an agent silently rewriting a verdict in the drawer
+without recording the change.
+
+* 6. First exhibit — ARCHITECTURE.org drift
+  :PROPERTIES:
+  :CUSTOM_ID: exhibit-arch
+  :STATUS: open
+  :VERIFIED_AT: 2026-06-22T04:00Z
+  :VERIFIED_BY: claude-agent
+  :VERDICT: corrected
+  :FINDING: 4 high-leverage drifts found; recorded below.
+  :END:
+
+A sub-agent audited =docs/ARCHITECTURE.org= for claim-bearing statements
+(non-overlapping with the present author). Findings, with the drift kind
+and the verification command:
+
+** 6.1 Module count
+   :PROPERTIES:
+   :CUSTOM_ID: drift-module-count
+   :STATUS: open
+   :VERDICT: corrected
+   :FINDING: ARCHITECTURE.org line 130 / table line 132–154 claim "21 source files"; actual is 27.
+   :EXEC_VERDICT: verified
+   :EXEC_FINDING: ls src/sage/*.scm | wc -l => 27; missing from table: netpolicy.scm, sandbox.scm, irc.scm, provenance.scm, agent.scm, hooks.scm, scratch.scm, usage-stats.scm.
+   :END:
+
+** 6.2 Model tier defaults
+   :PROPERTIES:
+   :CUSTOM_ID: drift-tier-defaults
+   :STATUS: open
+   :VERDICT: corrected
+   :FINDING: lines 552–555: standard model and ceilings wrong.
+   :EXEC_VERDICT: verified
+   :EXEC_FINDING: src/sage/model-tier.scm shows standard=llama3.2:latest (NOT qwen2.5-coder:7b — removed per guile-28p) and ceilings 4000/8000 (NOT 2000/6000).
+   :END:
+
+** 6.3 Context-window thresholds
+   :PROPERTIES:
+   :CUSTOM_ID: drift-context-thresholds
+   :STATUS: open
+   :VERDICT: corrected
+   :FINDING: line 80: doc says "50/80/90%"; code uses 75/90/95.
+   :EXEC_VERDICT: verified
+   :EXEC_FINDING: src/sage/context.scm: *context-thresholds* = '((0.95 . "critical") (0.90 . "high") (0.75 . "warning")).
+   :END:
+
+** 6.4 Safe-tools list missing git_fetch
+   :PROPERTIES:
+   :CUSTOM_ID: drift-safe-tools-git-fetch
+   :STATUS: open
+   :VERDICT: corrected
+   :FINDING: lines 366–378: safe-tools table omits git_fetch.
+   :EXEC_VERDICT: verified
+   :EXEC_FINDING: src/sage/tools.scm *safe-tools* includes git_fetch (added later, never reflected in doc).
+   :END:
+
+The verified-correctly claims (network ports, MCP FIFO/JSON-RPC, XDG
+paths, telemetry metric names, fire-and-forget behavior, YOLO gating,
+provider exports) make up the majority — drift is real but not
+catastrophic. Without annotations, a reader had no way to tell which
+were which.
+
+* 7. Process — sub-agent verification
+  :PROPERTIES:
+  :CUSTOM_ID: process
+  :STATUS: closed
+  :END:
+
+The pattern that produced §6 is the one we are committing to:
+
+1. /Author/ writes the doc (or the present-state of it is taken as
+   input).
+2. /Fan-out/: launch one or more independent sub-agents, each with a
+   non-overlapping scope (one per major doc, or one per /claim kind/
+   for the multi-axis case). Each sub-agent /must not/ see the
+   author's prior conclusions.
+3. /Each sub-agent/ emits a structured verdict per heading
+   (=:VERDICT:=, =:FINDING:=, ideally =:EXEC_VERDICT:= via a real
+   command). It MUST cite the verification command or grep target.
+4. /Reconcile/: drawer entries written; one ledger row per verdict;
+   conflicts surfaced as =:STATUS: open=.
+5. /Close/: a follow-up agent (or the author) reads the open
+   annotations and either fixes the doc, files a bead, or marks the
+   claim =disputed= with rationale.
+
+Attribution is part of the contract: =:VERIFIED_BY: claude-agent=,
+=:VERIFIED_BY: vera-agent=, =:VERIFIED_BY: <human-handle>=. Multiple
+verifications per heading are append, not overwrite — the property
+drawer accumulates =:VERIFIED_AT:= rows in time order.
+
+* 8. guile-sage-specific issues
+  :PROPERTIES:
+  :CUSTOM_ID: local-issues
+  :STATUS: open
+  :END:
+
+What's harder /here/ than in the source piece:
+
+** 8.1 Heterogeneous formats
+   Org, markdown, mermaid, plantuml SRC blocks, JSON contract schemas
+   (=docs/EVAL-CASE-SCHEMA.org=), C4 diagrams embedded in org. A single
+   property-drawer convention covers org only; markdown needs the
+   HTML-comment shim (§4); embedded diagrams cannot carry an attached
+   annotation — they need their own heading wrapper.
+
+** 8.2 Generated artefacts
+   Some docs export to HTML/PDF (=PRESENTATION.html=,
+   =RELEASE-*.org=). Annotations on a release-note heading are only
+   meaningful pre-export; post-export, the snapshot is frozen.
+   Annotations on release notes are =:STATUS: closed= by construction.
+
+** 8.3 The verifier is the running system
+   Unlike a citation graph, our verifications are operational: "the
+   model tier ceiling is N" is verified by reading =src/sage/model-tier.scm=
+   at HEAD. Three consequences:
+   - A verdict has a /target git SHA/ that drifts as soon as someone
+     edits the source. We have not yet encoded =:VERIFIED_AT_SHA:= in
+     the schema but should.
+   - Tests are also verifiers. A claim "all tests pass" is satisfied
+     by the harness, not by re-grepping.
+   - Some claims are unverifiable from inside the process — port
+     reachability needs the network, contract conformance against the
+     wal.sh spec needs the spec to be up. Those are =partial= /
+     =skipped= EXEC verdicts.
+
+** 8.4 Open gaps inherited from the source piece
+   - /Multi-axis verdict roll-up/ is unspecified (per-axis verdicts
+     yes; how to aggregate to a single =:VERDICT:= no).
+   - /Verdict vocabulary drift/ is already present in our own
+     adoption: we add =verified | broken | partial | skipped= for
+     =:EXEC_VERDICT:= which is not in the source schema's drawer set.
+     We accept the divergence and document it here.
+   - /Validators go unvalidated/: nothing checks that the verification
+     command in =:EXEC_FINDING:= /actually runs/ what the verdict
+     claims. The ledger gives tamper-evidence but not validation.
+
+* 9. Action plan
+  :PROPERTIES:
+  :CUSTOM_ID: action-plan
+  :STATUS: open
+  :END:
+
+1. [ ] Land the four corrections from §6 in =docs/ARCHITECTURE.org=.
+2. [ ] Add =:CUSTOM_ID:= to every heading in
+   =docs/ARCHITECTURE.org=, =docs/MCP-CONTRACT.org=,
+   =docs/HOOKS-CONTRACT.org=, =docs/SKILLS-CONTRACT.org=,
+   =docs/TELEMETRY.org= (highest-leverage claim-bearing docs).
+3. [ ] Implement =.verify/chain.jsonl= writer and =bd
+   reconcile-ledger= command (planned bead, blocked on a sketch of
+   the canonicalisation rule).
+4. [ ] Add a =gmake lint-docs= target that scans for headings without
+   =:CUSTOM_ID:= and surfaces them as warnings (not errors — adoption
+   is incremental).
+5. [ ] Pin the verdict vocabulary in this document and reject other
+   values in the ledger writer.
+6. [ ] Audit deployment / development guide coverage — we have
+   =ARCHITECTURE.org= and =CONTRIBUTING.org= but no dedicated
+   /deployment/ or /development/ guide; gap noted, not yet filed.
+
+* 10. References
+  :PROPERTIES:
+  :CUSTOM_ID: refs
+  :STATUS: closed
+  :END:
+
+- Walsh, J. /Annotation Systems for Evolving Documents/ (2026-06-14).
+  [[https://wal.sh/research/annotation-systems/]] — source of the
+  schema and lifecycle this doc adopts.
+- Walsh, J. /Walsh-Research Bot Compliance Specification/.
+  [[https://wal.sh/research/bots/compliance-spec]] — applied to outbound
+  fetches in =(sage netpolicy)= ([[file:../src/sage/netpolicy.scm]]).
+- Findler &amp; Felleisen. /Contracts for Higher-Order Functions/ (2002).
+- guile-sage commit log — the /actual/ source of truth this document
+  is verified against.
