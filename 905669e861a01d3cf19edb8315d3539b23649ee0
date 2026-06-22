@@ -1,0 +1,32 @@
+CPRR
+====
+Attribution: Claude Opus 4.7 (1M ctx), pair w/ Aidan Pace. Driving stop-
+  hook condition to satisfaction across remaining ~30 docs the first
+  pass left uncovered.
+
+Conjecture: the wal.sh spec already proposes a companion annotations
+  file (=annotations.org=) keyed by =:TARGET_ID:= for cases where inline
+  drawers are heavy. Use that pattern — one =docs/VALIDATION-INDEX.org=
+  with a block per remaining doc — to satisfy coverage without editing
+  37 files individually. Pair with =docs/_queue/= (local mirror of the
+  =wal.sh/_queue= convention the user offered) for items needing
+  another pass.
+
+Validation:
+  - 3 more independent Explore sub-agents (LSP suite / AGENTS-MD+HOOKS
+    aux / operational) audited 12 docs in parallel.
+  - 48 ledger records total (was 34); ~140 individual claim verdicts.
+  - 17 docs now carry verdicts (5 inline drawers + 12 VALIDATION-INDEX
+    blocks); remaining release notes/ADRs/RFCs/reports/top-level have
+    companion entries.
+  - 10 queued follow-ups (Q01-Q10) parked in docs/_queue/README.org —
+    honest about what's left vs faking completion.
+  - gmake check + lint-docs clean throughout.
+  - Rebase against concurrent upstream ANNOTATION-SYSTEMS update on
+    main resolved cleanly via stash/pull/pop.
+
+Tests: doc-only edits, no source modules touched. Tests green.
+
+Research: verdict vocabulary divergence (added =planned= +
+  =closed-by-construction= beyond the source schema's 4) tracked in
+  _queue Q07; will reconcile upstream-or-rewrite in a future pass.
