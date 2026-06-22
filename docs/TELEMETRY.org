@@ -2,6 +2,17 @@
 #+AUTHOR: guile-sage
 #+OPTIONS: toc:2
 
+* Validation status
+  :PROPERTIES:
+  :CUSTOM_ID: validation-status
+  :VALIDATED_AT: 2026-06-22T04:00Z
+  :VALIDATED_BY: claude-agent-telemetry (independent sub-agent)
+  :VERDICT: minor-drift
+  :FINDING: 16 claims audited. 11 correct (endpoint derivation :4317->:4318, scope name com.dsp-dr.guile_sage, service.name/version, SAGE_TELEMETRY_DISABLE gate, fire-and-forget behaviour). 2 corrected (table claims 6 metrics; *metric-units* in telemetry.scm:79-84 lists units for only 5 — mcp.tool_call defaults to '1' via catch-all; SAGE_LOG_DIR listed as optional but not read by telemetry.scm — belongs to logging/config modules). 2 needs-citation (session_id=unknown race claim unverifiable from static grep — runtime trace required; Grafana 401 references external dashboard-mutation script, out-of-scope for this module).
+  :LEDGER: .verify/chain.jsonl (target prefix docs/TELEMETRY.org)
+  :SOURCE_TRUTH: src/sage/telemetry.scm, tests/test-telemetry.scm
+  :END:
+
 * Overview
 
 guile-sage emits cumulative counter metrics via the OpenTelemetry

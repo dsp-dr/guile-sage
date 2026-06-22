@@ -4,6 +4,23 @@
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 
+* Validation status
+  :PROPERTIES:
+  :CUSTOM_ID: validation-status
+  :VALIDATED_AT: 2026-06-22T04:00Z
+  :VALIDATED_BY: claude-agent-skills (independent sub-agent)
+  :VERDICT: planned
+  :FINDING: 19 claims audited. src/sage/skills.scm NOT YET IMPLEMENTED (tracked in bead guile-sage-6fx); all claims describe future behavior per docs/SKILLS-IMPL-SPEC.org. 17 specs verified internally consistent with IMPL-SPEC. 2 needs-citation (heading 'four scopes' vs section table + IMPL-SPEC '6 scopes' — enterprise/personal/project/plugin/universal/claude-compat; preprocess timeout value undocumented in CONTRACT but specified as 10s in IMPL-SPEC §6.7).
+  :LEDGER: .verify/chain.jsonl (target prefix docs/SKILLS-CONTRACT.org)
+  :BLOCKING_BEAD: guile-sage-6fx (implementation)
+  :END:
+
+Per [[file:ANNOTATION-SYSTEMS.org][docs/ANNOTATION-SYSTEMS.org]]: this document is a *forward-looking
+contract*. All identifier/path/value claims describe the planned
+=src/sage/skills.scm= module per the build plan in
+[[file:SKILLS-IMPL-SPEC.org][SKILLS-IMPL-SPEC.org]]. Verifications mark these as
+=:VERDICT: correct= against the IMPL-SPEC, not against running code.
+
 * Purpose and scope
 
 This document is a contract specification for =guile-sage= reading and

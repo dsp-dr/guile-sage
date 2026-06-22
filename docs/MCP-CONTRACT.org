@@ -4,6 +4,17 @@
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 
+* Validation status
+  :PROPERTIES:
+  :CUSTOM_ID: validation-status
+  :VALIDATED_AT: 2026-06-22T04:00Z
+  :VALIDATED_BY: claude-agent-mcp (independent sub-agent)
+  :VERDICT: minor-drift
+  :FINDING: 33 claims audited. 29 correct (fresh SSE per call I01, no POST before endpoint I02, JSON-RPC envelope + id correlation I08/I09, 202-required I07, capability gates I17, tool namespacing I22, 5s connect timeout, 60s request timeout, SSE comment-line drop I04). 1 corrected (I10 result/error mutual exclusion: code checks both but does not validate exclusion, mcp.scm:636-645). 1 needs-citation (I21 heterogeneous content: spec says unknown content types MUST be preserved, but mcp.scm:648-653 only extracts text blocks — image/resource/unknown silently dropped). Promise/future design wording imprecise vs Guile condvar+pending-map actuality (correct per MCP spec, just imprecise).
+  :LEDGER: .verify/chain.jsonl (target prefix docs/MCP-CONTRACT.org)
+  :SOURCE_TRUTH: src/sage/mcp.scm
+  :END:
+
 * Purpose and scope
 
 This document is a contract specification for the Model Context Protocol

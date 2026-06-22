@@ -9,6 +9,23 @@ All diagrams in this document follow the project diagram style guide:
 [[https://wal.sh/research/diagram-style-guide#org010b7ab][wal.sh/research/diagram-style-guide]].
 #+end_quote
 
+* 0. Validation status
+  :PROPERTIES:
+  :CUSTOM_ID: validation-status
+  :VALIDATED_AT: 2026-06-22T04:00Z
+  :VALIDATED_BY: claude-agent-explore (independent sub-agent)
+  :VERDICT: corrected
+  :FINDING: 4 drifts found (module-count 21->27, model tier defaults, context thresholds 50/80/90 -> 75/90/95, safe-tools missing git_fetch/scratch_*). All landed in this commit.
+  :LEDGER: .verify/chain.jsonl (target prefix docs/ARCHITECTURE.org)
+  :END:
+
+Per [[file:ANNOTATION-SYSTEMS.org][docs/ANNOTATION-SYSTEMS.org]]: an Explore sub-agent verified ~24
+claim-bearing statements in this file against the live code on
+2026-06-22; 20 verified correct (ports, MCP FIFO/JSON-RPC, XDG paths,
+telemetry metric names, fire-and-forget, YOLO gating, provider exports)
+and 4 corrected (recorded above). Findings are appended to
+=.verify/chain.jsonl=.
+
 * 1. C4 Level 1 --- System Context
 
 #+BEGIN_SRC plantuml :file images/arch-c4-l1.png
@@ -82,7 +99,7 @@ System_Boundary(sage, "guile-sage process (GNU Guile 3.0)") {
   Container(session,     "session.scm",     "Guile", "Conversation persistence.\nXDG project-scoped paths.\nAuto-compact at 80%.")
   Container(config,      "config.scm",      "Guile", "Env vars, .env loading, XDG paths,\nAGENTS.md discovery, token limits.")
   Container(model_tier,  "model-tier.scm",  "Guile", "Tier-based model auto-selection.\nSkipped for non-ollama providers.")
-  Container(context,     "context.scm",     "Guile", "Context window tracking,\nthreshold warnings at 50/80/90%.")
+  Container(context,     "context.scm",     "Guile", "Context window tracking,\nthreshold warnings at 75/90/95%.")
   Container(compact,     "compaction.scm",  "Guile", "5 strategies: truncate, token-limit,\nimportance, summarize, intent.\ncompact-auto selects best.")
   Container(commands,    "commands.scm",    "Guile", "Custom /command registry.\nPersisted in XDG config.")
   Container(logging,     "logging.scm",     "Guile", "Structured JSONL logging\nto .logs/sage.log.")
@@ -132,7 +149,7 @@ SHOW_LEGEND()
 @enduml
 #+END_SRC
 
-** Module Summary (21 source files, ~8.4k LOC)
+** Module Summary (27 source files, ~11.1k LOC)
 
 | Module         | File             | Role                                        | Key exports                                              |
 |----------------+------------------+---------------------------------------------+----------------------------------------------------------|
@@ -159,6 +176,10 @@ SHOW_LEGEND()
 | version        | =version.scm=   | Semver constants                            | =*version*=, =version-string=                           |
 | commands       | =commands.scm=  | Custom command loader                       | =load-custom-commands!=                                  |
 | irc            | =irc.scm=       | IRC integration (optional)                  | =irc-connected?=, =irc-send=                            |
+| hooks          | =hooks.scm=     | PreToolUse/PostToolUse lifecycle hooks      | =run-pre-tool-use=, =run-post-tool-use=                 |
+| provenance     | =provenance.scm= | Ingress provenance + SHA-256 + GPG          | =provenance-log!=, =content-sha256=                     |
+| scratch        | =scratch.scm=   | Content-addressed scratch store             | =scratch-put!=, =scratch-get=, =scratch-list=           |
+| usage-stats    | =usage-stats.scm= | Local JSONL usage ledger                  | =usage-log!=, =usage-summary=                           |
 
 * 3. Network Topology
 
@@ -377,6 +398,9 @@ These read-only tools require no special mode:
 | =git_status=    | Git read       |                          |
 | =git_diff=      | Git read       |                          |
 | =git_log=       | Git read       |                          |
+| =git_fetch=     | Git read       |                          |
+| =scratch_get=   | Self-inspect   | Read large tool outputs  |
+| =scratch_list=  | Self-inspect   |                          |
 | =read_logs=     | Self-inspect   |                          |
 | =search_logs=   | Self-inspect   |                          |
 | =sage_task_*=   | Agent tasks    | Beads-managed state only |
@@ -555,9 +579,9 @@ Tiers are configurable via env vars:
 | Env var                        | Default            |
 |--------------------------------+--------------------|
 | =MODEL_TIER_FAST=              | =llama3.2:latest=  |
-| =MODEL_TIER_STANDARD=          | =qwen2.5-coder:7b= |
-| =MODEL_TIER_CEILING_FAST=      | 2000               |
-| =MODEL_TIER_CEILING_STANDARD=  | 6000               |
+| =MODEL_TIER_STANDARD=          | =llama3.2:latest=  |
+| =MODEL_TIER_CEILING_FAST=      | 4000               |
+| =MODEL_TIER_CEILING_STANDARD=  | 8000               |
 
 At startup, =load-model-tiers= cross-references configured tiers
 against =ollama-list-models= output and filters to only available

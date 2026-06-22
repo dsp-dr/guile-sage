@@ -4,6 +4,24 @@
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 
+* Validation status
+  :PROPERTIES:
+  :CUSTOM_ID: validation-status
+  :VALIDATED_AT: 2026-06-22T04:00Z
+  :VALIDATED_BY: claude-agent-hooks (independent sub-agent)
+  :VERDICT: partial-drift
+  :FINDING: 20 claims audited. 6 correct (PreToolUse veto, PostToolUse fires-after, exception caught+WARN+swallowed, FIFO ordering, no-op unregister, duplicate-name replace). 2 corrected (stale line numbers L1082/L1098 -> ~1294/~1460; veto string spec 'Hook vetoed tool: <name>' vs code 'Hook vetoed: <reason>' tools.scm:402). 1 disputed (spec claims 4 lifecycle events; code implements 2 — SessionStart + UserPromptSubmit designed not wired, hooks.scm:48). 4 needs-citation (hook scoping H05, shell timeout H08, sandbox H10, lifecycle events H01/H04 — all marked stub in test-hooks.scm).
+  :LEDGER: .verify/chain.jsonl (target prefix docs/HOOKS-CONTRACT.org)
+  :SOURCE_TRUTH: src/sage/hooks.scm, src/sage/tools.scm:386-426 (hook-fire call sites), tests/test-hooks.scm
+  :END:
+
+Per [[file:ANNOTATION-SYSTEMS.org][docs/ANNOTATION-SYSTEMS.org]]: this contract describes the
+*designed* hook system. The implementation is intentionally minimal —
+the file header in =src/sage/hooks.scm= states "no SessionStart, no
+UserPromptSubmit, no shell-type hooks, no sandboxing." Sections
+describing those features are SPEC for future work; their drawers are
+marked =needs-citation= until implemented.
+
 * Purpose and scope
 
 This document is a contract specification for the lifecycle hook system
