@@ -205,6 +205,12 @@ Method notes (from prior art, §6.4):
   proxy. Pair the network tests with prompt-injection→exfil red-team runs
   (Promptfoo / AgentRedBench / the wal.sh inject page) and lean on the
   ephemeral-key blast-radius limits (short TTL + budget cap + model scope).
+  In-the-wild instance: *agentjacking* (Tenet, 2026-06-12) — an honest MCP
+  server (Sentry) relays poisoned upstream data → agent runs an injected =npx= →
+  credential theft, no auto-approve needed. Our blast-radius limits (no provider
+  key, workspace-only FS, ephemeral scoped key) blunt the harvest+exfil stage;
+  tracked as beads =SAGE-ki3= (N8 test) / =SAGE-a3l= (taint tool-call gate). See
+  [[file:../CHAOS-TESTING.org][CHAOS-TESTING.org]] § Agentjacking.
 - *No off-the-shelf agent-confinement verifier exists yet* — this matrix is the
   spec for the suite we build (wire into =gmake chaos-net=).
 

@@ -169,6 +169,38 @@ injection test page) and =tests/test-prompt-injection.scm= /
   trusted by design (it drives the agent loop); everything ingressing from the
   network or filesystem does not.
 
+** Agentjacking — honest server, poisoned upstream data (in the wild)
+
+The "agentjacking" attack (Tenet Security, 2026-06-12;
+[[https://thenewstack.io/agentjacking-sentry-mcp-attack/][The New Stack]],
+[[https://tenetsecurity.ai/blog/agentjacking-coding-agents-with-fake-sentry-errors/][Tenet]],
+[[https://labs.cloudsecurityalliance.org/research/csa-research-note-agentjacking-mcp-sentry-injection-20260612/][CSA]])
+is a real-world instance of this boundary failing on other agents. Its novelty:
+the MCP server is *honest and correctly configured* (Sentry), but faithfully
+relays attacker-ingested content (a poisoned error event posted with a public,
+write-only DSN) carrying a fake =## Resolution= block with an =npx= command.
+Claude Code / Cursor / Codex ran it with the developer's privileges → credential
+theft + exfiltration; *no YOLO/auto-approve required*.
+
+What this clarifies for us:
+- *Distinguish two MCP threats:* a /compromised server/ (or bad =~/.claude.json=)
+  vs an /honest server relaying poisoned upstream data/. Our taint boundary
+  targets the second too — but our red-team did not yet exercise it (→ bead
+  =SAGE-ki3=, "N8 MCP-relayed-injection").
+- *The wrap path is the single load-bearing control.* Verified 2026-06-22: both
+  the streaming and non-streaming tool loops funnel through one
+  =execute-tool-chain= → =execute-tool= → =guard-tool-result= →
+  =wrap-tool-result=; MCP tools register as normal tools, so MCP output is
+  wrapped on every path. Locked with a regression test (→ =SAGE-aor=, I24).
+- *Residual gap:* the envelope demotes injected /instructions/ to data, but the
+  terminal harm is the /action/ the model then takes (call a tool to run/exfil).
+  MCP-default-unsafe blocks the worst of this in non-YOLO; a per-turn
+  taint-aware tool-call gate is the proposed hardening (→ =SAGE-a3l=).
+- *Exfil through the allowed channel* (RFC-003 §5 caveat) is exactly the
+  agent-firewall limit agentjacking demonstrates — the ephemeral key's short
+  TTL + budget cap + model scope + workspace-only FS bound the blast radius even
+  when the proxy channel itself is permitted.
+
 * Re-running
 
 Each fault is reproduced by the skeleton above with the matching injection.
