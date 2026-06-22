@@ -102,14 +102,14 @@ package, so it does NOT belong in the per-push =test.yml=. Policy:
 
 * Validated run --- 2026-06-22
 
-Executed from =hydra= (=192.168.86.29=) against the real *LiteLLM gateway*
-=192.168.86.22:4000= (direct ollama =:11434= is firewalled from this host, so
-=CHAOS_PROVIDER=openai= was used — exactly the cross-host case the openai mode
-exists for). toxiproxy built via =go install …/cmd/server@v2.12.0= +
-=…/cmd/cli@v2.12.0=.
+Executed from the dev host against the real *LiteLLM gateway* at =$LITELLM_HOST=
+(direct ollama =:11434= is firewalled from this host, so =CHAOS_PROVIDER=openai=
+was used — exactly the cross-host case the openai mode exists for). toxiproxy
+built via =go install …/cmd/server@v2.12.0= + =…/cmd/cli@v2.12.0=.
 
 #+BEGIN_SRC sh
-  CHAOS_PROVIDER=openai UPSTREAM=192.168.86.22:4000 \
+  : "${LITELLM_HOST:?set to your gateway host:port}"
+  CHAOS_PROVIDER=openai UPSTREAM="$LITELLM_HOST" \
   TOXI_LISTEN=127.0.0.1:24000 CHAOS_OPENAI_KEY=… CHAOS_MODEL=ollama-qwen2.5-coder \
   sh scripts/toxiproxy-chaos.sh all
 #+END_SRC
