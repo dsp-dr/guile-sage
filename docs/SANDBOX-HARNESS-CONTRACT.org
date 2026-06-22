@@ -13,6 +13,18 @@ each harness team's experiments — see [[file:rfc/003-ephemeral-key-sandbox.org
 Conform to the invariants below; choose your own mechanism details.
 #+end_quote
 
+#+begin_quote
+*READ THIS FIRST — what is actually under evaluation.* The decision under review
+is *NOT* "can this mechanism create a jail / container" — that is assumed to be
+solvable. It is: *how do we manage setup, key issuance + handoff, lifecycle, and
+teardown for an ephemeral guile-sage + LiteLLM instance so the whole thing is
+frictionless?* A harness that builds a flawless jail but makes key handoff or
+teardown clumsy has *failed the experiment*. The artifacts under review are the
+§3 hand-off, the §7 lifecycle, and the §9 honest evaluation — optimize and
+report those, not "I made a sandbox." (This reframing is direct feedback from
+the first implementation team; see §9–§10.)
+#+end_quote
+
 * 1. Roles
 
 | Role | Who | Trust | Owns |
@@ -142,7 +154,40 @@ mints the key on an authenticated request (removing the master key from the
 host). Each team prototypes, runs §6, and reports back. Only after the five
 experiments do we compare and decide a recommended methodology per platform.
 
-* 9. References
+* 9. Required experiment report (honest gaps are MANDATORY)
+
+Each harness team's deliverable is an *experiment report*, not just a running
+sandbox. A report missing any of the following is rejected:
+
+- *Conformance table* — each §6 negative test (N1–N7) marked
+  =exercised | stubbed | failed=, and *explicit about what was REAL vs a
+  stand-in*. (Example from team-1: "used =/health= as a reachability probe
+  instead of minting a real ephemeral key" — that is a *stub*, say so.)
+- *Honest gaps* — what was not done and why. This section is mandatory; "no
+  gaps" is not an acceptable answer for an experiment. This is the structural
+  ask: make team-1's honest-gaps section the required shape for everyone.
+- *Friction findings* — where setup / key issuance+handoff / lifecycle /
+  teardown was awkward, with evidence. These answer the *actual* decision
+  points (frictionless management), not "did the sandbox start".
+- *Recommended next step* — a hypothesis for the next run, even if untested.
+- *Queued questions* — new open items appended to §10 with an id.
+
+* 10. Carry-forward questions (seeded from the first run)
+
+Open decision points to resolve through experiment. Tracked as beads so teams
+can claim them; new questions append here.
+
+| id | question / decision point | origin | bead |
+|----+---------------------------+--------+------|
+| CF-1 | Mint a *real* ephemeral key end-to-end (team→user→key→use→revoke), prove dead after teardown (N4) — not a =/health= stand-in. | team-1 §8.5 / Q12 | =SAGE-x3p= |
+| CF-2 | Automate the §6 negative tests (N1–N7) in =gmake chaos-net= (currently manual / not landed). | team-1 §8.5 | =SAGE-fyj= |
+| CF-3 | Reproduce FreeBSD Bastille + =pf= for real (prior-art-validated, not reproduced). | team-1 §8.5 | =SAGE-euo= |
+| CF-4 | Prototype + test broker on =127.0.0.1= + a *UDS bridge* handoff (Claude Code pattern, RFC-003 §6.1; HC-04 prefers socket). Recommended fix, untested. | team-1 recommended-fix | =SAGE-db6= |
+
+All four are *key / handoff / lifecycle* questions — i.e. exactly the friction
+the experiment exists to resolve, not sandbox feasibility.
+
+* 11. References
 
 - [[file:rfc/003-ephemeral-key-sandbox.org][RFC-003 — pure sandboxing with ephemeral LiteLLM keys]] (rationale + diagrams)
 - [[file:LITELLM-SETUP.org][LITELLM-SETUP.org]] — the management-API calls + =scripts/litellm-provision.sh=

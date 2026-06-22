@@ -291,6 +291,12 @@ the LiteLLM broker here does.
 
 * 7. Open questions
 
+Live carry-forward questions (seeded from the first implementation team, tracked
+as beads) live in
+[[file:../SANDBOX-HARNESS-CONTRACT.org][SANDBOX-HARNESS-CONTRACT.org]] §10. The
+design-level questions below feed into them.
+
+
 - Broker placement: a host daemon vs. a wrapper invoked per session vs. a
   vault-agent-style sidecar.
 - Key handoff channel: env var (simplest, visible in =ps= inside the jail) vs.
