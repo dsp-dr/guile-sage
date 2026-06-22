@@ -126,7 +126,7 @@ For =.md= files (=AGENTS.md=, =CLAUDE.md=, =adr/*.md=) we use an
 HTML-comment block immediately after the heading:
 
 #+BEGIN_SRC markdown
-## Decision: Ollama as first provider
+,## Decision: Ollama as first provider
 
 <!-- :annotation:
 custom-id: adr-0002-ollama
@@ -314,11 +314,93 @@ What's harder /here/ than in the source piece:
    is incremental).
 5. [ ] Pin the verdict vocabulary in this document and reject other
    values in the ledger writer.
-6. [ ] Audit deployment / development guide coverage — we have
-   =ARCHITECTURE.org= and =CONTRIBUTING.org= but no dedicated
-   /deployment/ or /development/ guide; gap noted, not yet filed.
+6. [X] Audit deployment / development guide coverage — DONE 2026-06-22:
+   added =docs/DEPLOYMENT.org= and =docs/CONTRACTS-INDEX.org=, aligned
+   =CONTRIBUTING.org= + =AGENTS.md= (gmake, engineering boundaries, test
+   table, version), and documented the transport/error/taint boundaries in
+   =ARCHITECTURE.org= §14–16. See also =docs/LITELLM-SETUP.org=.
+7. [ ] Land the four §6 corrections in =ARCHITECTURE.org= — still OPEN: this
+   session added §14–16 but did not yet fix the module-count / tier-default /
+   context-threshold / safe-tools drifts recorded in §6.1–6.4.
+8. [ ] Triage the §10 methodology gaps with upstream (=walsh-kx1=).
 
-* 10. References
+* 10. Downstream methodology gaps (field report)
+  :PROPERTIES:
+  :CUSTOM_ID: methodology-gaps
+  :STATUS: open
+  :VERIFIED_BY: claude-agent
+  :VERIFIED_AT: 2026-06-22T05:00Z
+  :VERDICT: disputed
+  :FINDING: Four use cases the source methodology does not cover, each demonstrated live this session. Filed upstream as jwalsh/www.wal.sh walsh-kx1.
+  :FILED: walsh-kx1
+  :END:
+
+These are /our notes, issues, and problems/ with the annotation methodology
+itself — surfaced while doing the boundary/chaos/docs work, not drift in a
+single doc. Each was demonstrated live (=:EXEC_VERDICT: verified=) and is
+tracked upstream in =jwalsh/www.wal.sh= (=walsh-kx1=). NOTE: that repo does not
+yet exist on GitHub; =ghq get jwalsh/www.wal.sh= reports "exists" only because a
+local placeholder tracker was created — it has no remote until the repo is made.
+
+** 10.1 History rewrites orphan SHA-keyed annotations
+   :PROPERTIES:
+   :CUSTOM_ID: gap-history-rewrite
+   :STATUS: open
+   :VERDICT: disputed
+   :FINDING: §6.4 (version-aware annotations via git), §3/§8.2 (git notes) and the JSONL chain assume append-only history. A filter-repo --replace-text force-push changes every commit hash, orphaning all SHA-keyed annotations and detaching notes. Demonstrated: origin/main rewritten to scrub mac.lan->host.lan, zero common ancestor with prior clones (RCA gist fef45e01c0da095ea4d5dc7b0a0f4337). Anchor the chain to content/CUSTOM_ID hashes, not commit SHAs.
+   :EXEC_VERDICT: verified
+   :FILED: walsh-kx1
+   :END:
+
+** 10.2 EXEC_VERDICT conflicts with the de-hardcoded-IP lint
+   :PROPERTIES:
+   :CUSTOM_ID: gap-exec-vs-lint
+   :STATUS: open
+   :VERDICT: disputed
+   :FINDING: §8.3 makes the running system the verifier, but :EXEC_VERDICT: assertions that must hit a concrete host cannot embed it — gmake lint-docs forbids hardcoded RFC1918 IPs in living docs (the very rule whose retroactive enforcement caused 10.1). §11.6 (point-in-time/single-host) is adjacent, not this. Resolution: EXEC_VERDICT references a parameterized $HOST; resolved value + result recorded in the chain, never the doc.
+   :EXEC_VERDICT: verified
+   :FILED: walsh-kx1
+   :END:
+
+** 10.3 Cross-repo / external-service claims have no anchor home
+   :PROPERTIES:
+   :CUSTOM_ID: gap-foreign-claims
+   :STATUS: open
+   :VERDICT: disputed
+   :FINDING: Annotations anchor within one doc tree. This session's verification spanned guile-sage docs + the wal.sh page + a live LiteLLM gateway (claim "team key returns SAGE_OK"). External-service / other-repo claims have no :CUSTOM_ID: home and no stable verifier. Proposal: a "foreign claim" form keyed by URL + content-hash of the response, in a separate annotations file.
+   :EXEC_VERDICT: verified
+   :FILED: walsh-kx1
+   :END:
+
+** 10.4 git-notes fragility under rebase + non-default push
+   :PROPERTIES:
+   :CUSTOM_ID: gap-git-notes
+   :STATUS: open
+   :VERDICT: disputed
+   :FINDING: §3/§8.2 present git notes favorably. In practice our first-principles notes detached when rebase changed commit hashes, and notes do not travel without an explicit refs/notes/* push. Add a caveat; relates to 10.1.
+   :EXEC_VERDICT: verified
+   :FILED: walsh-kx1
+   :END:
+
+** 10.5 Tooling friction observed (not methodology, but logged)
+   :PROPERTIES:
+   :CUSTOM_ID: gap-tooling
+   :STATUS: open
+   :VERDICT: needs-citation
+   :FINDING: bd emits "Warning: could not export to JSONL: exit status 1" on every commit (.beads/daemon-error present since session start) — the tamper-evident JSONL chain this methodology relies on (§8.2) is exactly what is failing to export here. Worth confirming the dolt/JSONL writer is healthy before trusting the ledger.
+   :EXEC_VERDICT: partial
+   :END:
+
+** 10.6 This document failed the repo's own org-lint (validators-unvalidated, live)
+   :PROPERTIES:
+   :CUSTOM_ID: gap-self-lint
+   :STATUS: closed
+   :VERDICT: corrected
+   :FINDING: A concrete instance of §8.4 "validators go unvalidated": as merged from upstream, this file failed =gmake lint-org= — the naive check =grep '^## '= flagged the markdown header inside the §4 =#+BEGIN_SRC markdown= example (line ~129). Fixed by org comma-escaping (=,## …=). The annotation contract's host repo could not lint its own annotation doc.
+   :EXEC_VERDICT: verified
+   :END:
+
+* 11. References
   :PROPERTIES:
   :CUSTOM_ID: refs
   :STATUS: closed
