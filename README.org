@@ -391,7 +391,12 @@ guile-sage/
 │   └── version.scm      # Semver constants
 ├── tests/               # 27+ test files; SRFI-64 harness in test-harness.scm
 ├── docs/
-│   ├── ARCHITECTURE.org          # C4 + module map
+│   ├── CONTRACTS-INDEX.org       # START HERE: index of guides/contracts/specs
+│   ├── ARCHITECTURE.org          # C4 + module map + transport/error/taint boundaries
+│   ├── DEPLOYMENT.org            # install, provider matrix, resilience env vars
+│   ├── CHAOS-TESTING.org         # fault-injection boundary contract + spawn matrix
+│   ├── CHAOS-TOXIPROXY-SPEC.org  # automated network-fault harness (gmake chaos-net)
+│   ├── SANDBOX-AND-EGRESS.org    # connection modes, sandboxing, credentials
 │   ├── TELEMETRY.org             # OTLP setup + verification
 │   ├── MCP-CONTRACT.org          # 23 numbered invariants (I01-I23)
 │   ├── HOOKS-CONTRACT.org        # Lifecycle hook invariants (H01-H16)
@@ -415,8 +420,8 @@ guile-sage/
 *** Running Tests
 
 #+begin_src bash
-# Run all tests
-make check
+# Run all tests (use gmake — BSD make mis-parses the GNU Makefile)
+gmake check
 
 # Run individual test file
 guile3 -L src tests/test-tools.scm

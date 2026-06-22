@@ -1,0 +1,158 @@
+#+TITLE: guile-sage — Deployment Guide
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-22
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+Operational guide for installing and running guile-sage (v1.1.0). This is the
+*operator* view; for the security/credential-isolation blueprint see
+[[file:SANDBOX-AND-EGRESS.org][SANDBOX-AND-EGRESS.org]], for metrics see
+[[file:TELEMETRY.org][TELEMETRY.org]], and for the full env reference see
+[[file:../.env.template][.env.template]]. Diagrams follow the project style
+guide: [[https://wal.sh/research/diagram-style-guide#org010b7ab][wal.sh/research/diagram-style-guide]].
+
+By convention any =*_HOST= value is a DNS-resolvable name or IP literal with an
+optional =:port= (e.g. =ollama-host:11434=, =$LITELLM_HOST=). Docs never hardcode
+RFC1918 addresses; substitute your own at deploy time.
+
+* 1. Quick start
+
+#+begin_src bash
+git clone https://github.com/dsp-dr/guile-sage.git && cd guile-sage
+cp .env.template .env          # then edit: provider + key (see § 3)
+gmake build                    # gmake, NOT make (BSD make no-ops the GNU Makefile)
+gmake run                      # launches the REPL
+#+end_src
+
+Container:
+#+begin_src bash
+docker pull ghcr.io/dsp-dr/guile-sage:latest      # or :v1.1.0 / :<sha>
+docker run -it --env-file .env ghcr.io/dsp-dr/guile-sage:latest
+#+end_src
+
+* 2. Installation
+
+** Prerequisites
+
+- =guile3= (3.0.x) + =guild3= compiler; =curl=; =readline=. The Makefile
+  auto-detects =guile3=/=guild3= (FreeBSD) and falls back to =guile=/=guild=.
+- *Use =gmake=.* BSD =make= mis-parses the GNU Makefile (=$(shell …)=) and
+  produces an empty, no-op build.
+
+** User-local install (recommended)
+
+#+begin_src bash
+gmake install                  # PREFIX defaults to $HOME/.local
+#+end_src
+
+Installs the compiled =.go= cache to =$GUILE_CCACHE_DIR=, modules to
+=$GUILE_SITE_DIR=, prompts to =$DATADIR/sage=, and a =sage= wrapper to
+=$BINDIR= (=$HOME/.local/bin= — ensure it is on =PATH=). Override =PREFIX= for a
+system install. Uninstall: =gmake uninstall=.
+
+* 3. Provider configuration matrix
+
+Exactly one backend is active per run, selected by =SAGE_PROVIDER=. Never commit
+keys — =.env= is gitignored; use a secret manager in production.
+
+| Mode | =SAGE_PROVIDER= | Required vars | Egress | Secret held by sage |
+|------+-----------------+---------------+--------+---------------------|
+| Ollama (local) | =ollama= | =SAGE_OLLAMA_HOST=, =SAGE_MODEL= | =$OLLAMA_HOST:11434= | none |
+| Ollama (cloud) | =ollama= | + =OLLAMA_API_KEY= | =api.ollama.com:443= | cloud key |
+| Gemini (direct) | =gemini= | =GEMINI_API_KEY=, =SAGE_MODEL= | =generativelanguage.googleapis.com:443= | provider key |
+| OpenAI-shape via LiteLLM | =openai= | =SAGE_OPENAI_BASE=, =SAGE_OPENAI_API_KEY=, =SAGE_MODEL= | =$LITELLM_HOST= only | *proxy key only* |
+| Cloudflare AI Gateway | =openai= | =SAGE_OPENAI_BASE=, AIG token/key, =SAGE_MODEL= | gateway host:443 | gateway/downstream key |
+
+*LiteLLM gateway* is the recommended production shape: it collapses egress to a
+single host and keeps real provider keys server-side. Its admin/API-reference UI
+lives at =http://$LITELLM_HOST/ui/?page=api-reference= — use it to confirm which
+model names the proxy serves and which the key's team may access (a team without
+granted models returns =key_model_access_denied= even with a valid key). Set
+=SAGE_MODEL= to a model the gateway lists. See
+[[file:EU-AI-ACT-GUARDRAILS.org][EU-AI-ACT-GUARDRAILS.org]] for guardrail config.
+
+* 4. Network topology
+
+#+begin_src mermaid
+%% style: https://wal.sh/research/diagram-style-guide#org010b7ab
+flowchart LR
+    sage["sage REPL / container"]
+    subgraph backend["one active backend"]
+        ollama["Ollama :11434"]
+        litellm["LiteLLM gateway\n$LITELLM_HOST"]
+        cloud["cloud provider :443"]
+    end
+    otel["OTel Collector :4318"]
+    sage -->|"POST /api/chat (NDJSON)"| ollama
+    sage -->|"POST /v1 (proxy key only)"| litellm
+    sage -->|"POST /v1 (provider key)"| cloud
+    litellm --> cloud
+    sage -.->|"OTLP/HTTP metrics"| otel
+#+end_src
+
+Firewall: allow only the active backend's egress (e.g. =$LITELLM_HOST= for the
+gateway shape; =:443= to the provider for direct). HTTPS uses curl; the native
+Guile TLS path (if used) needs =GUILE_TLS_CERTIFICATE_DIRECTORY=.
+
+* 5. Resilience & operational env vars
+
+These govern the boundary behaviour documented in
+[[file:CHAOS-TESTING.org][CHAOS-TESTING.org]] and § 14–16 of
+[[file:ARCHITECTURE.org][ARCHITECTURE.org]]:
+
+| Var | Default | Effect |
+|-----+---------+--------|
+| =SAGE_HTTP_MAX_RETRIES= | 2 | chat retries on 429/5xx with exponential backoff; 0 disables. Connection failures + the startup probe never retry (fail fast, ~5s connect-timeout). |
+| =SAGE_STREAMING= | on | =0= forces non-streaming (also toggle per-session with =/stream=). |
+| =SAGE_MCP_DISABLE= | unset | =1= skips MCP discovery entirely (saves startup time; no external skills). |
+| =SAGE_TOKEN_LIMIT= | auto | override context-window detection. |
+| =SAGE_YOLO_MODE= | unset | *dev only* — permits mutating tools (write/commit/eval). Never in prod. |
+| =SAGE_TELEMETRY_DISABLE= | unset | =1= disables OTLP metrics. |
+| =SAGE_DEBUG_HTTP= | unset | =1= writes redacted wire logs to =.logs/http.jsonl=. |
+
+CI tip: set =SAGE_HTTP_MAX_RETRIES=0= and =SAGE_TELEMETRY_DISABLE=1= for
+deterministic, side-effect-free runs.
+
+* 6. Deployment scenarios
+
+** Laptop / development
+Local Ollama on =:11434=, =SAGE_YOLO_MODE=1=, =gmake run=. Zero credentials.
+
+** Single-user server (recommended: LiteLLM gateway)
+Run LiteLLM (and optionally Ollama) on the host; point sage at it with
+=SAGE_PROVIDER=openai SAGE_OPENAI_BASE=http://$LITELLM_HOST/v1= and a *proxy
+key*. Real provider keys live only in the LiteLLM config. Mount volumes for
+sessions (=~/.local/share/sage/sessions=) and =.logs=; ship OTLP to a central
+collector.
+
+** Container / CI
+Use the =ghcr.io/dsp-dr/guile-sage= image; pass config via =--env-file= or
+secrets (never bake keys into the image — =.dockerignore= already excludes
+=.env=). Restrict the network policy to the single backend host.
+
+* 7. Observability
+
+Set =OTEL_EXPORTER_OTLP_METRICS_ENDPOINT= (or the base =OTEL_EXPORTER_OTLP_ENDPOINT=,
+from which sage derives =:4318/v1/metrics=). Counters surface in Prometheus as
+=guile_sage_*= with =exported_job=guile-sage=. Telemetry is fail-soft (no-op if
+the endpoint is unset/unreachable). Full harness: [[file:TELEMETRY.org][TELEMETRY.org]].
+
+* 8. Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------+--------------+-----|
+| Startup hangs / slow then "using defaults" | backend host black-holes packets | curl =--connect-timeout 5= now bounds this; check firewall/DNS to the backend |
+| =[<provider> connection failed: …]= | backend down / wrong host | verify =SAGE_OLLAMA_HOST= / =SAGE_OPENAI_BASE=; =curl= the endpoint |
+| =[<provider> authentication failed …]= | bad/expired key | rotate the key in =.env= (remember: =.env= overrides shell env) |
+| =key_model_access_denied= (LiteLLM) | key's team lacks the model | grant the team the model, or use a team-less key; confirm via =/ui/?page=api-reference= |
+| Config change via =FOO=x sage= ignored | =.env= re-read overrides shell env | edit =.env= directly |
+| =make= builds nothing | BSD make mis-parses GNU Makefile | use =gmake= |
+| TLS cert error on HTTPS fetch | missing CA dir for native client | set =GUILE_TLS_CERTIFICATE_DIRECTORY= |
+
+* See also
+
+- [[file:SANDBOX-AND-EGRESS.org][SANDBOX-AND-EGRESS.org]] — sandboxing + credential boundaries
+- [[file:CHAOS-TESTING.org][CHAOS-TESTING.org]] — boundary/fault contract
+- [[file:TELEMETRY.org][TELEMETRY.org]] — metrics
+- [[file:CONTRACTS-INDEX.org][CONTRACTS-INDEX.org]] — contracts/specs/schemas index
+- [[file:../.env.template][.env.template]] — full environment reference
