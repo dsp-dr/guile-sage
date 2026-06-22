@@ -225,3 +225,78 @@ Action items:
    Claude Code prior-art pattern (§6.1).
 3. Build the negative test (curl 192.168.86.22:4000 inside sandbox
    MUST return 000) into =gmake chaos-net=.
+
+* Q13 — Pin LiteLLM ≥ 1.84.0 by hash; verify deployed version
+  :PROPERTIES:
+  :CUSTOM_ID: q13-litellm-pin
+  :STATUS: open
+  :KIND: supply-chain
+  :OWNER: operator
+  :END:
+
+Per [[file:../rfc/003-ephemeral-key-sandbox.org::*Supply chain][RFC-003 §9.6]]:
+- *Hard*: pin =litellm >= 1.84.0= (CVE-2026-49468 host-header auth
+  bypass on mgmt routes); =1.83.7+= (CVE-2026-42208 pre-auth SQLi
+  exploited in wild within 36h).
+- *Hard*: NEVER 1.82.7 or 1.82.8 — PyPI shipped
+  credential-harvesting malware "TeamPCP" (GHSA-5mg7-485q-xm76).
+- Verify deployed version: =curl /health/readiness= or
+  =POST /utils/litellm-version=; lock by SHA in deployment.
+
+* Q14 — Evaluate Docker Sandboxes (=sbx= CLI) as macOS row (f)
+  :PROPERTIES:
+  :CUSTOM_ID: q14-sbx-eval
+  :STATUS: open
+  :KIND: harness-eval
+  :OWNER: macos-team
+  :END:
+
+Per [[file:../rfc/003-ephemeral-key-sandbox.org::*Confinement matrix][RFC-003 §3]] row (f):
+hypervisor microVM, deny-default network allowlist, OS-keychain
+secret injection via host-side HTTPS proxy (sandbox NEVER reads the
+raw token — closer to SPIFFE than to Docker secrets). Open items
+flagged in the sub-agent brief:
+1. Confirm Apple Silicon native + identify the hypervisor
+   (=krunkit= vs Virtualization.framework vs Firecracker).
+2. Confirm short-TTL / rotation semantics of =sbx secret set= —
+   the keychain entry is durable; is it scoped to a sandbox
+   lifetime, or persists across =sbx rm=?
+3. Test whether =sbx run= can be combined with our coordinator
+   to inject the *ephemeral* LiteLLM key as the secret (the secret
+   itself is ephemeral, but =sbx= treats it like a permanent
+   credential).
+4. Run the comparison the user asked for: same trivial completion
+   call (a) under =sandbox-exec= with tmpfs handoff, (b) under
+   =sbx run= with =sbx secret=. Verify both 200 + both keys dead
+   after teardown. Asserts the harness contract is real.
+
+* Q15 — Audit-trail wiring for the negative tests (N3, N4)
+  :PROPERTIES:
+  :CUSTOM_ID: q15-audit-wiring
+  :STATUS: open
+  :KIND: tooling
+  :OWNER: chaos-team
+  :END:
+
+Per [[file:../rfc/003-ephemeral-key-sandbox.org::*Auditing a leaked key][RFC-003 §9.7]]:
+- N3 (key absent on disk post-exit): =rg sk- /tmp/sbx-exp/= +
+  workspace scan in =gmake chaos-net= teardown.
+- N4 (key dead after teardown → 401): sha256 the leaked key, query
+  =LiteLLM_VerificationToken.token=, assert =last_active= predates
+  teardown. Wire =/spend/logs?api_key=<hash>= into the chaos
+  harness as the canonical attribution path.
+
+* Q16 — Make LITELLM-SETUP.org the operator hardening manual
+  :PROPERTIES:
+  :CUSTOM_ID: q16-litellm-setup-hardening
+  :STATUS: open
+  :KIND: docs
+  :OWNER: any-agent
+  :END:
+
+[[file:../LITELLM-SETUP.org][docs/LITELLM-SETUP.org]] is currently the
+literate provisioning walkthrough. Fold RFC-003 §9.8 (12-item
+broker checklist) into LITELLM-SETUP.org as a top-level "Operator
+hardening" section: each numbered item gets a section + a runnable
+verification block (=curl=, =rg=, =psql=) so an operator can prove
+each control is on.

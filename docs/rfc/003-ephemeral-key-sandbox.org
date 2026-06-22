@@ -127,9 +127,10 @@ flowchart TB
 |---+----------+-----------+----------------+------------------+---------------|
 | a | FreeBSD | Bastille jail | jail root + nullfs ro workspace | =pf= anchor: pass to =$LITELLM_HOST=, block rest | tmpfs/=mdmfs= mount, env from broker |
 | b | FreeBSD | Podman rootless | volume mount | netavark/firewall to one host | =--secret= / tmpfs, env |
-| c | macOS | =sbx= (=sandbox-exec= SBPL) | =(deny file*)= + allow workspace | =(deny network*)= + allow =(local tcp)= to a *localhost-bound* proxy † | broker socket / tmpfs |
+| c | macOS | =sandbox-exec= SBPL (legacy =sbx=) | =(deny file*)= + allow workspace | =(deny network*)= + allow =(local tcp)= to a *localhost-bound* proxy † | broker socket / tmpfs |
 | d | macOS | Docker Desktop | bind mount | user-defined net + egress rule | Docker secret / tmpfs |
 | e | macOS | App Sandbox (native) | container + bookmarks | outbound client entitlement (coarse) † | broker socket / tmpfs |
+| f | macOS / Win / Linux | *Docker Sandboxes (=sbx= CLI)* — hypervisor microVM | filesystem passthrough at identical absolute paths; per-sandbox image/package state | =sbx policy allow network= (deny-default, wildcard hostnames + port, optional =--sandbox= scoping); UDP/ICMP unconditionally blocked | =sbx secret set= → OS keychain (macOS Keychain / Secret Service); host-side proxy injects credential into outbound HTTPS — sandbox NEVER sees raw token. SPIFFE-shaped. |
 
 † *macOS caveat (from prior art):* Seatbelt/SBPL network filtering is *coarse*
 (allow/deny; localhost vs all) and per-remote-host rules are unreliable; bind the
@@ -425,9 +426,290 @@ artifact). To replay: stand a localhost TCP forwarder to
 HTTP codes per the §8.3 table. =gmake chaos-net= will host the
 automated version once the §5 boundaries are scripted.
 
-* 9. References
+** 8.7 Iteration 2 — live broker→sandbox handoff (real ephemeral key)
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-iter2-live-handoff
+   :VALIDATED_AT: 2026-06-22T11:30Z
+   :VALIDATED_BY: claude-agent (interactive)
+   :VERDICT: correct
+   :FINDING: end-to-end provisioning chain + handoff + use + revoke + verify-dead worked on the local LiteLLM proxy; the §3 footnote about not-trusting-network-narrowing remains the open risk.
+   :END:
+
+The §8.1-§8.6 run avoided the master key. The user pushed back ("we
+can't punt on the hard boundary negotiation and workflow") — this
+iteration runs the whole [[file:../SANDBOX-HARNESS-CONTRACT.org][SANDBOX-HARNESS-CONTRACT.org]] cycle end-to-
+end with a *real* ephemeral key against the local LiteLLM
+(=$LITELLM_HOST= ≈ =192.168.86.22:4000=, master key =sk-litellm-local=
+— development placeholder per [[file:../LITELLM-SETUP.org][LITELLM-SETUP.org]], not a real secret).
+
+Scripts (under =tmp/sbx-exp/=, gitignored): =broker-mint.sh= (POST
+=/key/generate=, write to =/tmp/sbx-exp/.key-handoff= mode 0600),
+=sandbox-probe.sh= (read handoff, exercise key, redact in output),
+=tight-handoff.sb= (SBPL profile: =(deny file-read* (subpath
+"/Users/jwalsh"))= overlay, allow workspace, allow read of handoff
+literal).
+
+Run, redacted:
+
+#+begin_src text
+STEP 1: broker mints ephemeral key
+{ "models":["gemini-2.5-flash"], "spend":0.0, "max_budget":0.01,
+  "key":"sk-***", "key_name":"sk-...NJUw",
+  "expires":"2026-06-22T11:33:31.211532Z" }
+[broker] handoff -> /tmp/sbx-exp/.key-handoff (mode 0600, 26 bytes)
+
+STEP 2: pre-sandbox verify
+ephemeral /v1/models = HTTP:200
+ephemeral /key/info  = HTTP:200
+
+STEP 3: sandbox exercises the key under sandbox-exec
+[sbx] cwd=tmp/sbx-exp home=/Users/jwalsh
+[sbx] HOME/.zsh_history readable: head: Operation not permitted   <-- HC-01 ✓
+[sbx] handoff key length: 25
+[sbx] auth with ephemeral key /v1/models: HTTP:200                <-- chained auth ✓
+[sbx] chat completion via ephemeral key: http=200                 <-- chat works ✓
+
+STEP 4: broker revokes
+{"deleted_keys":["sk-***"]}   -> HTTP:200                          <-- CC-02 ✓
+
+STEP 5: verify revocation
+post-revoke /v1/models = HTTP:401                                  <-- N4 ✓
+
+STEP 6: scrub
+/tmp/sbx-exp/.key-handoff removed
+#+end_src
+
+Conformance demonstrated against the harness contract (sandbox-exec /
+=sbx= row of §3, slot =c=):
+
+| Invariant | Status | Evidence |
+|-----------+--------+----------|
+| HC-01 FS workspace-only | ✓ | =$HOME/.zsh_history= → =Operation not permitted= |
+| HC-04 Secret hygiene (no env, tmpfs only, perms 0600) | ✓ | handoff file 0600, never in env, scrubbed at end |
+| HC-07 Exec, not inherit | ✓ (by absence) | shell =exec= chain; key in cwd file, not env |
+| CC-01 Scoped + TTL + budget | ✓ | =models=[gemini-2.5-flash], duration=120s, max_budget=0.01 |
+| CC-02 Revoke on teardown | ✓ | =POST /key/delete= returned =deleted_keys= |
+| CC-03 Master key never leaves coordinator | ✓ | only ephemeral wrote to the handoff file |
+| N4 Use after teardown → 401 | ✓ | same key 200 → 401 after =/key/delete= |
+
+Still NOT demonstrated by this run (parked in [[file:../_queue/README.org::*Q10][_queue Q10]] + new
+items below):
+
+| Invariant | Why | Next step |
+|-----------+-----+-----------|
+| HC-02/03 Egress proxy-only, every client | the SBPL profile here allowed broad outbound for the handoff test; §8.4 found localhost-narrowing leaks to LAN | bind LiteLLM to 127.0.0.1, switch handoff to a unix-domain socket, retest |
+| HC-05 No provider key | gemini API key still sits in LiteLLM container env, not in sandbox; verified only by code inspection of LiteLLM | =find / -name '*.json' -exec grep AIza= negative scan inside the sandbox |
+| HC-06 Teardown on crash | sandbox exited cleanly; SIGKILL / segfault path untested | add =trap= test that asserts =/key/delete= still fires after =kill -9= |
+| N1 Non-proxy egress blocked | not enforced by the profile in this run | re-run §8.3 variant 1 with the real handoff file |
+| N3 Key absent on-disk post-exit | scrubbed but no =strings= scan / image-layer audit | =rg sk- /tmp/sbx-exp/= + workspace scan in =gmake chaos-net= |
+| N5 Budget cap 402 | =max_budget=0.01= was set but not driven through | spin a higher-volume test until the proxy returns 402 |
+| N6 No direct provider | direct =generativelanguage.googleapis.com= test not run inside sandbox | curl Google AI endpoint inside sandbox; MUST be unreachable |
+| N7 Injection-driven exfil | requires an actual prompt-injection corpus | wire Promptfoo / AgentRedBench into =gmake chaos-net= |
+
+The full negotiation worked. The handoff *channel* used here (tmpfs
+file with mode 0600) is HC-04-conformant but rates lowest of the
+acceptable options in §6.3: a *broker UDS with peer-cred check* is
+strictly better and should be the production path. Tmpfs is fine for
+a local single-tenant experiment, weak for anything multi-tenant.
+
+* 9. LiteLLM broker hardening (the unstable layer)
+  :PROPERTIES:
+  :CUSTOM_ID: litellm-hardening
+  :VALIDATED_AT: 2026-06-22T11:45Z
+  :VALIDATED_BY: claude-agent-litellm (independent sub-agent over docs + GitHub issues + CVE database)
+  :VERDICT: corrected
+  :FINDING: Several silent-clamp + fail-open + supply-chain risks the design originally assumed away.
+  :END:
+
+The handoff contract is only as strong as the broker. Independent
+research against the LiteLLM source, docs, and issue tracker turned up
+operational behaviours that change the threat model. Full operational
+hardening lives in [[file:../LITELLM-SETUP.org][LITELLM-SETUP.org]];
+this section captures the items the *RFC's threat model* depends on.
+
+** 9.1 Policy upper-bound clamps SILENTLY
+   :PROPERTIES:
+   :CUSTOM_ID: litellm-upperbound-silent
+   :END:
+
+=upperbound_key_generate_params= (under =litellm_settings= in
+=config.yaml=) caps =max_budget=, =budget_duration=, =duration=,
+=tpm_limit=, =rpm_limit=, =max_parallel_requests= on every
+=/key/generate=. *Excess values are silently clamped, not rejected* —
+the caller cannot detect that its requested TTL was reduced. Only
+=key_generation_settings.required_params= hard-fails on violation.
+
+**Threat-model consequence:** an untrusted broker cannot be relied on
+to set sane caps; the server-side upper bound is the *real* policy and
+must always be configured. Treat the broker as one of N tenants, not
+as the policy enforcer.
+
+** 9.2 Budget cascade is asymmetric
+   :PROPERTIES:
+   :CUSTOM_ID: litellm-budget-cascade
+   :END:
+
+- =team.max_budget ≤ org.max_budget= **enforced**
+  (=team_endpoints.py= L719-729 / L1573-1583).
+- =key.max_budget ≤ team.max_budget= **NOT enforced** — any key can
+  request the team ceiling.
+
+Map to our coordinator (CC-01): scope the *key* budget tightly per
+session (=$0.01= per the §8.7 run), don't rely on the team budget to
+limit per-session blast radius.
+
+** 9.3 Revocation is async against the auth cache
+   :PROPERTIES:
+   :CUSTOM_ID: litellm-revocation-async
+   :END:
+
+=POST /key/delete= is not synchronous against the in-memory
+=user_api_key_cache=. A request *already past auth* keeps running
+until completion; subsequent requests may briefly succeed on cached
+auth (#16646). =/team/delete= does NOT cascade-delete keys — they
+orphan with stale =team_id= and produce 403s on next use.
+
+**N4 calibration:** our negative test (key dead after teardown → 401)
+passed in §8.7 because the gap-in-window was tens of ms, but the
+contract should say "*eventually* 401 within cache-ttl" not
+"immediately 401". Belt-and-suspenders: short =duration= so TTL is
+the primary revocation, =/key/delete= the fast path.
+
+** 9.4 Guardrails fail-open by default
+   :PROPERTIES:
+   :CUSTOM_ID: litellm-guardrails-fail-open
+   :END:
+
+Detected violations fail *closed* (block the request). Provider
+errors / timeouts on the guardrail itself default to fail *open* —
+the request goes through. No global =on_flagged_action= switch
+(issue #19779 still open). Presidio fails open on analyzer error
+(#30728); =llm_as_a_judge= fails open on missing score (#30731).
+
+For prompt-injection→exfil testing (N7), this means a degraded
+guardrail is the same as no guardrail. Test the guardrails under
+fault injection alongside the main path.
+
+** 9.5 Concurrency: spend drift in multi-pod
+   :PROPERTIES:
+   :CUSTOM_ID: litellm-concurrency-drift
+   :END:
+
+Multi-pod deployments produce spend drift on ElastiCache (#30460,
+#26233) → either false 429s or budget over-spends. For accurate
+enforcement during the experiments, **run the LiteLLM proxy as a
+single pod** until the spend reconciliation work lands upstream.
+
+** 9.6 Supply chain — pin LiteLLM, audit CVEs
+   :PROPERTIES:
+   :CUSTOM_ID: litellm-supply-chain
+   :END:
+
+- *PyPI 1.82.7 and 1.82.8 shipped credential-harvesting malware*
+  ("TeamPCP", GHSA-5mg7-485q-xm76). Pin away from those exact
+  versions; lock to a known-good release with a published hash.
+- *CVE-2026-42208* — pre-auth SQLi on key-verify via crafted
+  =Authorization= header, exploited in the wild within 36h
+  (Sysdig). Fixed in =1.83.7=. Must be on ≥ 1.83.7.
+- *CVE-2026-49468* — host-header auth bypass on management routes.
+  Fixed in =1.84.0=.
+- *CVE-2026-35030* — OIDC userinfo cache-key collision (token[:20]).
+  Fixed in =1.83.0=.
+- Authed-RCE class (=/mcp-rest/test/connection=,
+  =/guardrails/test_custom_code=, =/prompts/test=,
+  =/config/update=) — never expose these on the public surface.
+- Pass-the-hash on =/v2/login= (GHSA-69x8-hrgq-fjj8) — unsalted
+  SHA-256.
+
+**Minimum bar:** =litellm >= 1.84.0=, pinned by SHA; the management
+admin routes bound to localhost only; reverse-proxy with strict
+=Host:= validation in front; rate-limit =/key/generate= at the
+reverse proxy; never expose the test/config endpoints.
+
+** 9.7 Auditing a leaked key
+   :PROPERTIES:
+   :CUSTOM_ID: litellm-audit
+   :END:
+
+If an ephemeral key escapes the sandbox: sha256 the =sk-…=, query
+=LiteLLM_VerificationToken.token= for owner + =last_active=;
+=GET /key/info?key=…= hashes server-side; SQL
+=LiteLLM_SpendLogs WHERE api_key=<hash>= for =requester_ip_address=
+and the full call history; then =POST /key/delete= or =/key/block=.
+The hashed-token design means the key value itself can be redacted
+from logs while attribution is preserved — wire the audit query into
+=gmake chaos-net= for N3.
+
+** 9.8 Stable-broker checklist (operator)
+   :PROPERTIES:
+   :CUSTOM_ID: litellm-broker-checklist
+   :END:
+
+1. =litellm >= 1.84.0=, pinned by hash; not 1.82.7 / 1.82.8.
+2. Bind admin routes to =127.0.0.1=; TLS-terminate at a reverse proxy
+   with strict =Host:= validation.
+3. =LITELLM_MASTER_KEY= from a vault, not committed; rotate quarterly,
+   rehearse on staging (regenerate has historical breakage:
+   =#11210=, =#17951=).
+4. =upperbound_key_generate_params= configured AND validated
+   client-side (silent clamp).
+5. =key_generation_settings.required_params= force =tags= (this one
+   hard-fails on violation).
+6. Per-key short =duration= (=15m=) and small =max_budget=; rely on
+   =expires= not on revoke calls.
+7. Single-pod deployment for accurate spend, or accept drift.
+8. Per-guardrail fail-closed audit (no global switch).
+9. DB backup of =LiteLLM_VerificationToken= + =LiteLLM_SpendLogs=.
+10. Rate-limit =/key/generate= at the reverse proxy.
+11. Monitor =/key/info=, =/team/info= for orphans after team deletes.
+12. Never expose =/config/update=, =/key/regenerate_master_key=,
+    =/mcp-rest/test/connection=, =/guardrails/test_custom_code=,
+    =/prompts/test=, =/v2/login= on the public surface.
+
+* 10. Cross-agent applicability — same contract, different =attach=
+  :PROPERTIES:
+  :CUSTOM_ID: cross-agent
+  :END:
+
+The handoff contract above is agent-agnostic. =guile-sage= happens to
+be the runtime here; the same =SessionSpec= + =CredentialBundle=
+applies to Claude Code CLI, OpenAI Codex CLI, OpenHands, Aider, or any
+agent that takes an OpenAI-compatible base URL + bearer key.
+
+What changes per agent is the =attach()= half of the lifecycle (§7 of
+the harness contract) — specifically how the =CredentialBundle.api_key=
+is presented to the agent's HTTP client. Examples:
+
+| Agent | Pointer back to LiteLLM | Throwaway-key wiring | Notes |
+|-------+-------------------------+----------------------+-------|
+| =guile-sage= | =SAGE_PROVIDER=openai=, =SAGE_OPENAI_BASE=http://$LITELLM_HOST/v1=, =SAGE_MODEL=<model>= | =SAGE_OPENAI_API_KEY=$(cat .key-handoff)= (transient assignment in sandbox; not exported) | What §8.7 ran. |
+| Claude Code CLI | =ANTHROPIC_BASE_URL=http://$LITELLM_HOST=, =ANTHROPIC_MODEL=<model>= | =ANTHROPIC_API_KEY=$(cat .key-handoff)= | LiteLLM speaks the Anthropic shape on =/anthropic/v1/messages=; bearer ephemeral key works the same. |
+| OpenAI Codex CLI / Aider / OpenHands | =OPENAI_API_BASE= or equivalent | =OPENAI_API_KEY=$(cat .key-handoff)= | Pure OpenAI-compat. |
+| Docker Sandboxes =sbx run= | =sbx policy allow network $LITELLM_HOST= + =sbx secret set LITELLM_KEY @.key-handoff= | the host-side proxy injects =Authorization: Bearer <secret>= into outbound HTTPS — *the sandbox never reads the raw token* | Strictly stronger than the file-based handoff this RFC ran. Best HC-04 conformance of any harness. |
+
+The =sbx= row (matrix row f) demonstrates the contract's value: the
+sandboxed agent makes authenticated requests to LiteLLM without the
+token ever materializing inside the sandbox. The =CredentialBundle=
+becomes an injection policy, not a payload. **This is the production
+shape we should target on macOS where =sbx= is available.**
+
+Comparison run (planned, not executed): mint one ephemeral key, run
+the same trivial completion call (a) under sandbox-exec with the
+tmpfs handoff, (b) under =sbx run= with =sbx secret=, both pointed at
+the LiteLLM proxy. Verify both return the same HTTP 200 + body and
+both keys are dead after teardown. Asserts the handoff contract is a
+real interface, not implementation-coupled.
+
+* 11. References
+  :PROPERTIES:
+  :CUSTOM_ID: references
+  :END:
 
 - [[file:002-sandbox-egress-credentials.org][RFC-002 — sandbox egress credentials]] (deferred; this advances it)
+- [[file:../SANDBOX-HARNESS-CONTRACT.org][SANDBOX-HARNESS-CONTRACT.org]] — stable harness contract this RFC operationalizes
 - [[file:../SANDBOX-AND-EGRESS.org][SANDBOX-AND-EGRESS.org]] — connection modes + platform sandboxing
 - [[file:../LITELLM-SETUP.org][LITELLM-SETUP.org]] — provisioning + ephemeral key API
 - [[file:../CHAOS-TESTING.org][CHAOS-TESTING.org]] — boundary/fault contract + taint
+- Docker Sandboxes (=sbx= CLI) — https://www.docker.com/products/docker-sandboxes/ + https://docs.docker.com/ai/sandboxes/
+- LiteLLM management API — http://$LITELLM_HOST/openapi.json
+- LiteLLM CVE bulletins — GHSA-5mg7-485q-xm76 (supply chain), CVE-2026-42208 (SQLi), CVE-2026-49468 (auth bypass)
