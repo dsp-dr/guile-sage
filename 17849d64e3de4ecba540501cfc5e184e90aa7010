@@ -1,0 +1,36 @@
+CPRR
+====
+Attribution: Claude Opus 4.7 (1M ctx), pair w/ Aidan Pace. The user
+  asked: pick a position on _queue location (in-repo vs efrit/XDG),
+  speculate on the LiteLLM-sandbox grind plan, and ACTUALLY run the
+  sbx: experiment with notes in docs/rfc/003-ephemeral-key-sandbox.org.
+
+Conjecture: §3's macOS footnote ("SBPL network filtering is coarse;
+  per-remote-host rules unreliable") is empirically true and the only
+  realistic confinement primitive on macOS for the LiteLLM hop is
+  full network-deny + UDS bridge — not (allow ... localhost:*).
+
+Validation (empirical, mini Darwin 25.4.0):
+  - sandbox-exec available + functional.
+  - FS confinement via (deny file-read* HOME) overlay: ROCK-SOLID
+    ($HOME/.zsh_history -> "Operation not permitted").
+  - (deny network*): all outbound 000. Reliable.
+  - (allow network-outbound (remote tcp "localhost:*")): LEAKED to
+    LAN (192.168.86.22:4000 -> 200). Variant 4 of §8.3 table.
+  - (remote ip "127.0.0.1:14000"): rejected at parse — "host must be
+    * or localhost".
+  Five SBPL variants tabulated in §8.3. Reproducer in tmp/sbx-exp/
+  (workspace-scoped, gitignored).
+
+Tests: doc + ledger only; gmake lint-docs PASS (0 errors). Ledger
+  now 50 records.
+
+Research:
+  - Did NOT mint a real ephemeral key (master key intentionally out
+    of scope) — used unauthed /health/liveliness as reachability
+    probe. The full §4 lifecycle still needs a broker stand-up.
+  - The reproducer used a 14-line Python TCP shim rather than socat
+    (not installed) — adequate for variant testing, not for the
+    UDS-based design the findings recommend.
+  - Q11 + Q12 added to docs/_queue/README.org capturing the position
+    and the SBPL-leak follow-up.
