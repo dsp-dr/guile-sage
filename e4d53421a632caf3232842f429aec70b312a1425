@@ -1,0 +1,38 @@
+CPRR
+====
+Attribution: Claude Opus 4.7 (1M ctx), pair w/ Aidan Pace. User
+  directive: "grind harder on LiteLLM (the unstable layer)" + "we
+  can't punt on the hard boundary negotiation and workflow" — so
+  run the real handoff, fold Docker Sandboxes, harden LiteLLM.
+
+Conjecture: the handoff contract is the load-bearing interface. The
+  sandbox mechanism (row a-f) is interchangeable; the
+  SessionSpec+CredentialBundle handshake must be sound regardless.
+  Run it for real on the most-available row (c, sandbox-exec) and
+  show it composes across agents and harnesses.
+
+Validation (live, mini Darwin 25.4.0, LITELLM_HOST=192.168.86.22:4000):
+  - Real /key/generate -> sk-***NJUw, 120s TTL, $0.01 budget,
+    gemini-2.5-flash scope. 26 bytes in /tmp/sbx-exp/.key-handoff
+    mode 0600.
+  - sandbox-exec probe with tight-handoff.sb: HC-01 ($HOME denied)
+    + HC-04 (tmpfs only, scrubbed) + auth chain (200/200/200) ✓.
+  - /key/delete returned {"deleted_keys":[...]} HTTP 200; same key
+    then 401 — N4 demonstrated, modulo §9.3 async-cache gap.
+  - Two independent sub-agents (Docker Sandboxes + LiteLLM
+    hardening) returned in parallel; their findings folded into §3
+    row (f) and §9 respectively.
+
+Tests: doc + ledger only; gmake lint-docs PASS (0 errors, 1 warning
+  unrelated). 54 ledger records.
+
+Research:
+  - sbx (Docker Sandboxes) GA 30 Jan 2026, brew tap, no Docker
+    Desktop required, hypervisor microVM, keychain-backed secret
+    injection by HOST proxy — best HC-04 candidate.
+  - LiteLLM CVE landscape 2024-2026 substantial: pin >=1.84.0 by
+    hash, NEVER 1.82.7/1.82.8 (supply-chain malware).
+  - Limits this run did NOT exceed: HC-02/03 (egress allowlist
+    correctness — §8.4 showed SBPL localhost-narrowing leaks LAN);
+    HC-05/06; N1/N3/N5/N6/N7. Tabulated in §8.7 with explicit next
+    probes.
