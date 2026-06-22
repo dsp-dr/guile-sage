@@ -72,9 +72,9 @@ Properties this buys:
   expires in minutes, reaches only the proxy.
 - Provider keys never exist inside the blast radius at all.
 
-** 2.1 Test coordinator — identity provisioning (org → team → user → key)
+** 2.1 Session Issuer — identity provisioning (org → team → user → key)
 
-The broker is realized by a *test coordinator* that owns the LiteLLM side of
+The broker is realized by a *session issuer* that owns the LiteLLM side of
 every spin-up. Per session it provisions a full identity chain (not a bare key)
 via the management API (=http://$LITELLM_HOST/openapi.json=) so spend, scope and
 audit attribute to the right agent and sandbox class:
@@ -82,7 +82,7 @@ audit attribute to the right agent and sandbox class:
 #+begin_src mermaid
 %% style: https://wal.sh/research/diagram-style-guide#org010b7ab
 flowchart LR
-    TC["Test Coordinator<br/>(master key)"]
+    TC["Session Issuer<br/>(master key)"]
     TC -->|"POST /organization/new"| ORG["org = guile-sage"]
     TC -->|"POST /team/new<br/>+ /team/model/add"| TEAM["team = sandbox class<br/>(bastille|podman|sbx|docker|appsandbox)<br/>models + budget"]
     TC -->|"POST /user/new"| USER["user = agent identity<br/>(attribution)"]
@@ -95,9 +95,9 @@ flowchart LR
   *key* = the ephemeral, scoped credential handed to the sandbox. Teardown
   revokes the key (=POST /key/delete=); org/team/user persist for audit.
 
-** 2.2 Coordinator drives spin-up; methodology deferred to experiments
+** 2.2 Issuer drives spin-up; methodology deferred to experiments
 
-The coordinator also signals each harness to apply its environment / filesystem /
+The issuer also signals each harness to apply its environment / filesystem /
 egress constraints — but *those semantics differ per mechanism* (=pf= vs
 netavark vs SBPL vs docker-net vs entitlements; nullfs vs bind-mount vs
 =deny file*=; unix socket vs tmpfs). *This RFC does not pick a methodology.* Each
@@ -496,7 +496,7 @@ Conformance demonstrated against the harness contract (sandbox-exec /
 | HC-07 Exec, not inherit | ✓ (by absence) | shell =exec= chain; key in cwd file, not env |
 | CC-01 Scoped + TTL + budget | ✓ | =models=[gemini-2.5-flash], duration=120s, max_budget=0.01 |
 | CC-02 Revoke on teardown | ✓ | =POST /key/delete= returned =deleted_keys= |
-| CC-03 Master key never leaves coordinator | ✓ | only ephemeral wrote to the handoff file |
+| CC-03 Master key never leaves issuer | ✓ | only ephemeral wrote to the handoff file |
 | N4 Use after teardown → 401 | ✓ | same key 200 → 401 after =/key/delete= |
 
 Still NOT demonstrated by this run (parked in [[file:../_queue/README.org::*Q10][_queue Q10]] + new
@@ -561,7 +561,7 @@ as the policy enforcer.
 - =key.max_budget ≤ team.max_budget= **NOT enforced** — any key can
   request the team ceiling.
 
-Map to our coordinator (CC-01): scope the *key* budget tightly per
+Map to our issuer (CC-01): scope the *key* budget tightly per
 session (=$0.01= per the §8.7 run), don't rely on the team budget to
 limit per-session blast radius.
 

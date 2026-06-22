@@ -6,7 +6,7 @@
 
 #+begin_quote
 Status: *STABLE contract, methodology DEFERRED.* This document fixes the
-interface between the *test coordinator* and the five *sandbox harnesses* so the
+interface between the *session issuer* and the five *sandbox harnesses* so the
 build/experiment teams can work independently. The per-platform *methodology*
 (exact pf/SBPL/netavark/docker-net/entitlement rules) is intentionally left to
 each harness team's experiments — see [[file:rfc/003-ephemeral-key-sandbox.org][RFC-003]] for rationale and diagrams.
@@ -25,11 +25,25 @@ report those, not "I made a sandbox." (This reframing is direct feedback from
 the first implementation team; see §9–§10.)
 #+end_quote
 
+* 0. Nomenclature
+  :PROPERTIES:
+  :CUSTOM_ID: nomenclature
+  :END:
+
+This document uses *Issuer* (OIDC-style) for the role formerly called
+"coordinator" / "test coordinator" in early drafts. The Issuer is the
+trusted process that holds the LiteLLM master key, mints scoped
+ephemeral =CredentialBundle=s per session, attaches them to a
+harness, and revokes on teardown. The =CC-01..04= codes in §5
+predate the rename ("CC" originally = Coordinator Capability); they
+are kept as stable identifiers — read them now as *Issuer Capability*
+codes.
+
 * 1. Roles
 
 | Role | Who | Trust | Owns |
 |------+-----+-------+------|
-| *Test coordinator* | one shared component | trusted | LiteLLM master key; org→team→user→key provisioning; lifecycle + revocation; audit |
+| *Session Issuer* | one shared component | trusted | LiteLLM master key; org→team→user→key provisioning; lifecycle + revocation; audit |
 | *Sandbox harness* (×5) | one team per mechanism | builds the boundary | platform confinement: fs, egress, secret handoff, exec, teardown signal |
 | *guile-sage* | the agent | *untrusted* | the workspace + the ephemeral key |
 
@@ -43,9 +57,9 @@ Harness slots (owners TBD by the teams):
 | =docker-macos= | macOS | Docker Desktop + net policy |
 | =appsandbox= | macOS | native App Sandbox |
 
-* 2. Provisioning chain (coordinator side)
+* 2. Provisioning chain (issuer side)
 
-Per session, the coordinator provisions a full identity chain via the LiteLLM
+Per session, the issuer provisions a full identity chain via the LiteLLM
 management API (=http://$LITELLM_HOST/openapi.json=) and revokes the key at
 teardown:
 
@@ -60,9 +74,9 @@ teardown:
 org/team/user are reused across sessions (idempotent find-or-create); only the
 *key* is per-session and ephemeral.
 
-* 3. Handoff schema (coordinator → harness)
+* 3. Handoff schema (issuer → harness)
 
-The coordinator hands each harness a =SessionSpec= and a =CredentialBundle=.
+The issuer hands each harness a =SessionSpec= and a =CredentialBundle=.
 Field names are normative; transport is the harness's choice (must satisfy
 HC-04).
 
@@ -100,19 +114,19 @@ Every harness, regardless of mechanism, MUST guarantee:
   *never* an environment variable, *never* on durable disk; gone at teardown.
 - *HC-05 No provider key* — no upstream provider credential is reachable from
   inside the sandbox (only the ephemeral LiteLLM key exists).
-- *HC-06 Teardown signal* — on agent exit (or coordinator request) the harness
-  destroys the sandbox (tmpfs/socket gone) and notifies the coordinator so the
+- *HC-06 Teardown signal* — on agent exit (or issuer request) the harness
+  destroys the sandbox (tmpfs/socket gone) and notifies the issuer so the
   key is revoked. Must run even on crash (trap/OnStop/ExecStopPost).
 - *HC-07 Exec, not inherit* — sage is =exec='d so the credential lives only in
   its address space and is not inherited by child processes.
 
-* 5. Coordinator obligations
+* 5. Issuer obligations
 
 - *CC-01* Mint keys scoped to the session's team models, with a short =duration=
   (TTL), a =max_budget=, and =rpm/tpm= limits; tag =metadata.session=.
 - *CC-02* Revoke (=/key/delete=) on teardown; an orphan-reaper deletes keys whose
   session is no longer active. TTL + budget are independent backstops.
-- *CC-03* The master key never leaves the coordinator; the sandbox only ever sees
+- *CC-03* The master key never leaves the issuer; the sandbox only ever sees
   an ephemeral key (CC-01).
 - *CC-04* Attribute spend/audit via org/team/user; expose per-session logs.
 
@@ -143,7 +157,7 @@ language/transport is the team's choice):
 - =provision(SessionSpec) -> handle= — create the confined environment.
 - =attach(handle, CredentialBundle) -> exec= — inject the key (HC-04) and run
   sage against =api_base=.
-- =teardown(handle) -> revoked= — destroy + signal the coordinator (HC-06).
+- =teardown(handle) -> revoked= — destroy + signal the issuer (HC-06).
 
 * 8. What is deferred (do NOT standardize yet)
 

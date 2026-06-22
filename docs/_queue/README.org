@@ -286,6 +286,68 @@ Per [[file:../rfc/003-ephemeral-key-sandbox.org::*Auditing a leaked key][RFC-003
   teardown. Wire =/spend/logs?api_key=<hash>= into the chaos
   harness as the canonical attribution path.
 
+* Q17 — =sbx login= blocker for the cross-harness comparison run
+  :PROPERTIES:
+  :CUSTOM_ID: q17-sbx-login-blocker
+  :STATUS: open
+  :KIND: prerequisite
+  :OWNER: operator
+  :END:
+
+=sbx= (Docker Sandboxes CLI v0.33.0) installed via =brew install
+docker/tap/sbx=. Every command (=sbx list=, =sbx run=, =sbx exec=)
+fails with =ERROR: Not authenticated to Docker= until =sbx login= runs.
+=sbx login --username <name> --password-stdin= is non-interactive but
+requires a Docker Hub PAT in env. No PAT in env on =mini=.
+
+To unblock the comparison ([[file:q14-sbx-eval][Q14]] — same call
+under =sandbox-exec= tmpfs vs =sbx run= + =sbx secret=): export
+=DOCKER_HUB_TOKEN= (or a scoped PAT), then =echo "$DOCKER_HUB_TOKEN" |
+sbx login --username <user> --password-stdin=. Verify with =sbx ls=
+(should list zero sandboxes, no auth error).
+
+* Q18 — Import recipes from =wal.sh/research/agent-sandbox-practical-configs/=
+  :PROPERTIES:
+  :CUSTOM_ID: q18-import-practical-configs
+  :STATUS: open
+  :KIND: docs-ingest
+  :OWNER: any-agent
+  :END:
+
+The practical-configs piece (Jun 19, 2026) contains tested
+recipes the user pointed us at:
+- =bastille bootstrap 15.0-RELEASE= + =bastille cmd $NAME= drive
+  pattern → matches RFC-003 row (a), should be referenced verbatim
+  in the FreeBSD-jails section once the harness team picks up.
+- =sandbox-exec -f agent-sandbox.sb= recipe for the macOS row (c) —
+  our §8.3 SBPL variants overlap; reconcile differences and adopt
+  the upstream pattern where stronger.
+- WASM tier (Deno/wasmtime/Pyodide/MicroPython) is *not* in our
+  RFC-003 matrix; consider adding row (g) "WASM agent runtime" if
+  it's a fit for any guile-sage workload.
+
+Action: cross-reference each command set against RFC-003 §3 +
+SANDBOX-HARNESS-CONTRACT.org; file deltas as a follow-up RFC if the
+upstream recipe is materially stronger than what's currently in our
+matrix.
+
+* Q19 — Nomenclature swap landed: "coordinator" → "Issuer"
+  :PROPERTIES:
+  :CUSTOM_ID: q19-nomenclature-issuer
+  :STATUS: closed
+  :KIND: docs
+  :OWNER: claude-agent
+  :END:
+
+Per user request ("find a better word / nomenclature for this as a
+role / workflow"): renamed all 18 occurrences across
+=docs/rfc/003-ephemeral-key-sandbox.org= and
+=docs/SANDBOX-HARNESS-CONTRACT.org=. The OIDC term =Issuer= is
+shorter, standard, and verb-clear (the artifact is the
+=CredentialBundle=; the verb is =issue=). The =CC-01..04= codes were
+retained ("CC" = Credential-Capability / Coordinator-legacy) to avoid
+breaking conformance cross-references.
+
 * Q16 — Make LITELLM-SETUP.org the operator hardening manual
   :PROPERTIES:
   :CUSTOM_ID: q16-litellm-setup-hardening
