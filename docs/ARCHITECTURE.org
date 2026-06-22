@@ -4,6 +4,11 @@
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 
+#+begin_quote
+All diagrams in this document follow the project diagram style guide:
+[[https://wal.sh/research/diagram-style-guide#org010b7ab][wal.sh/research/diagram-style-guide]].
+#+end_quote
+
 * 1. C4 Level 1 --- System Context
 
 #+BEGIN_SRC plantuml :file images/arch-c4-l1.png
@@ -587,14 +592,25 @@ Goal: replace all shell calls with pure Guile or native bindings.
 
 | Module       | Shell usage                          | Status  | Alternative             |
 |--------------+--------------------------------------+---------+-------------------------|
-| util.scm     | =curl= for HTTPS POST/streaming      | TODO    | =(web client)= + gnutls |
-| mcp.scm      | =curl -sN= + FIFO for SSE            | BLOCKED | Guile HTTP bug (Accept) |
-| mcp.scm      | =mkfifo= for named pipe               | BLOCKED | Guile pipe bug (macOS)  |
+| util.scm     | libc =(system)= + curl (POST/stream/GET) | BLOCKED | spawn-primitive SIGSEGV (see below) |
+| mcp.scm      | libc =(system)= + curl -sN + FIFO for SSE | BLOCKED | spawn-primitive SIGSEGV (see below) |
+| mcp.scm      | libc =(system "mkfifo …")=            | BLOCKED | spawn-primitive SIGSEGV (see below) |
 | tools.scm    | =git= commands                        | TODO    | libgit2 bindings        |
 | tools.scm    | =grep=, =find=                        | TODO    | pure Guile search       |
 | agent.scm    | =bd= commands                         | TODO    | beads Guile API         |
-| config.scm   | =mkdir -p= for dir creation           | TODO    | =(mkdir ...)= recursive |
+| config.scm   | =mkdir -p= via =primitive-fork=+execlp | OK     | child execs before GC; safe |
 | context.scm  | (none --- pure Guile)                 | DONE    | ---                     |
+
+The =BLOCKED= rows are *not* candidates for a "native Guile" rewrite. On this
+build (FreeBSD =guile3= 3.0.10, BDW-GC + finalizer/signal threads) every
+Guile-native spawn primitive --- =system*=, =open-pipe*=, =open-input-pipe= ---
+SIGSEGVs when it forks the already-threaded, GC'd VM. Only libc =(system …)= is
+safe (a bare =primitive-fork= survives only if the child execs/exits before
+allocating, which is why =mkdir= via fork is OK). The libc =(system …)= + FIFO
+pattern is therefore the *correct* implementation, not a stopgap. Full
+spawn-primitive safety matrix and the validated conjecture:
+[[file:CHAOS-TESTING.org][docs/CHAOS-TESTING.org § First-principles finding]].
+This is a hard codebase boundary (see § 16).
 
 * 12. Session State
 
@@ -640,3 +656,73 @@ subdirectories under each base:
 ~/.cache/sage/      (cache)
 ~/.local/state/sage/ (state)
 #+END_SRC
+
+* 14. HTTP Transport & Resilience
+
+All HTTP egress routes through =curl= via libc =(system …)= (see § 11 for the
+spawn rationale), with one consistent timeout/retry policy across every
+provider. The boundary contract lives in
+[[file:CHAOS-TESTING.org][docs/CHAOS-TESTING.org]]; this is the architectural
+summary.
+
+| Route                     | Function (util.scm)        | Timeout            | Retry |
+|---------------------------+----------------------------+--------------------+-------|
+| Startup model probe       | =http-get= (=*-list-models=) | =--connect-timeout 5= | none (fail fast) |
+| Chat completion           | =http-post-with-timeout=   | connect 5s, total bounded | 429/5xx, backoff |
+| Streaming chat            | =http-post-streaming-curl= (FIFO) | =--connect-timeout 5= | none |
+| MCP JSON-RPC / SSE        | =mcp-post= / =sse-open-connection= | =--connect-timeout 5= | none |
+
+- *Connect timeout:* every request fails fast (~5s) if the host is
+  unreachable, so a black-holed backend can never hang startup.
+- *Backoff:* =http-post-with-timeout= retries *429* and *5xx* with exponential
+  backoff (0.5s, 1s, …), capped by =SAGE_HTTP_MAX_RETRIES= (default 2; 0 = off).
+  Connection failures (code 0) and the startup probe are deliberately *not*
+  retried --- each retry costs another full connect-timeout, so a down host
+  surfaces a clean error immediately.
+- *Predicate:* =http-retryable-code?= (429 + 5xx) is the single source of truth
+  for what is transient vs. permanent.
+
+* 15. Provider Error Normalization
+
+Ollama, Gemini, and OpenAI-shape backends fail *identically* from the user's
+view. Every non-200 (or unparseable) response is mapped to a single clean
+assistant line --- never a thrown raw body, never a stray Scheme value --- and
+the REPL stays live.
+
+- Format: =[<Provider> <label>: <msg>]=, e.g.
+  =[Gemini authentication failed (invalid/expired API key): …]=.
+- Labels encode permanence: =connection failed= (0), =authentication failed=
+  (401/403), =model not found= (404), =rate limited= (429), =server error=
+  (5xx), =request failed (HTTP N)= (other).
+- Implementations: =gemini-error-response= / =ollama-error-response= /
+  =openai-error-response=. Full body is logged (=SAGE_DEBUG_HTTP=1= →
+  =.logs/http.jsonl=); only the one-line summary reaches the screen.
+- Ollama 404 keeps its dedicated =model-not-found= path (REPL renders an
+  =ollama pull= hint).
+- Streaming surfaces errors too: an empty stream falls back to one
+  non-streaming request so a bad key still yields the clean message.
+- The REPL chat catch-all prints one trimmed red line, never the raw =args=.
+
+* 16. Tool Result Taint Boundary
+
+All bytes originating outside the process --- file reads, grep, =git log=,
+fetched URLs, and *MCP server responses* --- are *untrusted data, never
+instructions*.
+
+- *Single choke point:* every tool call (native AND MCP) returns through
+  =execute-tool= → =guard-tool-result= → =wrap-tool-result=, so nothing reaches
+  the model un-wrapped.
+- *Envelope:* =<tool-result safe="false">= over (for fetches)
+  =<fetch-result trust="untrusted" sha256=… bytes=…>= over a =CDATA= section.
+  =escape-cdata= splits any =]]>= in the body (=]]]]><![CDATA[>=) so a payload
+  cannot close the section and break into instruction context.
+- =safe="true"= only for read-only built-ins (§ 6 safe-tools); everything else
+  (MCP, =fetch_url=, =search_files=) is =safe="false"=.
+- *Contract prose:* =*tool-result-system-prompt*= (repl.scm) tells the model
+  the block is untrusted data, not commands.
+- *Trust lattice* (=provenance.scm=): =untrusted < provider < local < verified=;
+  ingress is recorded with source + SHA-256.
+- Model/provider output stays trusted by design (it drives the agent loop);
+  network/filesystem ingress does not. Verified against the wal.sh injection
+  page and =test-prompt-injection= / =test-shell-injection= / =test-security=.
+  See [[file:CHAOS-TESTING.org][docs/CHAOS-TESTING.org § hostile/tainted]].
