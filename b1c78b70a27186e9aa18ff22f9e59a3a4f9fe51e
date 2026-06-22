@@ -1,0 +1,27 @@
+CPRR
+====
+Attribution: Claude Opus 4.7 (1M ctx), pair w/ Aidan Pace. Triggered by
+  a stack of pre-release goals: tests/PBT/UAT clean, toxiproxy chaos,
+  docs aligned with claim/status annotations per the wal.sh annotation-
+  systems piece, with sub-agent independent verification.
+
+Conjecture: the highest-leverage durable artifact in this sweep is the
+  annotation contract itself, not any one drift fix — once headings
+  carry :CUSTOM_ID: + drawer annotations and verifications append to a
+  ledger, /any/ future drift becomes detectable rather than surprising.
+
+Validation: full `gmake check` clean (exit 0, every suite green). PBT
+  76/76 over 7600 trials. Toxiproxy registered + scenario 1 (proxy
+  disabled) exercised; uncovered a real bug in scripts/toxiproxy-chaos.sh
+  (hardcodes guile3, no fallback to guile — filed). Tmux UAT session
+  alive on gemini-2.5-flash (dotenv overrode shell env, expected).
+  Sub-agent audit on docs/ARCHITECTURE.org returned 4 drifts + ~20
+  verified-correct claims, encoded as drawer annotations under §6.
+
+Tests: contract pinned in this doc; ledger writer not yet implemented;
+  `bd reconcile-ledger` planned. Next bite: land ARCH corrections,
+  spread :CUSTOM_ID: to MCP/HOOKS/SKILLS/TELEMETRY contracts.
+
+Research: dotenv → *config* hash precedence over getenv means UAT
+  against ollama via toxiproxy needs either an alt-.env or explicit
+  config-load-dotenv arg; current invocation reverts to gemini.
