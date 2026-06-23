@@ -1,0 +1,130 @@
+#+TITLE: Plan: a CLJ/CLJS local agent-observability wrapper ("lapdog-cljs")
+#+AUTHOR: claude-agent (paired w/ jwalsh)
+#+DATE: 2026-06-23
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+A Clojure/ClojureScript, LAN-local, no-SaaS live dashboard for AI
+coding agents (Claude Code, guile-sage, any harness). Reference model:
+Datadog *lapdog*. Storage thesis: ClickHouse "thousands of agents, not
+one". Shared-state model: our =shared-repl-gossip= nREPL-as-shared-heap.
+
+* 1. What we verified (2026-06-23, mini)
+
+- *Datadog lapdog* = a local-first CLI wrapping the Datadog APM
+  *test-agent* (=ddapm-test-agent=). Installed =brew install
+  datadog/lapdog/lapdog= → v1.62.0. =lapdog start= ran a background
+  Python agent on =127.0.0.1:8126= (=/info=) + OTLP receivers on
+  =:4317= (gRPC) and =:4318= (HTTP). A test OTLP/HTTP trace POST to
+  =:4318/v1/traces= returned *200*. Stopped clean.
+- Commands: =lapdog start|stop|status=, =lapdog claude|codex|pi=,
+  =lapdog <any app>=. Per-agent intercept: Claude Code gets an
+  auto-installed plugin (non-blocking =curl= hooks) *plus a
+  model-request proxy*; tags each span with =git.commit.sha= of HEAD.
+- *We will NOT adopt lapdog as-is*: its dashboard is single-user dev
+  (static page hitting =localhost:8126=), and the model-request proxy
+  sits in the live LLM path. We build the CLJS equivalent and keep the
+  collector as the seam.
+- Gotcha logged: PyPI =lapdog= (0.18.10) is an unrelated Broad
+  Institute genomics tool — *not* Datadog's. Use the brew tap or
+  =pipx install ddapm-test-agent=.
+
+* 2. Grounding in our own research
+
+- =docs/reports/20260414-agent-observability.org=: industry uses
+  *traces/spans*, not counters; *OTEL GenAI semantic conventions
+  v1.37+* are the lingua franca (=gen_ai.operation.name=,
+  =gen_ai.conversation.id=, =gen_ai.usage.*_tokens=, =execute_tool=);
+  *OpenInference* span kinds (AGENT/TOOL/CHAIN/LLM) map onto our
+  agents; raw OTLP is the right call for a non-mainstream runtime.
+- =wal.sh/_drafts/shared-repl-gossip=: one shared heap, many
+  observers (humans via CIDER, agents via tmux, monitors via WS).
+  *The ingest atom IS the live store*; the WS dashboard and CIDER are
+  two views of the same heap.
+- ClickHouse blog: human-in-control, agents-as-workers; complete
+  *unsampled* event history in columnar storage, queried by SQL
+  (=SELECT service, quantile(0.99)(duration_ms) FROM spans …=). The
+  dashboard layout mirrors their diagram: agent task lanes +
+  human-pinned charts + AI-ranked spans.
+
+* 3. Architecture
+
+#+begin_src dot :tangle diagrams/obs/pipeline.dot :mkdirp yes :file images/obs-pipeline.png :cmdline -Tpng :exports both
+// render: dot -Tpng diagrams/obs/pipeline.dot -o images/obs-pipeline.png
+digraph obs {
+  rankdir=LR; node[fontname="Helvetica",fontsize=10,shape=box,style=filled,fillcolor="#eef2ff"]; edge[fontname="Helvetica",fontsize=9];
+  cc[label="Claude Code\n(OTLP + hooks)",fillcolor="#ffedcc"];
+  gs[label="guile-sage\n(OTLP native)",fillcolor="#ffedcc"];
+  ll[label="LiteLLM\n(OTLP)",fillcolor="#ffedcc"];
+  col[label="bb/clj ingest\nOTLP/HTTP :4318",fillcolor="#c7efd0"];
+  atom[label="shared heap (atom)\nsessions→turns→tool-trees\n+ cost rollup + git.sha",shape=note,fillcolor="#fff0cc"];
+  ch[label="ClickHouse\nspans/events (history, SQL)",fillcolor="#cfe3ff"];
+  prom[label="nexus Prometheus\ncounters (RED, token/s, $/min)",fillcolor="#cfe3ff"];
+  ws[label="CLJ WS bridge\n(http-kit)",fillcolor="#c7efd0"];
+  ui[label="CLJS dashboard\n(shadow-cljs/reagent)\nagent lanes + pinned charts",fillcolor="#e9f7ee"];
+  cider[label="CIDER (human)",fillcolor="#e6f0ff"];
+  cc->col; gs->col; ll->col;
+  col->atom; atom->ch[label="batch insert"]; col->prom[label="counters",style=dashed];
+  atom->ws[label="deltas"]; ws->ui[label="WebSocket"]; ch->ws[label="SQL (history)"];
+  atom->cider[label="nREPL inspect",style=dotted];
+}
+#+end_src
+
+Two paths, deliberately split:
+- *Live tail* (low latency): agent → =:4318= → ingest atom → WS push →
+  CLJS. Sub-second tiles.
+- *History/SQL* (high cardinality): ingest → ClickHouse events table →
+  WS bridge runs parameterized SQL on demand (the agent-queryable
+  surface from the ClickHouse thesis).
+- *Counters* stay on the existing nexus Prometheus path (token/s,
+  $/min, error rate) — NOT on the dashboard critical path.
+
+* 4. What the wrapper adds over raw OTLP
+
+OTLP alone gives spans + token counters + latency. The CLJ enrichment
+stage adds the *lapdog-grade* value:
+1. *Session reconstruction* — group spans by =gen_ai.conversation.id=
+   into turn trees.
+2. *Tool-call trees* — parent/child from span links/IDs.
+3. *Cost rollups* — tokens × model pricing (real $ for LiteLLM/gemini;
+   $0 for local ollama).
+4. *Prompt/response capture* — NOT in stock Claude Code OTLP. Use
+   *Claude Code hooks* (=PreToolUse=/=PostToolUse=/=Stop= → non-blocking
+   =curl= to the ingest) rather than a key-intercepting proxy. guile-sage
+   emits these natively (we own it).
+5. *git correlation* — tag every session with =git.commit.sha= of HEAD
+   (lapdog's trick).
+
+* 5. Phasing
+
+| Phase | Deliverable | Tooling | Verify |
+|-------+-------------+---------+--------|
+| 1 | =bb= OTLP/HTTP receiver (:4318) → atom → WS broadcast | babashka + http-kit | POST a GenAI span, see it on a WS client |
+| 2 | CLJS dashboard: live agent lanes + token/s + $ tiles | shadow-cljs + reagent | open ws://mini.lan:PORT, watch a live guile-sage run |
+| 3 | Session/tool-tree reconstruction + cost engine | clj | a multi-tool turn renders as a tree with $ |
+| 4 | ClickHouse events sink + SQL history panel | clickhouse-local or container | run the diagram's p99 SQL from the UI |
+| 5 | Claude Code hooks for prompt/response capture | settings.json hooks | a tool call shows its prompt body in the UI |
+
+Phase 1 is ~1 babashka file and runnable today; both Claude Code and
+guile-sage already emit OTLP so there is no agent change to start.
+
+* 6. Open decisions
+
+- *ClickHouse vs. keep-it-simple*: Phase 1–3 need no ClickHouse (atom +
+  ring buffer). Add CH (Phase 4) only when history/SQL across many runs
+  is wanted. Don't front-load it.
+- *Port*: our receiver should be OTLP/*HTTP* (=:4318=) — the =/debug=
+  finding showed Claude Code's OTLP *gRPC* export hangs while HTTP
+  works. Pick a non-:4318 local port to avoid colliding with lapdog/
+  nexus conventions (e.g. =:4319=) and set the agent's endpoint to it.
+- *Where it lives*: new repo =agent-obs-cljs= vs. =mini-setup= (infra)
+  vs. =guile-sage/observability=. Leaning new repo; it serves all
+  harnesses, not just guile-sage.
+
+* 7. References
+
+- Datadog lapdog README: https://github.com/DataDog/dd-apm-test-agent (lapdog/)
+- ClickHouse: https://clickhouse.com/blog/the-future-of-observability-not-one-proprietary-ai-agent-thousands-by-teams
+- =docs/reports/20260414-agent-observability.org= — OTEL GenAI survey
+- =wal.sh/_drafts/shared-repl-gossip= — shared-heap model
+- OTEL GenAI semantic conventions v1.37+ (=gen_ai.*=)
