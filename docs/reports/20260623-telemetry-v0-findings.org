@@ -1,0 +1,124 @@
+#+TITLE: Telemetry v0 — isolated guile-sage→lapdog test + the contract to verify next
+#+AUTHOR: claude-agent (paired w/ jwalsh)
+#+DATE: 2026-06-23
+#+OPTIONS: toc:2 num:t ^:nil
+#+STARTUP: overview
+
+#+begin_quote
+*v0 finding.* Isolated the telemetry path to one LLM-free hop
+(guile-sage → lapdog, no LiteLLM, no Gemini — a trivial =(+ 1 0 40 1)=
+"workload"). The pipeline enables, records counters, and POSTs 200 —
+*but a spec-strict OTLP/HTTP receiver reads 0 metrics* because the flush
+omits =Content-Type: application/json=. This is a conformance gap to
+the OTLP/HTTP contract, not a guile-sage logic bug. Document v0 here;
+the next pass studies the defined provider contracts.
+#+end_quote
+
+* 1. The isolated test
+
+Deliberately minimal — no LiteLLM, no real model call (avoid the
+feature dot-product):
+
+#+begin_src scheme :eval no
+(use-modules (sage telemetry))
+(setenv "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT" "http://127.0.0.1:4318/v1/metrics")
+(telemetry-init)
+(inc-counter! "session.count" '() 1)
+(inc-counter! "token.usage" '(("model" . "calc")("type" . "output")) (+ 1 0 40 1)) ; 42
+(telemetry-flush!)
+#+end_src
+
+Receiver: =lapdog= (=ddapm-test-agent= v1.62.0) on =:4318=.
+
+* 2. What works (verified)
+
+| Step | Result |
+|------+--------|
+| =telemetry-init= | =enabled? = #t=, endpoint resolved to =http://127.0.0.1:4318/v1/metrics= |
+| =inc-counter!= | records into =*counters*= — 2 entries: =token.usage=42=, =session.count=1= (=hash-count= = 2) |
+| payload build | well-formed =OTLP/JSON=: ={"resourceMetrics":[{"resource":{"attributes":[…16 attrs…]},…}]}= |
+| HTTP transport | =POST /v1/metrics → 200= (guile-sage shells out via curl; UA =curl/8.7.1=) |
+| flush return | =#<unspecified>= — *this is success* (=log-debug= returns unspecified on the 2xx branch; not a failure) |
+
+* 3. What's broken (the v0 finding)
+
+=lapdog= logs: =received /v1/metrics payload with 0 resource metric(s)
+containing 0 metric(s)= — despite guile-sage sending a non-empty
+=resourceMetrics= array.
+
+*Root cause:* =telemetry-flush!= calls =(http-post-with-timeout
+*endpoint* body 2)= with *no headers*. =http-post-with-timeout=
+defaults =#:key (headers '())= and forwards that empty list to
+=http-post-curl=, so the request carries *no =Content-Type:
+application/json=*. Per the OTLP/HTTP spec, a JSON payload MUST be
+=application/json=; without it a strict receiver (ddapm-test-agent)
+falls back to protobuf parsing and reads zero.
+
+*Why it "worked" before:* the nexus otelcol is lenient and likely
+sniffed the JSON; ddapm-test-agent is strict. This is exactly the
+value of testing against a second, stricter receiver.
+
+** 3.1 The one-line fix (proposed, not yet landed)
+   The flush should send the content type:
+   =(http-post-with-timeout *endpoint* body 2 #:headers '((content-type . "application/json")))=
+   — then re-run §1 and confirm lapdog logs =2 metric(s)=. (Verify the
+   exact header alist shape =http-post-curl= expects; other call sites
+   pass ='(content-type application/json)=.)
+
+* 4. lapdog as a contract-analysis instrument
+
+lapdog records everything received — usable as a *wire-contract ledger*
+for comparing what each harness emits:
+
+| Source | What it gives |
+|--------+---------------|
+| =~/.lapdog/lapdog.log= | per-request: =received /v1/metrics payload with N resource metric(s)= + an =aiohttp.access= line (size, status, UA) for EVERY POST |
+| =GET :8126/test/traces= (200) | captured APM traces (JSON) |
+| =GET :8126/test/session/start= (200) | session snapshot/VCR boundary — the test-agent's record/replay mechanism |
+| OTLP receivers =:4317/:4318= | accept + count resource metrics (the strict-parse signal that caught our gap) |
+
+So: point each harness at lapdog, do one action, read the log — the
+delta IS the harness's emitted contract.
+
+* 5. The defined contracts to study next ("go back")
+
+v0 surfaced that each layer has a *defined contract* we haven't checked
+against:
+
+1. *OTLP/HTTP* — https://opentelemetry.io/docs/specs/otlp/ : Content-Type
+   (=application/json= vs =application/x-protobuf=), the
+   =resourceMetrics → scopeMetrics → metrics= shape, sum/gauge
+   temporality. (This is the v0 gap.)
+2. *OTEL env-var spec* — =OTEL_EXPORTER_OTLP_ENDPOINT/_PROTOCOL=, etc.
+   (see =mini-setup/docs/telemetry-env-contract.org= B1–B4).
+3. *Per-harness lapdog wrapper contracts* — lapdog ships a dedicated
+   integration module per harness:
+   =backfill_claude.py=, =backfill_codex.py=, =backfill_pi.py=. Each is
+   "a landed PR's worth" of wrapper support, encoding what that harness
+   exposes and how lapdog hooks it (Claude Code plugin + hooks; Codex
+   JSONL + proxy; Pi TS extension). *These are the reference contracts
+   for adding guile-sage support* — read them to see the expected
+   shape, then either emit-to-match or write a guile-sage backfill.
+4. *Datadog ddtrace / LLMObs* — the =DD_*= + =TRACEPARENT= surface
+   lapdog injects (see the telemetry-env-contract gist).
+
+* 6. v0 status + next step
+
+- *guile-sage emitter*: enables + records + transports correctly. One
+  conformance gap: missing =Content-Type= on the flush. *No
+  architectural change needed* — a header fix.
+- *Next*: (a) land the Content-Type fix + re-verify against lapdog;
+  (b) read =backfill_{claude,codex,pi}.py= to extract the per-harness
+  wrapper contract; (c) decide guile-sage's path — emit-to-match-OTLP
+  vs. a guile-sage lapdog backfill.
+- Reproducer scripts: =/tmp/tele-test*.scm= (this session);
+  promote to =tests/test-telemetry-otlp-conformance.scm= once the fix
+  lands.
+
+* 7. References
+
+- =mini-setup/docs/telemetry-env-contract.org= — B1–B4 boundary spec
+- =docs/reports/20260623-cljs-agent-observability-plan.org= — the wrapper plan
+- =docs/reports/20260414-agent-observability.org= — OTEL GenAI survey
+- gist (env-var contract): https://gist.github.com/aygp-dr/4fe2228908ddb262a5f31bf70bc27d28
+- OTLP spec: https://opentelemetry.io/docs/specs/otlp/
