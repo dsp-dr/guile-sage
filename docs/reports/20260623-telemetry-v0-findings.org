@@ -5,13 +5,16 @@
 #+STARTUP: overview
 
 #+begin_quote
-*v0 finding.* Isolated the telemetry path to one LLM-free hop
-(guile-sage → lapdog, no LiteLLM, no Gemini — a trivial =(+ 1 0 40 1)=
-"workload"). The pipeline enables, records counters, and POSTs 200 —
-*but a spec-strict OTLP/HTTP receiver reads 0 metrics* because the flush
-omits =Content-Type: application/json=. This is a conformance gap to
-the OTLP/HTTP contract, not a guile-sage logic bug. Document v0 here;
-the next pass studies the defined provider contracts.
+*v0 finding (corrected).* Isolated the telemetry path to one LLM-free
+hop (guile-sage → lapdog, no LiteLLM, no Gemini — trivial
+=(+ 1 0 40 1)=). The pipeline enables, records counters, POSTs 200 with
+=Content-Type: application/json=, and the payload is well-formed
+OTLP/JSON. lapdog logs "0 metrics" anyway — *because lapdog counts the
+snake_case =resource_metrics= key while OTLP/JSON uses camelCase
+=resourceMetrics= (agent.py:914)*. *guile-sage is conformant; the bug
+is lapdog's.* (The first Content-Type diagnosis was wrong — retracted
+in §3.) The real lesson held: a second receiver surfaced a contract
+detail — just the opposite of what we first thought.
 #+end_quote
 
 * 1. The isolated test
@@ -40,30 +43,41 @@ Receiver: =lapdog= (=ddapm-test-agent= v1.62.0) on =:4318=.
 | HTTP transport | =POST /v1/metrics → 200= (guile-sage shells out via curl; UA =curl/8.7.1=) |
 | flush return | =#<unspecified>= — *this is success* (=log-debug= returns unspecified on the 2xx branch; not a failure) |
 
-* 3. What's broken (the v0 finding)
+* 3. What's broken — and it is NOT guile-sage (CORRECTED 2026-06-23)
 
-=lapdog= logs: =received /v1/metrics payload with 0 resource metric(s)
-containing 0 metric(s)= — despite guile-sage sending a non-empty
-=resourceMetrics= array.
+=lapdog= logs =received /v1/metrics payload with 0 resource metric(s)=
+for guile-sage's (non-empty, well-formed) payload. *First diagnosis
+(Content-Type missing) was WRONG* and is retracted — see below.
 
-*Root cause:* =telemetry-flush!= calls =(http-post-with-timeout
-*endpoint* body 2)= with *no headers*. =http-post-with-timeout=
-defaults =#:key (headers '())= and forwards that empty list to
-=http-post-curl=, so the request carries *no =Content-Type:
-application/json=*. Per the OTLP/HTTP spec, a JSON payload MUST be
-=application/json=; without it a strict receiver (ddapm-test-agent)
-falls back to protobuf parsing and reads zero.
+** 3.1 What guile-sage actually sends (verified, all correct)
+   - =http-post-curl= (=src/sage/util.scm:464=) *already hardcodes*
+     =-H 'Content-Type: application/json'=. The flush is not missing it.
+   - Dumped payload: =resourceMetrics:1 → scopeMetrics:1 → metrics:2=,
+     1489 bytes, =asInt= datapoints. Well-formed OTLP/JSON.
+   - Field names are *lowerCamelCase* (=resourceMetrics=,
+     =scopeMetrics=, =timeUnixNano=, =asInt=) — *exactly per the
+     OTLP/JSON (proto3 JSON) encoding spec*.
 
-*Why it "worked" before:* the nexus otelcol is lenient and likely
-sniffed the JSON; ddapm-test-agent is strict. This is exactly the
-value of testing against a second, stricter receiver.
+** 3.2 The real root cause — a lapdog counter bug (snake vs camel)
+   =ddapm_test_agent/agent.py:914=:
+   =num_resource_metrics = len(metrics_data.get("resource_metrics", []))=
+   It reads *=resource_metrics=* (snake_case — the *protobuf* field
+   name) but OTLP/JSON on the wire is *=resourceMetrics=* (camelCase).
+   - protobuf path: =protobuf_to_dict= yields snake_case → count works.
+   - JSON path: =json.loads= keeps the wire's camelCase → =.get(
+     "resource_metrics")= → =None= → *0*.
+   So ANY spec-conformant OTLP/JSON metrics emitter shows "0" in
+   lapdog's log. =decode_metrics_request= DOES accept the JSON (200,
+   stored); only the count/log (and likely surfacing) uses the wrong
+   key. Compounds with upstream #378 (OTLP accepted, not surfaced).
 
-** 3.1 The one-line fix (proposed, not yet landed)
-   The flush should send the content type:
-   =(http-post-with-timeout *endpoint* body 2 #:headers '((content-type . "application/json")))=
-   — then re-run §1 and confirm lapdog logs =2 metric(s)=. (Verify the
-   exact header alist shape =http-post-curl= expects; other call sites
-   pass ='(content-type application/json)=.)
+** 3.3 The fix: NONE in guile-sage
+   guile-sage is OTLP/JSON-conformant. Do *not* change it to emit
+   snake_case (that would be non-spec). The gap is lapdog's; raise it
+   upstream *only via the user* (hard rule: no public issues from the
+   agent). For our own dashboard, the bb/cljs receiver must read
+   =resourceMetrics= (camelCase) — then guile-sage's metrics ingest
+   correctly with zero emitter change.
 
 * 4. lapdog as a contract-analysis instrument
 
@@ -104,13 +118,16 @@ against:
 
 * 6. v0 status + next step
 
-- *guile-sage emitter*: enables + records + transports correctly. One
-  conformance gap: missing =Content-Type= on the flush. *No
-  architectural change needed* — a header fix.
-- *Next*: (a) land the Content-Type fix + re-verify against lapdog;
-  (b) read =backfill_{claude,codex,pi}.py= to extract the per-harness
-  wrapper contract; (c) decide guile-sage's path — emit-to-match-OTLP
-  vs. a guile-sage lapdog backfill.
+- *guile-sage emitter*: enables + records + transports + emits
+  conformant OTLP/JSON (camelCase, Content-Type set). *Nothing to fix.*
+- *lapdog*: counts/surfaces only snake_case (=resource_metrics=) on the
+  JSON path → 0 for any conformant emitter. lapdog's bug, raise
+  upstream via the user only.
+- *Next*: (a) the bb/cljs receiver reads =resourceMetrics= (camelCase)
+  → guile-sage ingests with zero change; (b) read
+  =backfill_{claude,codex,pi}.py= for the per-harness *capture*
+  contract if we want lapdog's UI (needs the DD LLMObs path, not OTLP —
+  cf. #378).
 - Reproducer scripts: =/tmp/tele-test*.scm= (this session);
   promote to =tests/test-telemetry-otlp-conformance.scm= once the fix
   lands.
