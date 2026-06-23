@@ -132,6 +132,7 @@ flowchart TB
 | d | macOS | Docker Desktop | bind mount | user-defined net + egress rule | Docker secret / tmpfs |
 | e | macOS | App Sandbox (native) | container + bookmarks | outbound client entitlement (coarse) † | broker socket / tmpfs |
 | f | macOS / Win / Linux | *Docker Sandboxes (=sbx= CLI)* — hypervisor microVM | filesystem passthrough at identical absolute paths; per-sandbox image/package state | =sbx policy allow network= (deny-default, wildcard hostnames + port, optional =--sandbox= scoping); UDP/ICMP unconditionally blocked | =sbx secret set= → OS keychain (macOS Keychain / Secret Service); host-side proxy injects credential into outbound HTTPS — sandbox NEVER sees raw token. SPIFFE-shaped. |
+| g | macOS / Win / Linux | *Deno permission runtime* (v2.x) — V8/Rust process; declarative at exec | =--allow-read=<paths>= + =--deny-read= (default-deny when =--allow-read= omitted) | =--allow-net=<host>:<port>= — *exact host:port match enforced* (no SBPL-style leak). =--deny-net= for default-deny. | =--allow-read=<handoff-file>=, or pipe the key on stdin; =--allow-env=<vars>=. Same handoff contract as row (c) but the permission expression is at the *invocation*, not in a separate profile file. Sandbox scope is JS/TS code only — spawning native subprocesses needs =--allow-run= and that child is outside Deno's permission cage. |
 
 † *macOS caveat (from prior art):* Seatbelt/SBPL network filtering is *coarse*
 (allow/deny; localhost vs all) and per-remote-host rules are unreliable; bind the
@@ -518,6 +519,100 @@ file with mode 0600) is HC-04-conformant but rates lowest of the
 acceptable options in §6.3: a *broker UDS with peer-cred check* is
 strictly better and should be the production path. Tmpfs is fine for
 a local single-tenant experiment, weak for anything multi-tenant.
+
+** 8.8 Iteration 3 — Deno permission runtime (row g)
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-iter3-deno
+   :VALIDATED_AT: 2026-06-22T14:38Z
+   :VALIDATED_BY: claude-agent (interactive)
+   :VERDICT: correct
+   :FINDING: Deno's --allow-net=<host:port> + --allow-read=<file> is the cleanest expression of the contract on macOS; egress narrowing actually works (no §8.4 leak).
+   :END:
+
+Comparison run after the user pointed at Deno + App Sandbox as
+alternatives to =sbx= (still blocked on Docker login). Same handoff,
+same LiteLLM, same trivial chat call.
+
+The probe (=tmp/sbx-exp/deno-probe.ts=) reads the tmpfs key, does a
+=GET /v1/models= and a tiny =POST /v1/chat/completions=. The
+permission cage is *all declarative at exec*:
+
+#+begin_src sh
+deno run \
+  --allow-net=192.168.86.22:4000 \
+  --allow-read=/tmp/sbx-exp/.key-handoff \
+  --allow-env=LITELLM_HOST \
+  --deny-write --deny-run --deny-ffi --deny-sys \
+  deno-probe.ts
+#+end_src
+
+Run, redacted:
+
+#+begin_example
+STEP 1: broker mints ephemeral key
+  models=[gemini-2.5-flash], max_budget=$0.01, expires ~15min
+  handoff -> /tmp/sbx-exp/.key-handoff mode 0600 (26 bytes)
+
+STEP 2: positive probe under Deno
+[deno] handoff key length: 25
+[deno] auth /v1/models: HTTP:200
+[deno] chat completion: HTTP:200 content=null
+
+STEP 3: negative probe (Deno deny-default for everything else)
+[deno-neg] fetch("https://example.com/") -> NotCapable ✓
+[deno-neg] readTextFile("$HOME/.zsh_history") -> NotCapable ✓
+
+STEP 4: revoke + verify
+  /key/delete -> HTTP:200
+  post-revoke /v1/models = HTTP:401 ✓
+#+end_example
+
+The two negatives are the headline result. The §8.4 SBPL variant 4
+let a curl to =192.168.86.22:4000= return 200 under a rule meant to
+restrict to loopback — *the macOS Seatbelt language can't actually
+narrow egress to a specific remote*. Deno's =--allow-net= matches
+exactly =host:port= and produces =NotCapable= for anything not on
+the list. Cross-platform, same surface on macOS / Linux / Windows.
+
+** 8.9 Why we did NOT try App Sandbox
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-app-sandbox-no
+   :END:
+
+The user asked about "osx internal" as another option. macOS App
+Sandbox (row e in §3) is the native, blessed path — but it requires:
+an =.app= bundle with =Info.plist=, declared entitlements
+(=com.apple.security.app-sandbox=, =com.apple.security.network.client=,
+etc.), code signing, and distribution as an app, not a CLI. For a
+shell-tool agent like guile-sage this is the wrong shape. The
+practical macOS native paths are =sandbox-exec= (row c, deprecated
+but functional) and Deno (row g, if the agent is JS/TS). Neither
+needs an app bundle.
+
+** 8.10 Reading on Deno vs sandbox-exec vs sbx
+   :PROPERTIES:
+   :CUSTOM_ID: experiment-iter3-comparison
+   :END:
+
+| Aspect | sandbox-exec (c) | Deno (g) | sbx (f) |
+|--------+------------------+----------+---------|
+| Auth needed to use | none | none | Docker Hub PAT |
+| Permission expression | =.sb= profile file | CLI flags at exec | =sbx policy= + keychain secret |
+| Network narrow-rule on macOS | *unreliable* (§8.4 leak) | exact =host:port= ✓ | deny-default + wildcard ✓ |
+| Isolation primitive | Mach (process-level) | V8/Rust (process-level) | hypervisor microVM |
+| Secret custody | tmpfs handoff | tmpfs handoff (or stdin) | OS-keychain + host-proxy injection (best HC-04) |
+| Cross-platform | macOS only | mac/linux/win | mac/linux/win |
+| Suits a Scheme/Guile agent | yes (any binary) | no (JS/TS only inside the cage) | yes (any binary) |
+
+Row guidance for guile-sage:
+- =sandbox-exec= for the macOS dev box today — works, free, but
+  bind LiteLLM to =127.0.0.1= to avoid the §8.4 LAN leak.
+- =sbx= when Docker login is configured — strictly stronger because
+  the sandbox never reads the raw token.
+- =Deno= where the agent client is JS/TS or where we ship a wrapper
+  binary the harness can spawn under Deno permissions (Deno itself
+  is the closest thing macOS has to a built-in =--allow-net=
+  egress-allowlist that actually works).
 
 * 9. LiteLLM broker hardening (the unstable layer)
   :PROPERTIES:
