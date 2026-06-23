@@ -7,7 +7,7 @@
 #
 # Config is read from the environment (sage's gitignored .env provides it):
 #   LITELLM_HOST        name-or-IP[:port]            (required)
-#   LITELLM_MASTER_KEY  gateway admin key            (required; e.g. sk-litellm-local)
+#   LITELLM_MASTER_KEY  gateway admin key            (required; from .env, never committed)
 #   OLLAMA_HOST         ollama name:port             (default: ollama-host:11434)
 #   GEMINI_API_KEY      real gemini key, stored server-side (default: MOCK)
 #

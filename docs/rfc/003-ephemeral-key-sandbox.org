@@ -326,7 +326,7 @@ design-level questions below feed into them.
   :END:
 
 Ran the §2 control flow up to phase 3 (sandbox + egress) against the
-local LiteLLM at =$LITELLM_HOST= = =192.168.86.22:4000=. Did NOT mint a
+local LiteLLM at =$LITELLM_HOST= = =$LITELLM_HOST=. Did NOT mint a
 real ephemeral key (broker master key intentionally out of scope for
 this run); validated reachability against the unauthed
 =/health/liveliness= endpoint as a placeholder. Workspace
@@ -340,7 +340,7 @@ this run); validated reachability against the unauthed
 - =sandbox-exec= present at =/usr/bin/sandbox-exec= (deprecated-but-present,
   matches §3 caveat).
 - Localhost TCP bridge stood up as a 14-line Python =asyncio= forwarder:
-  =127.0.0.1:14000= → =192.168.86.22:4000=. Represents the §2 "broker
+  =127.0.0.1:14000= → =$LITELLM_HOST=. Represents the §2 "broker
   socket / tmpfs key injection" idea simplified to a TCP shim for this
   probe.
 - Probe script: =sh= one-liner doing 4 checks — read =/etc/hosts= (sanity),
@@ -356,7 +356,7 @@ this run); validated reachability against the unauthed
 |-------+--------|
 | =/etc/hosts= | readable (=##\n# Host Database\n# localho=) |
 | =$HOME/.zsh_history= | readable (shell history exposed) |
-| direct =192.168.86.22:4000/health/liveliness= | HTTP 200 |
+| direct =$LITELLM_HOST/health/liveliness= | HTTP 200 |
 | loopback =127.0.0.1:14000/health/liveliness= | HTTP 200 (shim alive) |
 
 ** 8.3 SBPL profile variants tested
@@ -369,7 +369,7 @@ this run); validated reachability against the unauthed
 | 1 | =(allow default) (deny file-read* HOME) (deny network*)= | denied ✓ | 000 ✓ | 000 ✓ | **Tightest network-deny works; baseline reproducible.** |
 | 2 | =(deny default)= + explicit allow-list for =/usr=, =/System=, etc. | denied ✓ | 000 ✓ | 000 ✓ | Equivalent — confirms profile shape doesn't matter for full network-deny. |
 | 3 | variant 1 + =(allow network* (local tcp "localhost:14000"))= | denied ✓ | 000 ✓ | **000 ✗** | Port-specific localhost allow *did not* pass through to the shim — silently no-op or wrong syntax. |
-| 4 | variant 1 + =(allow network-outbound (remote tcp "localhost:*"))= | denied ✓ | **200 ✗** | 200 ✓ | **Critical: allow rule leaked LAN access** — direct =192.168.86.22:4000= returned 200. §3 footnote confirmed: localhost narrowing is unreliable. |
+| 4 | variant 1 + =(allow network-outbound (remote tcp "localhost:*"))= | denied ✓ | **200 ✗** | 200 ✓ | **Critical: allow rule leaked LAN access** — direct =$LITELLM_HOST= returned 200. §3 footnote confirmed: localhost narrowing is unreliable. |
 | 5 | variant 1 + =(allow network-outbound (remote ip "127.0.0.1:14000"))= | n/a | n/a | n/a | =sandbox-exec= rejected at parse: ="host must be * or localhost in network address"= — bare-IP narrowing is *not* supported. |
 
 ** 8.4 Findings → RFC updates
@@ -447,7 +447,7 @@ The §8.1-§8.6 run avoided the master key. The user pushed back ("we
 can't punt on the hard boundary negotiation and workflow") — this
 iteration runs the whole [[file:../SANDBOX-HARNESS-CONTRACT.org][SANDBOX-HARNESS-CONTRACT.org]] cycle end-to-
 end with a *real* ephemeral key against the local LiteLLM
-(=$LITELLM_HOST= ≈ =192.168.86.22:4000=, master key =sk-litellm-local=
+(=$LITELLM_HOST= ≈ =$LITELLM_HOST=, master key =$LITELLM_MASTER_KEY=
 — development placeholder per [[file:../LITELLM-SETUP.org][LITELLM-SETUP.org]], not a real secret).
 
 Scripts (under =tmp/sbx-exp/=, gitignored): =broker-mint.sh= (POST
@@ -539,7 +539,7 @@ permission cage is *all declarative at exec*:
 
 #+begin_src sh
 deno run \
-  --allow-net=192.168.86.22:4000 \
+  --allow-net=$LITELLM_HOST \
   --allow-read=/tmp/sbx-exp/.key-handoff \
   --allow-env=LITELLM_HOST \
   --deny-write --deny-run --deny-ffi --deny-sys \
@@ -568,7 +568,7 @@ STEP 4: revoke + verify
 #+end_example
 
 The two negatives are the headline result. The §8.4 SBPL variant 4
-let a curl to =192.168.86.22:4000= return 200 under a rule meant to
+let a curl to =$LITELLM_HOST= return 200 under a rule meant to
 restrict to loopback — *the macOS Seatbelt language can't actually
 narrow egress to a specific remote*. Deno's =--allow-net= matches
 exactly =host:port= and produces =NotCapable= for anything not on

@@ -50,7 +50,7 @@ at egress. This is the property that makes sandboxing meaningful.
 # Via LiteLLM (proxy key only; model name selects the upstream)
 export SAGE_PROVIDER=openai
 export SAGE_OPENAI_BASE="http://$LITELLM_HOST/v1"
-export SAGE_OPENAI_API_KEY=sk-litellm-local
+export SAGE_OPENAI_API_KEY=sk-REPLACE-WITH-YOUR-KEY
 export SAGE_MODEL=gemini-2.5-flash        # or ollama-llama3.2, gemini-2.5-pro, ...
 echo "$SAGE_PROVIDER -> $SAGE_OPENAI_BASE (model $SAGE_MODEL)"
 
@@ -94,7 +94,7 @@ sandbox-exec \
   -f sage-sandbox.sb env -i \
   HOME="$HOME" PATH=/opt/homebrew/bin:/usr/bin:/bin GUILE_AUTO_COMPILE=0 \
   SAGE_PROVIDER=openai SAGE_OPENAI_BASE="http://$LITELLM_HOST/v1" \
-  SAGE_OPENAI_API_KEY=sk-litellm-local SAGE_MODEL=gemini-2.5-flash \
+  SAGE_OPENAI_API_KEY=sk-REPLACE-WITH-YOUR-KEY SAGE_MODEL=gemini-2.5-flash \
   SAGE_DATA_DIR=/tmp/sage SAGE_CACHE_DIR=/tmp/sage/cache SAGE_CONFIG_DIR=/tmp/sage/config \
   guile -L src -l scripts/your-entry.scm
 #+end_src

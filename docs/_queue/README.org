@@ -211,7 +211,7 @@ live under XDG, and only PR-worthy items get promoted into
 Empirically verified in [[file:../rfc/003-ephemeral-key-sandbox.org]] §8:
 the SBPL allow rule =(allow network-outbound (remote tcp
 "localhost:*"))= LEAKED to the LAN — direct curl to
-=192.168.86.22:4000= returned HTTP 200 from inside the sandbox even
+=$LITELLM_HOST= returned HTTP 200 from inside the sandbox even
 though the rule was meant to restrict to loopback. This validates the
 §3 footnote ("coarse / unreliable") and rules out localhost-narrowed
 allow as a confinement primitive.
@@ -223,7 +223,7 @@ Action items:
    switch the sandbox→broker hop to a *unix domain socket* with
    peer-cred check — that path was *not* tested in §8 but is the
    Claude Code prior-art pattern (§6.1).
-3. Build the negative test (curl 192.168.86.22:4000 inside sandbox
+3. Build the negative test (curl $LITELLM_HOST inside sandbox
    MUST return 000) into =gmake chaos-net=.
 
 * Q13 — Pin LiteLLM ≥ 1.84.0 by hash; verify deployed version

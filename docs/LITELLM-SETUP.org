@@ -15,9 +15,10 @@ Emacs (org-babel) and copy-pasteable to a shell.
 - =LITELLM_HOST= is a =name-or-IP[:port]= (e.g. =gw.lan:4000=); set it in your
   environment (sage's gitignored =.env= already does). Docs never hardcode
   addresses (keeps =gmake lint-docs= green).
-- Admin calls authenticate with the *master key* from =$LITELLM_MASTER_KEY=.
-  This project uses the local placeholder =sk-litellm-local= (set in =.env=) —
-  not a real secret, but don't commit or share it. Never put a real key here.
+- Admin calls authenticate with the *master key* from =$LITELLM_MASTER_KEY=,
+  which you set in sage's gitignored =.env= (never committed, never written into
+  this doc). The blocks below read it from the environment; they fail fast if it
+  is unset. Never paste a real key here.
 - The example *names* are this project's actual setup (team =guile-sage=, models
   =ollama-qwen2.5-coder= / =gemini-2.5-flash=); the *secret values* are mocks.
 - Discover/verify every endpoint live: =http://$LITELLM_HOST/ui/?page=api-reference=
@@ -27,7 +28,7 @@ Emacs (org-babel) and copy-pasteable to a shell.
 
 #+begin_src sh :results output
 : "${LITELLM_HOST:=localhost:4000}"               # name-or-IP[:port]
-: "${LITELLM_MASTER_KEY:=sk-litellm-local}"       # from .env; local placeholder
+: "${LITELLM_MASTER_KEY:?set it in .env}"
 echo "gateway = http://$LITELLM_HOST  (master key: ${LITELLM_MASTER_KEY:0:6}…)"
 #+end_src
 
@@ -58,7 +59,7 @@ A "model" is a gateway alias mapping a public name → an upstream =litellm_para
 ** Local Ollama
 
 #+begin_src sh :results output
-: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:?set it in .env}"
 : "${OLLAMA_HOST:=ollama-host:11434}"        # mock; your Ollama address
 curl -sS -X POST "http://$LITELLM_HOST/model/new" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
@@ -78,7 +79,7 @@ JSON
 ** External provider (Gemini)
 
 #+begin_src sh :results output
-: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:?set it in .env}"
 : "${GEMINI_API_KEY:=MOCK-gemini-api-key}"   # mock; store the real one server-side
 curl -sS -X POST "http://$LITELLM_HOST/model/new" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
@@ -97,7 +98,7 @@ JSON
 Confirm what the proxy now serves:
 
 #+begin_src sh :results output
-: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:?set it in .env}"
 curl -sS "http://$LITELLM_HOST/model/info" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq -r '.data[].model_name' 2>/dev/null
 #+end_src
@@ -111,7 +112,7 @@ them until the team is granted access. (This is exactly the
 ** Create the team (=POST /team/new=)
 
 #+begin_src sh :results output
-: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:?set it in .env}"
 curl -sS -X POST "http://$LITELLM_HOST/team/new" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
   -H "Content-Type: application/json" \
@@ -129,7 +130,7 @@ JSON
 ** Or grant models to an existing team (=POST /team/model/add=)
 
 #+begin_src sh :results output
-: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:?set it in .env}"
 : "${TEAM_ID:=11111111-2222-3333-4444-555555555555}"   # mock team id
 curl -sS -X POST "http://$LITELLM_HOST/team/model/add" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
@@ -145,7 +146,7 @@ Scope the key to the team so spend and model access are bounded. (For an
 unscoped key that can reach team-less models, generate it *without* a =team_id=.)
 
 #+begin_src sh :results output
-: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:?set it in .env}"
 : "${TEAM_ID:=11111111-2222-3333-4444-555555555555}"
 curl -sS -X POST "http://$LITELLM_HOST/key/generate" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
@@ -181,7 +182,7 @@ the gateway (see [[file:EU-AI-ACT-GUARDRAILS.org][EU-AI-ACT-GUARDRAILS.org]]);
 here we just wire it through the API.
 
 #+begin_src sh :results output
-: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:?set it in .env}"
 curl -sS "http://$LITELLM_HOST/guardrails/list" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq '.' 2>/dev/null
 #+end_src
@@ -189,7 +190,7 @@ curl -sS "http://$LITELLM_HOST/guardrails/list" \
 Smoke-test a piece of text against a named guardrail (=POST /guardrails/apply_guardrail=):
 
 #+begin_src sh :results output
-: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:?set it in .env}"
 : "${GUARDRAIL_NAME:=pii-masking}"            # mock guardrail id
 curl -sS -X POST "http://$LITELLM_HOST/guardrails/apply_guardrail" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
@@ -205,7 +206,7 @@ set =SAGE_GUARDRAIL_PROXY=http://$LITELLM_HOST= in sage's =.env=.
 * 6. Tracking & spend (=GET /spend/*=, =/global/spend/*=)
 
 #+begin_src sh :results output
-: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:=sk-litellm-local}"
+: "${LITELLM_HOST:=localhost:4000}"; : "${LITELLM_MASTER_KEY:?set it in .env}"
 # Recent per-request spend logs
 curl -sS "http://$LITELLM_HOST/spend/logs" \
   -H "Authorization: Bearer $LITELLM_MASTER_KEY" | jq '.[0:3]' 2>/dev/null
@@ -244,8 +245,8 @@ agent work can be (re)stood-up reproducibly. =scripts/litellm-provision.sh=
 runs §2–§4 idempotently: it registers =ollama-qwen2.5-coder= and
 =gemini-2.5-flash=, finds-or-creates the =guile-sage= team and grants it those
 models, then mints a team-scoped virtual key — reading =LITELLM_HOST= and
-=LITELLM_MASTER_KEY= from the environment (sage's =.env= already sets both; the
-local master placeholder is =sk-litellm-local=).
+=LITELLM_MASTER_KEY= from the environment (sage's gitignored =.env= sets both;
+the master key value is never committed to this repo).
 
 #+begin_src sh :results output :eval no
 # loads LITELLM_HOST + LITELLM_MASTER_KEY from .env, then provisions
