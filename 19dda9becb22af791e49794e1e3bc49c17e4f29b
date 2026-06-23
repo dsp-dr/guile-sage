@@ -1,0 +1,32 @@
+CPRR
+====
+Attribution: Claude Opus 4.7 (1M ctx), pair w/ Aidan Pace. User asked
+  "could we use deno or osx internal" — natural follow-up after sbx
+  blocked on Docker login.
+
+Conjecture: Deno's declarative permission model (--allow-net=host:port
+  + --allow-read=file at exec time) is the cleanest cross-platform
+  expression of the four-axis sandbox contract; macOS App Sandbox is
+  the wrong shape for a CLI agent (needs .app bundle + entitlements).
+
+Validation (live, mini Darwin 25.4.0, LITELLM_HOST=192.168.86.22:4000):
+  - Deno v2.8.3 installed at /opt/homebrew/bin/deno; no auth needed.
+  - Minted fresh ephemeral key (gemini-2.5-flash, $0.01, 15m TTL).
+  - Positive probe (deno run --allow-net=192.168.86.22:4000 --allow-read=
+    /tmp/sbx-exp/.key-handoff): /v1/models 200; chat 200.
+  - Negative probe (default-deny for net+read except $HOME env):
+    fetch("https://example.com/") -> NotCapable; readTextFile($HOME
+    /.zsh_history) -> NotCapable.
+  - Revoke: /key/delete -> {"deleted_keys":[...]} 200.
+  - Post-revoke: same key -> 401.
+
+Tests: doc + ledger only. gmake lint-docs PASS (0 errors). 60 records.
+
+Research:
+  - Critical comparative finding: Deno's --allow-net=host:port DOES
+    what SBPL's localhost-narrowing doesn't (§8.4). Same handoff
+    contract, structurally tighter egress on macOS.
+  - Deno cage scope is JS/TS only — spawning guile-sage from Deno
+    needs --allow-run, and the spawned binary runs outside the cage.
+    Deno is best for JS/TS agents, or for the launcher that exec's
+    the agent into a separate sandbox.
