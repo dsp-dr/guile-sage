@@ -38,6 +38,51 @@ The trust split:
 | Sandbox (jail/container/seatbelt) | semi | only the *ephemeral* key, on tmpfs |
 | guile-sage + the model | *untrusted* | the workspace + the ephemeral key |
 
+The three trust zones and what crosses each boundary (graphviz; render
+with =C-c C-c= or =dot -Tpng=):
+
+#+begin_src dot :tangle diagrams/rfc003/trust-boundaries.dot :mkdirp yes :file images/rfc003/trust-boundaries.png :cmdline -Tpng :exports both
+digraph trust_boundaries {
+  rankdir=LR;
+  graph [fontname="Helvetica", fontsize=11, labelloc=t,
+         label="RFC-003: Trust zones — what crosses each boundary"];
+  node  [fontname="Helvetica", fontsize=10, shape=box, style=filled];
+  edge  [fontname="Helvetica", fontsize=9];
+
+  subgraph cluster_issuer {
+    label="ISSUER zone (trusted)"; style=filled; color="#1f6feb"; fillcolor="#e6f0ff";
+    issuer [label="Session Issuer\n(holds MASTER key)", fillcolor="#cfe3ff"];
+    master [label="LITELLM_MASTER_KEY", shape=note, fillcolor="#ffe6e6"];
+    issuer -> master [style=dotted, arrowhead=none, label="never leaves"];
+  }
+
+  subgraph cluster_proxy {
+    label="PROXY zone (trusted)"; style=filled; color="#2da44e"; fillcolor="#e9f7ee";
+    litellm [label="LiteLLM proxy\n$LITELLM_HOST", fillcolor="#c7efd0"];
+    provk   [label="upstream provider keys\n(ollama local / gemini)", shape=note, fillcolor="#ffe6e6"];
+    litellm -> provk [style=dotted, arrowhead=none, label="injected server-side"];
+  }
+
+  subgraph cluster_sandbox {
+    label="SANDBOX zone (untrusted: agent + model)"; style=filled; color="#bf8700"; fillcolor="#fff8e6";
+    agent [label="guile-sage / harness\n(UNTRUSTED)", fillcolor="#ffedcc"];
+    ephem [label="ephemeral key only\n(tmpfs, TTL, $budget)", shape=note, fillcolor="#fff0cc"];
+    ws    [label="workspace\n(ro base + rw overlay)", fillcolor="#ffedcc"];
+    agent -> ephem [style=dotted, arrowhead=none];
+    agent -> ws    [style=dotted, arrowhead=none];
+  }
+
+  issuer  -> litellm [label="POST /key/generate\n(master auth)", color="#1f6feb"];
+  litellm -> issuer  [label="ephemeral sk-… (TTL)", color="#1f6feb", style=dashed];
+  issuer  -> ephem   [label="handoff: tmpfs 0600 / UDS\n(never env, never disk)", color="#bf8700", penwidth=2, constraint=false];
+  agent   -> litellm [label="chat /v1 (Bearer ephemeral)\nONLY reachable host", color="#2da44e", penwidth=2];
+  issuer  -> litellm [label="POST /key/delete (teardown)", color="#cf222e", style=dashed, constraint=false];
+
+  note [shape=plaintext, fillcolor=none,
+        label="Boundary invariants:\l• master key: ISSUER only\l• provider keys: PROXY only, never in blast radius\l• ephemeral key: SANDBOX only, dead on exit/TTL\l• egress: collapses to $LITELLM_HOST\l"];
+}
+#+end_src
+
 * 2. Core control flow (platform-independent)
 
 The same five-phase lifecycle holds on every platform; only the confinement
@@ -54,7 +99,7 @@ sequenceDiagram
     U->>B: 1. start session (workspace, model)
     B->>L: 2. POST /key/generate<br/>{duration, models, max_budget, team_id, rpm}
     L-->>B: ephemeral sk-… (TTL-bound)
-    B->>S: 3. create sandbox; mount workspace ro/rw;<br/>egress allow = $LITELLM_HOST only;<br/>inject key via broker socket / tmpfs (never env, never disk)
+    B->>S: 3. create sandbox, mount workspace ro/rw<br/>egress allow $LITELLM_HOST only<br/>inject key via broker socket / tmpfs (never env, never disk)
     S->>G: 4. exec sage (SAGE_OPENAI_BASE=$LITELLM_HOST/v1)
     loop session
         G->>L: chat /v1 (Bearer ephemeral key)
@@ -94,6 +139,31 @@ flowchart LR
   (carries model grants + budget caps); *user* = the agent identity (attribution);
   *key* = the ephemeral, scoped credential handed to the sandbox. Teardown
   revokes the key (=POST /key/delete=); org/team/user persist for audit.
+
+Same chain as graphviz (renders locally; note the budget-cascade caveat):
+
+#+begin_src dot :tangle diagrams/rfc003/provisioning-chain.dot :mkdirp yes :file images/rfc003/provisioning-chain.png :cmdline -Tpng :exports both
+digraph provisioning {
+  rankdir=LR;
+  graph [fontname="Helvetica", fontsize=11, labelloc=t,
+         label="RFC-003 §2.1: Issuer provisioning chain (org → team → user → key)"];
+  node  [fontname="Helvetica", fontsize=10, shape=record, style=filled, fillcolor="#eef2ff"];
+  edge  [fontname="Helvetica", fontsize=9];
+
+  iss [label="Session Issuer\n(master key)", shape=box, fillcolor="#cfe3ff"];
+  org [label="{org = guile-sage|POST /organization/new|program identity}"];
+  team[label="{team = sandbox class\\n(bastille\\|podman\\|sbx\\|deno\\|docker)|POST /team/new + /team/model/add|models + budget cap}"];
+  usr [label="{user = agent identity|POST /user/new|attribution}"];
+  key [label="{ephemeral key|POST /key/generate|TTL + budget + models}", fillcolor="#fff0cc"];
+  harness [label="one of N harnesses", shape=box, style="filled,dashed", fillcolor="#fff8e6"];
+
+  iss -> org -> team -> usr -> key -> harness;
+  key -> iss [label="POST /key/delete\n(teardown)", color="#cf222e", style=dashed, constraint=false];
+
+  note [shape=plaintext,
+        label="org/team/user persist (audit);\lonly the KEY is per-session + ephemeral.\lBudget: team ≤ org enforced; key ≤ team NOT enforced (§9.2).\l"];
+}
+#+end_src
 
 ** 2.2 Issuer drives spin-up; methodology deferred to experiments
 
@@ -163,7 +233,34 @@ stateDiagram-v2
     Starved --> Revoked
 #+end_src
 
-Scope minted per session (see [[file:../LITELLM-SETUP.org][LITELLM-SETUP.org]]):
+Same state machine as graphviz (renders locally):
+
+#+begin_src dot :tangle diagrams/rfc003/key-lifecycle.dot :mkdirp yes :file images/rfc003/key-lifecycle.png :cmdline -Tpng :exports both
+digraph key_lifecycle {
+  rankdir=LR;
+  graph [fontname="Helvetica", fontsize=11, labelloc=t,
+         label="RFC-003 §4: Ephemeral key lifecycle"];
+  node  [fontname="Helvetica", fontsize=10, shape=circle, style=filled, fillcolor="#eef2ff", fixedsize=true, width=1.1];
+  edge  [fontname="Helvetica", fontsize=9];
+
+  start [shape=point, width=0.15];
+  minted  [label="Minted"];
+  active  [label="Active", fillcolor="#c7efd0"];
+  expired [label="Expired", fillcolor="#ffe6cc"];
+  revoked [label="Revoked", fillcolor="#ffd6d6"];
+  starved [label="Starved\n(402)", fillcolor="#ffe6cc"];
+  done [shape=doublecircle, label="", width=0.3, fillcolor="#333333"];
+
+  start  -> minted  [label="POST /key/generate"];
+  minted -> active  [label="handoff to sandbox\n(tmpfs/UDS)"];
+  active -> expired [label="TTL elapsed\n(primary)"];
+  active -> revoked [label="POST /key/delete\n(fast path, async §9.3)"];
+  active -> starved [label="max_budget hit"];
+  starved-> revoked [label="reap"];
+  expired-> done;
+  revoked-> done;
+}
+#+end_src
 team =guile-sage=, =models= the team is granted, short =duration=, small
 =max_budget=, an =rpm_limit=, and any guardrails. Belt-and-suspenders: TTL is
 the *primary* expiry (survives a crashed broker that never calls =/key/delete=);
