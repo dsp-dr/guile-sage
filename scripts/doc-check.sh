@@ -48,9 +48,12 @@ for f in src/sage/*.scm; do
 done
 
 echo
-# 3. No hardcoded IPs in docs/ (recurses subdirs: rfc/, _queue/, etc.; reports/ exempt)
-echo "--- No hardcoded IPs (living docs only, not reports/) ---"
-count=$(grep -rn '192\.168\.' docs/ --include='*.org' --include='*.md' --exclude-dir=reports AGENTS.md README.org .env.template 2>/dev/null | wc -l | tr -d ' ')
+# 3. No hardcoded private IPs in docs/ + the verify ledger.
+# Pattern is the generic RFC1918 /16 prefix (matches any 192.168.x) — a
+# detector, not a specific subnet. Recurses docs/ (rfc/, _queue/, …) and
+# .verify/*.jsonl; reports/ is exempt (point-in-time snapshots).
+echo "--- No hardcoded IPs (living docs + verify ledger; reports/ exempt) ---"
+count=$(grep -rn '192\.168\.' docs/ .verify/ --include='*.org' --include='*.md' --include='*.jsonl' --exclude-dir=reports AGENTS.md README.org .env.template 2>/dev/null | wc -l | tr -d ' ')
 if [ "$count" -eq 0 ]; then
   pass "zero hardcoded IPs"
 else
