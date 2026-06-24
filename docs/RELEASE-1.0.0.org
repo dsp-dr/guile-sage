@@ -58,7 +58,7 @@ Intent: usable from a fresh clone + a local LLM (Ollama with
 - Per-model token limits for Gemini family (=2.5-pro= 2M,
   =2.5-flash=/=flash-lite= 1M, =1.5-flash= 128K) — not the stale
   8K Ollama tier default.
-- Context-window warnings at 50% / 80% / 90%.
+- Context-window warnings at 75% / 90% / 95% (warning / high / critical).
 
 ** MCP client
 - SSE transport + JSON-RPC 2.0 per =docs/MCP-CONTRACT.org= (23

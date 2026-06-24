@@ -4,32 +4,23 @@
 
 * Overview
 
-Sage provides native Scheme tool building. No MCP, no proxies, no subprocess overhead.
-Tools are first-class functions with JSON schemas.
+Sage provides *both* native Scheme tools (first-class functions with JSON
+schemas, in-process) *and* an MCP client. Native tools are the default for
+in-tree capabilities; MCP integrates external tool servers.
 
-* MCP Reference (NOT SUPPORTED)
+* MCP integration (SUPPORTED)
 
-MCP (Model Context Protocol) uses JSON-RPC 2.0 over stdio:
+Sage is an MCP (Model Context Protocol) *client*: it discovers SSE MCP servers
+from =~/.claude.json= and calls their tools over JSON-RPC 2.0 (=mcp-init=,
+=mcp-call-tool= in =src/sage/mcp.scm=). MCP tools register through the same
+=register-tool= path as native tools, so their results traverse the same taint
+boundary (=guard-tool-result= → =wrap-tool-result=; see
+[[file:CHAOS-TESTING.org][CHAOS-TESTING.org]]). MCP tools default to *unsafe*
+(require YOLO mode / confirmation). Full invariants:
+[[file:MCP-CONTRACT.org][MCP-CONTRACT.org]].
 
-#+begin_src json
-// Tool definition
-{
-  "name": "generate-qrcode",
-  "description": "Generate QR code",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "content": {"type": "string"},
-      "format": {"type": "string", "enum": ["png", "ascii"]}
-    }
-  }
-}
-
-// Tool call
-{"jsonrpc": "2.0", "method": "tools/call", "params": {...}, "id": 1}
-#+end_src
-
-*Why sage doesn't use MCP:* Subprocess overhead, JSON serialization, extra dependencies.
+Native vs MCP is a *choice*, not an exclusion: prefer native for in-process,
+zero-dependency tools; use MCP to reach external/third-party tool servers.
 
 * Native Tool Building
 
@@ -141,13 +132,15 @@ END:VCARD"
   (if (= (car result) 200) (cdr result) "Error"))
 #+end_src
 
-* MCP vs Native
+* MCP vs Native (both supported — pick per use case)
 
-| Aspect | MCP | Sage Native |
-|--------|-----|-------------|
-| Latency | Subprocess + JSON-RPC | In-process |
-| Dependencies | Node.js | Pure Scheme |
-| Debugging | External logs | /logs |
-| Extensibility | New server | Lambda |
+| Aspect | MCP (external) | Sage Native (in-tree) |
+|--------|----------------|------------------------|
+| Latency | SSE + JSON-RPC over network | In-process |
+| Dependencies | the external MCP server | Pure Scheme |
+| Debugging | =/logs= + server logs | =/logs= |
+| Extensibility | add a server to =~/.claude.json= | =register-tool= lambda |
+| Safety default | unsafe (YOLO/confirm) | per-tool =safe?= flag |
 
-*MCP not supported.* Use native tools.
+Use *native* for in-process, dependency-free tools; use *MCP* to reach
+external tool servers. See [[file:MCP-CONTRACT.org][MCP-CONTRACT.org]].
