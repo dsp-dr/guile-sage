@@ -14,9 +14,17 @@ kinds of doc:
 - *Specs / schemas* — formats and forward-looking designs (some not yet
   implemented; flagged as such).
 
-Point-in-time *reports* live under =docs/reports/= and are never edited after
+Point-in-time *reports* live under =docs/reports/= (index:
+[[file:reports/README.org][reports/README.org]]) and are never edited after
 creation. Diagrams follow
 [[https://wal.sh/research/diagram-style-guide#org010b7ab][wal.sh/research/diagram-style-guide]].
+
+*How to scan this tree:* every =docs/*.org= declares its state on a top-of-file
+=#+STATUS:= line — =Current= (matches the implementation), =Design= (forward-looking,
+not yet built), =Frozen= (a snapshot, not maintained), or =Disputed= (a known
+spec/code mismatch). Run =grep '^#+STATUS' docs/*.org= to see the whole tree's
+state at a glance. What was *tested against a running system*, and when, is the
+live-runs ledger in [[file:VALIDATION-INDEX.org::#live-runs][VALIDATION-INDEX.org]].
 
 * Engineering boundaries (hard constraints)
 
