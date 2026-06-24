@@ -1,4 +1,5 @@
 #+TITLE: guile-sage: Sandboxing, egress, and connection modes
+#+STATUS: Current — reflects the implementation
 #+OPTIONS: toc:2
 #+PROPERTY: header-args:sh :var LITELLM_HOST=(getenv "LITELLM_HOST")
 

@@ -1,5 +1,6 @@
 #+TITLE: guile-sage — EU AI Act Guardrails
 #+DATE: 2026-04-12
+#+STATUS: Current — reflects the implementation
 #+AUTHOR: guile-sage contributors
 #+PROPERTY: header-args:shell :results output :exports both
 

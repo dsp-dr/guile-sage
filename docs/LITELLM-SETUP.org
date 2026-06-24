@@ -1,6 +1,7 @@
 #+TITLE: guile-sage — LiteLLM gateway setup (literate)
 #+AUTHOR: guile-sage
 #+DATE: 2026-06-22
+#+STATUS: Current — reflects the implementation
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 #+PROPERTY: header-args:sh :var LITELLM_HOST=(getenv "LITELLM_HOST") :results output

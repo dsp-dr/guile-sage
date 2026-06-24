@@ -1,6 +1,7 @@
 #+TITLE: guile-sage — Architecture
 #+AUTHOR: guile-sage
 #+DATE: 2026-04-11
+#+STATUS: Current — reflects the implementation
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 

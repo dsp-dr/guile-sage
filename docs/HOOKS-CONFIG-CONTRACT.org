@@ -1,6 +1,7 @@
 #+TITLE: guile-sage — Hook Configuration and Persistence Contract
 #+AUTHOR: guile-sage research
 #+DATE: 2026-04-18
+#+STATUS: Current — disputed (event field string vs symbol; see docs _queue Q03)
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 

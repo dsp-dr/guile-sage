@@ -1,6 +1,7 @@
 #+TITLE: guile-sage --- Negative Contract Enforcement via Lifecycle Hooks
 #+AUTHOR: guile-sage research
 #+DATE: 2026-04-18
+#+STATUS: Current — reflects the implementation
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 

@@ -1,6 +1,7 @@
 #+TITLE: guile-sage — v1.0.1 release notes
 #+AUTHOR: guile-sage
 #+DATE: 2026-04-20
+#+STATUS: Frozen — release snapshot (not maintained)
 #+OPTIONS: toc:2 num:nil
 
 * Summary

@@ -1,6 +1,7 @@
 #+TITLE: guile-sage — Commands
 #+AUTHOR: dsp-dr
 #+DATE: 2026-01-24
+#+STATUS: Current — minor gaps (yolo, plan commands not yet implemented; see VALIDATION-INDEX)
 
 * Design Principle
 

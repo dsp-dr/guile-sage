@@ -1,6 +1,7 @@
 #+TITLE: guile-sage — Plugin System Specification
 #+AUTHOR: guile-sage
 #+DATE: 2026-04-18
+#+STATUS: Design, forward-looking — not yet implemented
 
 *Status:* Raised to P1 on 2026-04-20. Strategic unlock for the
 core-stays-small philosophy. Tracked as bead =guile-sage-bmy=

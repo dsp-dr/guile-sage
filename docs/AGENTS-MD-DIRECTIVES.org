@@ -1,6 +1,7 @@
 #+TITLE: guile-sage --- AGENTS.md Structured Directive Parsing Contract
 #+AUTHOR: guile-sage research
 #+DATE: 2026-04-18
+#+STATUS: Design, forward-looking — not yet implemented
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 

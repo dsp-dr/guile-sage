@@ -1,6 +1,7 @@
 #+TITLE: guile-sage — Tool Guide
 #+AUTHOR: dsp-dr
 #+DATE: 2026-01-25
+#+STATUS: Current — reflects the implementation
 
 * Overview
 

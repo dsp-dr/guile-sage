@@ -1,4 +1,5 @@
 #+TITLE: guile-sage — Telemetry
+#+STATUS: Current — reflects the implementation
 #+AUTHOR: guile-sage
 #+OPTIONS: toc:2
 

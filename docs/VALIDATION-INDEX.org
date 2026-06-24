@@ -1,6 +1,7 @@
 #+TITLE: guile-sage — Documentation Validation Index
 #+AUTHOR: guile-sage
 #+DATE: 2026-06-22
+#+STATUS: Current — reflects the implementation
 #+OPTIONS: toc:2 num:nil ^:nil
 #+STARTUP: overview
 
