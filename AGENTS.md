@@ -479,12 +479,9 @@ for the architecture level.
 |----------|---------------|-------------|
 | `ARCHITECTURE.org` | C4 diagrams, module list, startup sequence, data flow | Any module added/removed/renamed |
 | `TELEMETRY.org` | Metric names, OTLP setup, verification | Any counter added or endpoint changed |
-| `CLI-COMPARISON.org` | Feature matrix vs other CLIs | Any feature shipped or gap closed |
 | `TIMING-PROTOCOL.org` | Benchmark methodology + locked-in numbers | Model defaults change or new provider |
 | `MCP-CONTRACT.org` | MCP protocol invariants (23) | MCP client behavior changes |
 | `EU-AI-ACT-GUARDRAILS.org` | LiteLLM guardrail spec | Guardrail config changes |
-| `ROADMAP.org` | Epics with shipped/open status | Epic completed or new one filed |
-| `RELEASE-0.6.0.org` | v0.6.0 changelog (frozen) | Never (it's a release snapshot) |
 | `TOOLS.org` / `TOOLS-GUIDE.org` | Tool reference | Any tool added/removed/changed |
 | `COMMANDS.org` | Slash command reference | Any /command added |
 

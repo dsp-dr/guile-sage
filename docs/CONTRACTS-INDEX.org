@@ -48,7 +48,6 @@ The non-negotiables, with the full rationale + reproducible experiments in
 | [[file:TELEMETRY.org][TELEMETRY.org]] | OTLP metrics, counters, verification | counters/endpoints change |
 | [[file:TIMING-PROTOCOL.org][TIMING-PROTOCOL.org]] | benchmark methodology | model/provider defaults change |
 | [[file:EU-AI-ACT-GUARDRAILS.org][EU-AI-ACT-GUARDRAILS.org]] | LiteLLM guardrail setup (Article 5) | guardrail policy changes |
-| [[file:ROADMAP.org][ROADMAP.org]] | epics + status | planning |
 
 * Contracts
 

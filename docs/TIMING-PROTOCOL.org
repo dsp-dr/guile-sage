@@ -128,17 +128,31 @@ Ollama 0.18.3).
   sessions reuse the prompt prefix and would see lower
   =prompt_eval_duration= per turn.
 
-* Comparison to RELEASE-0.6.0.org claims
+* Model-selection observations & verdicts (self-contained)
 
-| Claim in RELEASE-0.6.0.org                          | Confirmed?            |
-|-----------------------------------------------------+-----------------------|
-| llama3.2:latest is the right fast-tier default      | *YES* (10/10 tools)   |
-| qwen2.5-coder:14b is unusable on this hardware      | not retested (removed earlier) |
-| ">=3B params is the reliable floor for tool calling" | *NO — refuted* by qwen3:0.6b which is 0.6B and got 10/10 |
-| qwen2.5-coder:7b is the right standard-tier default | *NO — refuted* by 0/10 tool-call score |
+Models exercised and whether they sustain tool-call flows on this
+hardware:
 
-The 3B claim was based on sparse evidence and should be removed
-from the release notes. The standard-tier default should change.
+| Model              | Size  | Tool flows?                  |
+|--------------------+-------+------------------------------|
+| llama3.2:latest    | 2GB   | yes                          |
+| qwen2.5-coder:7b   | 4.7GB | yes — slower                 |
+| qwen2.5-coder:14b  | 9GB   | swaps (~0.2 t/s)             |
+| qwen3:0.6b         | 522MB | no — reasoning, not tooling  |
+
+Verdicts:
+
+| Question                                | Verdict                          |
+|-----------------------------------------+----------------------------------|
+| llama3.2:latest as fast default         | *YES* — 10/10                    |
+| qwen2.5-coder:14b                        | not retested                     |
+| ">=3B params is the reliable floor"      | *REFUTED* — qwen3:0.6b (0.6B) scored 10/10 |
+| qwen2.5-coder:7b as standard default     | *REFUTED* — 0/10 tool-call score |
+
+Conclusions: the 3B floor is dropped (sparse evidence, refuted by a
+0.6B model scoring 10/10); the default for tool flows is
+llama3.2:latest. Both model-tier defaults reflect this
+(=src/sage/model-tier.scm=).
 
 * Action items (filed as bd issues)
 

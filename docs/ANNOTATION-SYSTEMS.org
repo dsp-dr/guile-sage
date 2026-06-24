@@ -265,8 +265,8 @@ What's harder /here/ than in the source piece:
    annotation — they need their own heading wrapper.
 
 ** 8.2 Generated artefacts
-   Some docs export to HTML/PDF (=PRESENTATION.html=,
-   =RELEASE-*.org=). Annotations on a release-note heading are only
+   Some docs export to HTML/PDF (e.g. =RELEASE-*.org=).
+   Annotations on a release-note heading are only
    meaningful pre-export; post-export, the snapshot is frozen.
    Annotations on release notes are =:STATUS: closed= by construction.
 

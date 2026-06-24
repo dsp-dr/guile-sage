@@ -63,7 +63,7 @@ fi
 echo
 # 4. All reports have YYYYMMDD prefix
 echo "--- Report naming convention ---"
-bad=$(ls docs/reports/ 2>/dev/null | grep -v '^[0-9]' | head)
+bad=$(ls docs/reports/ 2>/dev/null | grep -v '^[0-9]' | grep -v '^README\.org$' | head)
 if [ -z "$bad" ]; then
   pass "all reports YYYYMMDD-prefixed"
 else

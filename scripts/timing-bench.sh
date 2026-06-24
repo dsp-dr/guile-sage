@@ -3,7 +3,7 @@
 #
 # Reproducible per-model performance + tool-call benchmark for the
 # Ollama backend. Used to confirm the timing numbers cited in
-# RELEASE-0.6.0.org and to feed the model-tier defaults.
+# docs/TIMING-PROTOCOL.org and to feed the model-tier defaults.
 #
 # Two phases per model:
 #   Phase 1: warm load + single-turn eval performance (no tools)

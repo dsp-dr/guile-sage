@@ -27,16 +27,6 @@ Release notes are point-in-time snapshots; per ANNOTATION-SYSTEMS.org
 §8.2, annotations on release headings are =:STATUS: closed= by
 construction once the release ships. We don't audit shipped history.
 
-** RELEASE-0.6.0.org
-   :PROPERTIES:
-   :TARGET_ID: file:RELEASE-0.6.0.org
-   :STATUS: closed
-   :VERDICT: closed-by-construction
-   :VALIDATED_AT: 2026-06-22T04:00Z
-   :VALIDATED_BY: claude-agent
-   :FINDING: Shipped release; immutable. Future edits are corrections only.
-   :END:
-
 ** RELEASE-1.0.0.org
    :PROPERTIES:
    :TARGET_ID: file:RELEASE-1.0.0.org
@@ -202,16 +192,6 @@ the code; full claim-by-claim audits are queued for follow-up sweeps.
    :FINDING: Scenarios in spec match scripts/toxiproxy-chaos.sh sub-commands; up/down/scenario N/all surface verified.
    :END:
 
-** CLI-COMPARISON.org
-   :PROPERTIES:
-   :TARGET_ID: file:CLI-COMPARISON.org
-   :STATUS: closed
-   :VERDICT: closed-by-construction
-   :VALIDATED_AT: 2026-06-22T04:00Z
-   :VALIDATED_BY: claude-agent
-   :FINDING: Cross-CLI feature comparison — point-in-time observation, not a contract about guile-sage internals.
-   :END:
-
 ** COMMANDS.org
    :PROPERTIES:
    :TARGET_ID: file:COMMANDS.org
@@ -242,16 +222,6 @@ the code; full claim-by-claim audits are queued for follow-up sweeps.
    :FINDING: v1 schema live in tests/eval/traffic-cases.json + scripts/eval-sage.sh (verified meta.version="1.0", TC01-TC20 cases). v2 fields expect_tool_min_count/expect_tool_order/requires_model_tier documented but NOT implemented in eval-sage.sh (grep finds zero occurrences). check_tool_min_count/check_tool_order pseudocode aspirational. TC21 chain-planning case correctly marked speculative. Tracked in bead guile-sage-50n.
    :END:
 
-** ROADMAP.org
-   :PROPERTIES:
-   :TARGET_ID: file:ROADMAP.org
-   :STATUS: open
-   :VERDICT: planned
-   :VALIDATED_AT: 2026-06-22T04:00Z
-   :VALIDATED_BY: claude-agent
-   :FINDING: Forward-looking by construction; "verified" means alignment with open beads, not shipped reality.
-   :END:
-
 ** TOOLS-GUIDE.org
    :PROPERTIES:
    :TARGET_ID: file:TOOLS-GUIDE.org
@@ -270,16 +240,6 @@ the code; full claim-by-claim audits are queued for follow-up sweeps.
    :VALIDATED_AT: 2026-06-22T04:00Z
    :VALIDATED_BY: claude-agent-ops (independent sub-agent)
    :FINDING: Protocol fully implemented at scripts/timing-bench.sh. TIMING_BENCH_MODELS default matches verbatim. Phase 1 single-turn metrics (load_duration/prompt_eval_count/eval_count/total_duration) extracted at lines 89-94. Phase 2 tool-calling: native tool_calls field check at line 114-115 (text-formatted calls correctly excluded). Locked-in 2026-04-11 measurements (llama3.2 10/10, qwen2.5-coder 0/10) are the source of truth driving the model-tier defaults — verified against src/sage/model-tier.scm.
-   :END:
-
-** PRESENTATION.org
-   :PROPERTIES:
-   :TARGET_ID: file:PRESENTATION.org
-   :STATUS: closed
-   :VERDICT: closed-by-construction
-   :VALIDATED_AT: 2026-06-22T04:00Z
-   :VALIDATED_BY: claude-agent
-   :FINDING: Slide-deck source; exports to PRESENTATION.html. Frozen post-export per §8.2.
    :END:
 
 * Contract docs awaiting deep audit

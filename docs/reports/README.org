@@ -1,0 +1,31 @@
+#+TITLE: Reports — Frozen Snapshots
+#+STATUS: Frozen — point-in-time snapshots (never edited after creation)
+
+These are dated archival snapshots: each captures the state of some
+investigation, design, or status as of its =YYYYMMDD= prefix. They are
+*not* the current state and are never edited after creation — for the
+current docs and contracts, start from [[file:../CONTRACTS-INDEX.org][docs/CONTRACTS-INDEX.org]].
+
+* Notable durable snapshots
+
+** Research / findings
+- =20260412-lossy-projection-research.md= — projection-loss research
+- =20260414-compaction-survey.org= — context-compaction survey
+- =20260414-eval-frameworks.org= — eval-framework landscape
+- =20260414-security-economics.org= — security economics
+- =20260419-small-model-tool-selection.org= — small-model tool-call findings
+
+** Design / decisions
+- =20260124-session-format-spec.md= — session file format
+- =20260126-plan-mcp-integration.org= — MCP integration plan
+- =20260414-contract-driven-agents.org= — contract-driven agent design
+- =20260414-guardrail-architectures.org= — guardrail architecture options
+- =20260417-cloudflare-ai-gateway-requirements.org= — gateway requirements
+
+** Status snapshots
+- =20260126-status-v0.5.org= — v0.5 status
+- =20260419-release-readiness.org= — release-readiness check
+- =20260623-telemetry-v0-findings.org= — telemetry v0 findings
+
+The remaining entries are dated snapshots of their respective sessions,
+plans, and test runs; see the file names for date and topic.
