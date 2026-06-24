@@ -496,3 +496,65 @@ is lightweight unless flagged.
    :VALIDATED_BY: claude-agent
    :FINDING: 64KB top-level spec — many claim-bearing sections. Full audit deferred to a dedicated sweep; spot-check against ARCH/MCP/HOOKS/SKILLS/TELEMETRY audits found internal consistency.
    :END:
+
+* Live validation runs (consumer-side runtime testing, 2026-06)
+  :PROPERTIES:
+  :CUSTOM_ID: live-runs
+  :STATUS: open
+  :END:
+
+What was exercised against a *running* system (LiteLLM gateway + guile-sage as a
+consumer), and when. This is the "what/when we tested" ledger per the annotation
+contract ([[file:ANNOTATION-SYSTEMS.org][ANNOTATION-SYSTEMS.org]]). Secrets/actuals
+(real host, keys, raw ledgers) live ONLY in private gists; this records the
+public-safe verdict so the repo is scannable.
+
+** gsv-daria-hydra-01 — LiteLLM key validation (T1–T6)
+   :PROPERTIES:
+   :CUSTOM_ID: run-gsv-t1t6
+   :STATUS: closed
+   :VERDICT: correct
+   :VERIFIED_AT: 2026-06-23
+   :VERIFIED_BY: claude-agent-daria (non-root, hydra sandbox)
+   :FINDING: Baseline against unpatched LiteLLM 1.83.4 (not hardened). T2 auth 200, T3 chat 200 (gemini-2.5-flash, needs max_tokens≥32), T6 un-granted model 401, T4 key scope OK ($1 budget). T5 /key/generate GAP: a scoped key minted a child key (200) — issuer config fix needed. T1 /health/liveliness flaky (liveliness ≠ readiness). Actuals: private gist (run report).
+   :END:
+
+** guile-sage end-to-end via LiteLLM (gemini-2.5-flash)
+   :PROPERTIES:
+   :CUSTOM_ID: run-sage-e2e
+   :STATUS: closed
+   :VERDICT: correct
+   :VERIFIED_AT: 2026-06-23
+   :VERIFIED_BY: claude-agent-daria
+   :FINDING: Drove guile-sage (SAGE_PROVIDER=openai → LiteLLM) in a tmux REPL. Plain chat → VALIDATION-OK; tool-use agent loop → [Tool: list_files] executed + model follow-up; LiteLLM guardrails surfaced via x-litellm-applied-guardrails header. gemini-via-LiteLLM returns proper openai-shape tool_calls. Bug filed: SAGE_STREAMING=0 ignored on -p path (SAGE-yuf); empty-200 display gap (SAGE-u47).
+   :END:
+
+** Guardrail conformance (egress-echo redaction probe)
+   :PROPERTIES:
+   :CUSTOM_ID: run-guardrail-conformance
+   :STATUS: open
+   :VERDICT: disputed
+   :VERIFIED_AT: 2026-06-23
+   :VERIFIED_BY: claude-agent-daria
+   :FINDING: "applied" ≠ "redacted": the x-litellm-applied-guardrails header listed the full redaction set on EVERY request, but the egress-echo proved phone (+1-555-0100) came back VERBATIM (redact-phone ineffective for that format); email/ssn/cc/api-key redacted ✓; clean control passed ✓. Header alone is not proof of redaction. Spec + harness in private gist; gap is issuer-side (phone matcher / block-vs-redact policy).
+   :END:
+
+** LiteLLM solidity grind + spend metering
+   :PROPERTIES:
+   :CUSTOM_ID: run-solidity
+   :STATUS: closed
+   :VERDICT: correct
+   :VERIFIED_AT: 2026-06-23
+   :VERIFIED_BY: claude-agent-daria
+   :FINDING: 15 back-to-back real calls. Steady-state once healthy: ~7/8 success, p50 ~0.8s (vs 42s while half-migrated). All instability was operator-side upgrade transients (1.83.4→1.89.3 restart + half-migrated Prisma total_spend), not LiteLLM under load. Per-key spend monotonic (/key/info), $1 budget enforced. Residual: rare empty-200.
+   :END:
+
+** Sandbox harness (RFC-003) — NOT run here
+   :PROPERTIES:
+   :CUSTOM_ID: run-sandbox
+   :STATUS: open
+   :VERDICT: skipped
+   :VERIFIED_AT: 2026-06-23
+   :VERIFIED_BY: claude-agent-daria
+   :FINDING: FreeBSD confinement (Bastille/Podman/pf) is ROOT-ONLY; the daria agent (uid 1003) cannot self-confine. Scaffold staged + parameterized only. Root operator (jwalsh+sudo) owns the confined drive + the N-matrix. Structural finding: the confinement privilege lives with the issuer/launcher, not the agent.
+   :END:
