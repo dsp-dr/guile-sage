@@ -104,6 +104,29 @@ One stdio entrypoint serves both (= =gmake mcp-server=):
    arg-injection (negative tests, N1–N5).
 7. [ ] *Deploy* — document the wiring, add to dogfood loop.
 
+* 6b. Worked reference — =@jwalsh/mcp-server-qrcode= (real third-party server)
+
+A small real server we drove end-to-end over stdio (2026-06-25) as a concrete
+template for our own. Install: =npm i -g @jwalsh/mcp-server-qrcode= → bin
+=mcp-server-qrcode=.
+
+- =initialize= → =serverInfo {name:"QR Code Generator", version:"0.3.6"}=,
+  caps =resources/prompts/tools=.
+- =tools/list= → one tool =generate-qrcode=, =inputSchema= (draft-07): =content=
+  (string), =errorCorrectionLevel= (enum L/M/Q/H, default M), =size= (number
+  1–10, default 3), =format= (enum =image|text=, default image).
+- =tools/call= success → =result.content= = *two* =text= blocks ("QR code
+  generated for: …" + the ASCII QR). So =content[]= is a LIST and may hold
+  multiple blocks / mixed types (=text=, =image= with =mimeType=+base64 =data=).
+- =tools/call= with a bad arg (=format:"ascii"=, or wrong key =data=) →
+  JSON-RPC *error =-32602= "Input validation error"* with the zod failure
+  detail. This is exactly our *B3* (validate =arguments= against =inputSchema=)
+  and the error code to emit.
+
+Lessons baked into the contract: emit =content= as a list (allow multiple/mixed
+blocks); validate args and return =-32602= on schema failure; advertise only
+real capabilities.
+
 * 7. References
 - [[file:MCP-CONTRACT.org][MCP-CONTRACT.org]] — the client side (inverse of this).
 - [[file:ROADMAP.org][ROADMAP.org]] — strategic direction + dogfood scope.
