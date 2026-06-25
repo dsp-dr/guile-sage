@@ -1,0 +1,24 @@
+digraph key_lifecycle {
+  rankdir=LR;
+  graph [fontname="Helvetica", fontsize=11, labelloc=t,
+         label="RFC-003 §4: Ephemeral key lifecycle"];
+  node  [fontname="Helvetica", fontsize=10, shape=circle, style=filled, fillcolor="#eef2ff", fixedsize=true, width=1.1];
+  edge  [fontname="Helvetica", fontsize=9];
+
+  start [shape=point, width=0.15];
+  minted  [label="Minted"];
+  active  [label="Active", fillcolor="#c7efd0"];
+  expired [label="Expired", fillcolor="#ffe6cc"];
+  revoked [label="Revoked", fillcolor="#ffd6d6"];
+  starved [label="Starved\n(402)", fillcolor="#ffe6cc"];
+  done [shape=doublecircle, label="", width=0.3, fillcolor="#333333"];
+
+  start  -> minted  [label="POST /key/generate"];
+  minted -> active  [label="handoff to sandbox\n(tmpfs/UDS)"];
+  active -> expired [label="TTL elapsed\n(primary)"];
+  active -> revoked [label="POST /key/delete\n(fast path, async §9.3)"];
+  active -> starved [label="max_budget hit"];
+  starved-> revoked [label="reap"];
+  expired-> done;
+  revoked-> done;
+}

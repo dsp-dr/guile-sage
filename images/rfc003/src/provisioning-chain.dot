@@ -1,0 +1,20 @@
+digraph provisioning {
+  rankdir=LR;
+  graph [fontname="Helvetica", fontsize=11, labelloc=t,
+         label="RFC-003 §2.1: Issuer provisioning chain (org → team → user → key)"];
+  node  [fontname="Helvetica", fontsize=10, shape=record, style=filled, fillcolor="#eef2ff"];
+  edge  [fontname="Helvetica", fontsize=9];
+
+  iss [label="Session Issuer\n(master key)", shape=box, fillcolor="#cfe3ff"];
+  org [label="{org = guile-sage|POST /organization/new|program identity}"];
+  team[label="{team = sandbox class\\n(bastille\\|podman\\|sbx\\|deno\\|docker)|POST /team/new + /team/model/add|models + budget cap}"];
+  usr [label="{user = agent identity|POST /user/new|attribution}"];
+  key [label="{ephemeral key|POST /key/generate|TTL + budget + models}", fillcolor="#fff0cc"];
+  harness [label="one of N harnesses", shape=box, style="filled,dashed", fillcolor="#fff8e6"];
+
+  iss -> org -> team -> usr -> key -> harness;
+  key -> iss [label="POST /key/delete\n(teardown)", color="#cf222e", style=dashed, constraint=false];
+
+  note [shape=plaintext, style=none,
+        label="org/team/user persist (audit);\lonly the KEY is per-session + ephemeral.\lBudget: team ≤ org enforced; key ≤ team NOT enforced (§9.2).\l"];
+}

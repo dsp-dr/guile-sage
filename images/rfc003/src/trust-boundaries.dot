@@ -1,0 +1,39 @@
+digraph trust_boundaries {
+  rankdir=LR;
+  graph [fontname="Helvetica", fontsize=11, labelloc=t,
+         label="RFC-003: Trust zones — what crosses each boundary"];
+  node  [fontname="Helvetica", fontsize=10, shape=box, style=filled];
+  edge  [fontname="Helvetica", fontsize=9];
+
+  subgraph cluster_issuer {
+    label="ISSUER zone (trusted)"; style=filled; color="#1f6feb"; fillcolor="#e6f0ff";
+    issuer [label="Session Issuer\n(holds MASTER key)", fillcolor="#cfe3ff"];
+    master [label="LITELLM_MASTER_KEY", shape=note, fillcolor="#ffe6e6"];
+    issuer -> master [style=dotted, arrowhead=none, label="never leaves"];
+  }
+
+  subgraph cluster_proxy {
+    label="PROXY zone (trusted)"; style=filled; color="#2da44e"; fillcolor="#e9f7ee";
+    litellm [label="LiteLLM proxy\n$LITELLM_HOST", fillcolor="#c7efd0"];
+    provk   [label="upstream provider keys\n(ollama local / gemini)", shape=note, fillcolor="#ffe6e6"];
+    litellm -> provk [style=dotted, arrowhead=none, label="injected server-side"];
+  }
+
+  subgraph cluster_sandbox {
+    label="SANDBOX zone (untrusted: agent + model)"; style=filled; color="#bf8700"; fillcolor="#fff8e6";
+    agent [label="guile-sage / harness\n(UNTRUSTED)", fillcolor="#ffedcc"];
+    ephem [label="ephemeral key only\n(tmpfs, TTL, $budget)", shape=note, fillcolor="#fff0cc"];
+    ws    [label="workspace\n(ro base + rw overlay)", fillcolor="#ffedcc"];
+    agent -> ephem [style=dotted, arrowhead=none];
+    agent -> ws    [style=dotted, arrowhead=none];
+  }
+
+  issuer  -> litellm [label="POST /key/generate\n(master auth)", color="#1f6feb"];
+  litellm -> issuer  [label="ephemeral sk-… (TTL)", color="#1f6feb", style=dashed];
+  issuer  -> ephem   [label="handoff: tmpfs 0600 / UDS\n(never env, never disk)", color="#bf8700", penwidth=2, constraint=false];
+  agent   -> litellm [label="chat /v1 (Bearer ephemeral)\nONLY reachable host", color="#2da44e", penwidth=2];
+  issuer  -> litellm [label="POST /key/delete (teardown)", color="#cf222e", style=dashed, constraint=false];
+
+  note [shape=plaintext, fillcolor=none,
+        label="Boundary invariants:\l• master key: ISSUER only\l• provider keys: PROXY only, never in blast radius\l• ephemeral key: SANDBOX only, dead on exit/TTL\l• egress: collapses to $LITELLM_HOST\l"];
+}

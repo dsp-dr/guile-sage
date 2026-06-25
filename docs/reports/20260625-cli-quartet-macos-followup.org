@@ -1,0 +1,119 @@
+#+TITLE: CLI quartet — macOS follow-up & roadmap (closes SAGE-4fl)
+#+AUTHOR: guile-sage (dogfood team)
+#+DATE: 2026-06-25
+#+STATUS: Plan — macOS-grounded; feeds ROADMAP.org
+#+OPTIONS: toc:2 num:t ^:nil
+#+STARTUP: overview
+
+Follow-up to [[file:20260625-coding-agent-feature-review.org][the 2026-06 coding-agent feature review]], which could only fill the
+Claude Code + Codex columns (OpenCode + Droid won't run on FreeBSD/hydra) and
+parked the gap as *SAGE-4fl*: "finish the matrix from a Linux/macOS host."
+
+This *is* that host. All four were exercised on *mini* (Mac Mini M4, macOS 26.3,
+arm64) — Claude Code / OpenCode / Codex from their *actual installed binaries*,
+Droid from docs (Factory's CDN throttled the 109 MB binary at capture time).
+Per-tool deep dives (MCP, performance, time-travel, visualization, Ollama-first
+config), with grounded command output, are in the gist:
+https://gist.github.com/aygp-dr/d215ee22f521d2329be715ba36390a1d
+
+*Net:* nothing here overturns the "be the MCP server" thesis — it *hardens* it,
+adds two rows the prior matrix under-covered (time-travel, visualization), and
+surfaces one new differentiator we were sitting on (OTLP).
+
+* 1. Matrix — OpenCode + Droid columns filled (closes SAGE-4fl)
+
+Versions: Claude Code 2.1.191 · OpenCode 1.17.5 · Codex 0.142.1 · Droid 0.158.0.
+=Y= yes · =P= partial · =N= no. *All four are binary-verified on mini* — the
+Droid binary finished downloading (SHA-256 =d37a94f4…b5e9373b=) and its rows below
+are confirmed from =droid --help= / =droid exec --help= / =droid mcp=, not docs.
+
+** L3 — agent runtime (the surface guile-sage must own)
+| Feature                       | Claude Code | Codex | OpenCode | Droid | guile-sage |
+|-------------------------------+-------------+-------+----------+-------+------------|
+| agent loop / control flow     | Y           | Y (=exec=) | Y (=run= / TUI / =serve=) | Y (=exec=) | Y |
+| tool registry + execution     | Y           | Y     | Y (+plugins) | Y (=--list-tools=) | Y (native+MCP) |
+| MCP client                    | Y           | Y     | Y (local/remote, OAuth) | Y (=droid mcp=) | Y |
+| *MCP server mode*             | *N*         | *Y (=mcp-server= stdio)* | *N* (has ACP server, not MCP) | *N* (=daemon= only, not MCP) | *N → SAGE-t2l* |
+| sub-agents / multiagent       | Y (=--agents=) | P (=fork=) | Y (=opencode agent=) | *Y (=--mission= worker/validator models)* | P (aq/coordinator) |
+| memory / session persistence  | Y           | Y     | Y (=--session=, list, export/import) | Y (=resume=, =search= sessions) | Y |
+| *session fork* (branch a run) | Y (=--fork-session=) | Y (=fork=) | Y (=--fork=) | *Y (=--fork=)* | *P — gap* |
+| sandbox / egress confinement  | P (perm-modes) | Y (=codex sandbox=) | P | P (=--auto low/med/high=) | design (RFC-003) |
+| hooks / lifecycle events      | Y           | ?     | P (plugins) | ? | Y |
+| permission model (safe/unsafe)| Y           | Y (disk levels) | P | Y (autonomy tiers) | Y |
+| plugins / extensions          | Y           | ?     | Y (=opencode plugin=) | Y (=droid plugin=) | design |
+| cloud / remote tasks          | P (=--remote-control=) | Y (=cloud=) | P (=serve= / =web= / =attach=) | Y (=daemon=, =computer= relay) | N (LAN posture) |
+
+** New rows the prior matrix under-covered
+| Feature                       | Claude Code | Codex | OpenCode | Droid | guile-sage |
+|-------------------------------+-------------+-------+----------+-------+------------|
+| *time travel / checkpointing* | Y — resume + *file-history rewind* | Y — resume/fork/*archive*, rollout files+SQLite | Y — fork + export/import + *snapshot dir* + SQLite | Y — fork/resume + =--worktree= + session =search=; *no file rewind* | *P — persist+compaction, no fork/rewind* |
+| *visualization surfaces*      | TUI, =--ide=, =--chrome=, =--remote-control=, tmux/worktree | TUI, exec-server | TUI, *web UI*, =serve=, ACP, mDNS | TUI, =--worktree=, =daemon= server, Factory bridge | *REPL/TUI only* |
+| *OTLP telemetry*              | *Y → nexus* | N | N | N (none in =--help=) | *Y (opt-in)* |
+| Ollama / local-first          | via =ANTHROPIC_BASE_URL= | =[model_providers.ollama]= / =--oss= | add =@ai-sdk/openai-compatible= | =custom_models= (#169 caveat) | *native (Ollama/Gemini/LiteLLM)* |
+
+* 2. What the filled columns change
+
+1. *MCP-server mode is still uncontested.* Of four, only *Codex* runs as an MCP
+   server. OpenCode ships an *ACP* server (=opencode acp=) and an HTTP =serve= +
+   =web= — adjacent, but not MCP. The substrate play (*SAGE-t2l*) loses no ground;
+   if anything OpenCode's ACP shows the field reaching for "expose the agent as a
+   callable service," which is exactly sage's bet, just via MCP instead of ACP.
+2. *Session fork is now unanimous (all =Y=).* Every one of the four branches a
+   session — Claude =--fork-session=, Codex =fork=, OpenCode =--fork=, and (now
+   binary-confirmed) Droid =--fork <sessionId>=. guile-sage persists + compacts
+   but cannot *branch*. This is the one table-stakes verb we're visibly missing.
+   (Droid also surprised on multiagent: =--mission= drives separate
+   =--worker-model= / =--validator-model= agents — first-class, ahead of sage's
+   =P= aq/coordinator; default model is =claude-opus-4-8=.)
+3. *Time-travel has two distinct levels.* Everyone resumes/forks *conversations*;
+   only Claude Code and (via snapshot dirs) OpenCode/Codex checkpoint *files*.
+   sage's compaction is conversation-level only. File-level checkpoint is a real,
+   separable capability — and it composes with our sandbox/taint boundary.
+4. *OTLP is a sage differentiator we under-sell.* Claude Code emits OTLP; OpenCode,
+   Codex, Droid emit *none*. guile-sage already has opt-in OTLP + a JSONL usage
+   ledger. Combined with #1 this is the strongest strategic thread below.
+5. *Local-first is native here, bolted-on there.* All four can reach Ollama, but
+   sage treats Ollama/Gemini/LiteLLM as first-class providers; the others need a
+   custom-provider stanza (and Droid's =exec --model= still rejects custom IDs,
+   Factory #169/#787/#1061). On a LAN/self-hosted box this is a posture advantage.
+
+* 3. Roadmap — sequenced
+
+Priorities reuse the L3 assets we own; each maps to a bead candidate. (=SAGE-t2l=
+and =SAGE-4fl= already exist; the rest are proposed IDs for the maintainer.)
+
+| # | Item | Why now (from the quartet) | Effort | Bead |
+|---+------+----------------------------+--------+------|
+| P1 | *MCP server mode* — stdio =initialize= / =tools/list= / =tools/call= over =*tools*= | only Codex does it; 2 live consumers on mini (Claude Code, Emacs gptel/mcp.el) | M | =SAGE-t2l= |
+| P2 | *Session fork* — branch a persisted session | now unanimous across all 4; sage is the visible gap | S | new =SAGE-fork= |
+| P3 | *Telemetry substrate* — when agents call sage-as-MCP-server, sage emits the OTLP they lack | only Claude+sage emit OTLP; satisfies mini's hard nexus requirement *for* the blind agents | S–M | new =SAGE-otlp-sub= |
+| P4 | *Sandbox tiers* — adopt Codex =sandbox_permissions= disk-levels + Droid =--auto low/med/high= autonomy gates into RFC-003 / HC-01 | two independent designs converge on tiered confinement | M | =SAGE-4fl=→RFC-003 |
+| P5 | *=sage review=* — non-interactive review verb | =codex review= is a discrete table-stakes verb; pairs with our eval lineage | S | new =SAGE-review= |
+| P6 | *File-level checkpoint* — snapshot/restore touched files across a turn | Claude file-history + OpenCode/Codex snapshot dirs; composes with taint boundary | M | new =SAGE-ckpt= |
+| P7 | *Inspector surface* — =sage serve= read-only web/JSON view of session+ledger | field is adding web (OpenCode =web=, Droid bridge, Claude remote-control); ride P1's loop, don't build a TUI | L | watch |
+
+** Phasing
+- *Now (substrate):* P1 then P3. P1 makes sage callable; P3 makes it the *governed,
+  observable* substrate — the combination is the moat, not P1 alone.
+- *Next (parity, cheap):* P2 + P5 — small, visible, close the "missing verbs" gap.
+- *Then (depth):* P4 + P6 — the sandbox/checkpoint capabilities that justify
+  "governed substrate" over "yet another agent."
+- *Watch:* P7 — only after a third consumer asks; keep the LAN/self-hosted posture.
+
+* 4. Strategic line (one sentence)
+
+The quartet confirms the field is racing on *agent UX* (web surfaces, cloud,
+remote control) and leaving *governance + observability* on the floor — so
+guile-sage should not chase their UX; it should *be the MCP server they call*
+(P1) and *emit the telemetry they don't* (P3), turning its existing L3 assets —
+tool registry, sandbox, taint boundary, OTLP ledger — into the substrate other
+agents run on.
+
+* 5. Bookkeeping
+- Closes *SAGE-4fl* (OpenCode/Droid columns filled from macOS).
+- Reaffirms *SAGE-t2l* as P1; proposes =SAGE-fork=, =SAGE-otlp-sub=, =SAGE-review=,
+  =SAGE-ckpt=.
+- Source data: gist =d215ee22= (4 deep dives) + mini-setup
+  =docs/agentic-cli-quartet-20260625.org=.
+- All four columns binary-verified on mini (Droid binary verified + run
+  post-capture; rows promoted from doc-derived to confirmed).
