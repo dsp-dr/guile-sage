@@ -1,0 +1,39 @@
+#+TITLE: 2026-Q2 CLI coding agents — local harness evaluation
+#+AUTHOR: claude-agent (paired w/ jwalsh)
+#+DATE: 2026-06-23
+#+OPTIONS: toc:2 num:t ^:nil
+
+Consolidation of the physical harness evaluation, extending the wal.sh
+note (=SOURCE.org=, "CLI Coding Agents: 2026 Q2 Comparison"). For each
+installed harness we capture *reference data* (CLI surface, slash
+commands, docs/help, config) then *drive it* via a tmux session.
+
+* Installed (mini, 2026-06-23)
+claude, codex, gemini, pi, opencode, aider, crush.
+(antigravity = Google, needs install: https://antigravity.google/download)
+
+* Per-harness capture (saved under each =<harness>/= dir)
+| File | What |
+|------+------|
+| =help.txt= | =<h> --help= (+ subcommand helps) |
+| =version.txt= | =<h> --version= |
+| =slash-commands.txt= | in-session =/= command list (driven via tmux) |
+| =config.txt= | config file path + keys (=~/.<h>= etc.) |
+| =drive.txt= | a real non-interactive run (trivial calc) + the transcript |
+| =NOTES.org= | comparison-axis findings (below) |
+
+* Comparison axes (from SOURCE.org)
+invocation patterns · permission models · sandbox/isolation · MCP
+support · hooks · skills/custom-agents · memory/persistence · custom
+model providers · remote/cloud execution · telemetry/OTEL.
+
+* Signals
+1. *general usage / familiarity* — Google chosen for easy API-key setup
+   (antigravity download). Drive each, note ergonomics.
+2. *contract honoring* — which honor OTEL vs DD (lapdog backfills:
+   claude/codex/pi have native wrappers; see telemetry work).
+
+* Status
+- [X] consolidation dir + source
+- [ ] capture + drive each harness (in progress)
+- [ ] cross-harness NOTES synthesis
