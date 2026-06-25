@@ -81,6 +81,29 @@ L3 assets we already own. Building blocks are in place (=*tools*= +
 =register-tool= with JSON schemas in =tools.scm=; the JSON-RPC + transport code
 in =mcp.scm=); the gap is the server-side =tools/list=/=tools/call= loop.
 
+** Dogfood scope (v1): two consumers, one stdio entrypoint
+
+As the dogfood team we scope the MCP-server to the two hosts we actually use —
+*Claude Code* and *Emacs* — and they want the *same* thing: a *stdio* MCP server.
+So the whole feature is one entrypoint.
+
+- *Build:* =(sage mcp-server)= — a stdio JSON-RPC loop handling =initialize=,
+  =tools/list= (emit =*tools*= with their JSON schemas), =tools/call= (dispatch
+  to the tool's exec-fn, honoring the =safe?= flag + the taint boundary). Pure
+  stdin/stdout read-print loop — no subprocess fork, so it sidesteps the
+  spawn-segfault boundary (see [[file:CHAOS-TESTING.org][CHAOS-TESTING.org]]).
+- *Launch (stable command):* =gmake mcp-server= → e.g.
+  =guile3 -L src -c '(use-modules (sage mcp-server)) (mcp-serve)'=.
+- *Wire — Claude Code:*
+  =claude mcp add guile-sage -- gmake -C /path/to/guile-sage mcp-server=
+  (stdio; Claude spawns it and speaks JSON-RPC over stdin/stdout).
+- *Wire — Emacs:* point an MCP client (e.g. =mcp.el= / =gptel= MCP) at the same
+  stdio command =gmake -C /path/to/guile-sage mcp-server=.
+- *Out of scope for v1:* HTTP/SSE transport, auth, remote hosting — add only if a
+  third consumer needs them. Two clients, one stdio command, done.
+
+Tracked: =SAGE-t2l=.
+
 * Notes
 
 - This supersedes the old v0.1-era roadmap (removed 2026-06-24). It is a
