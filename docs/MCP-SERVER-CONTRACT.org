@@ -94,9 +94,13 @@ One stdio entrypoint serves both (= =gmake mcp-server=):
 * 6. Build sequence (we are at step 1–2)
 
 1. [X] *Contract* — this doc (observed protocol + boundary).
-2. [ ] *Wizard* — a mock =mcp-server= that completes the handshake and returns a
-   canned =tools/list= + stub =tools/call=, so we can =claude mcp add= it and SEE
-   it connect/health-check before any real dispatch.
+2. [X] *Wizard* — =scripts/mcp-server-wizard.scm= (mock): completes the handshake,
+   canned =tools/list= (=sage_echo=, =sage_whoami=), stub =tools/call= with
+   =-32602=/=-32601=. Wired via project =.mcp.json= (server =sage-wizard=) +
+   =.claude/settings.json= =enabledMcpjsonServers=. *B1 trap found:* =gmake -C=
+   prints "Entering directory" to stdout and corrupts the stream — the MCP
+   command MUST be the direct =guile3 -L src scripts/mcp-server-wizard.scm=, not
+   the make target. Driven OK via the probe + the exact configured command.
 3. [ ] *Prototype* — wire =tools/list=/=tools/call= to real =*tools*= (safe-only).
 4. [ ] *Build* — full method coverage, errors, B1 stdout discipline.
 5. [ ] *Harden* — B2/B3 enforcement, schema validation, limits.

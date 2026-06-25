@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "sage-wizard": {
+      "command": "guile3",
+      "args": ["-L", "src", "scripts/mcp-server-wizard.scm"]
+    }
+  }
+}

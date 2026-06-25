@@ -31,5 +31,8 @@
       "Bash(gmake check)",
       "Bash(gmake version)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "sage-wizard"
+  ]
 }
