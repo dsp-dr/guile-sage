@@ -50,3 +50,4 @@ experiments/
 .beads/backup/
 .beads/embeddeddolt/
 .beads/push-state.json
+CLAUDE.local.md
