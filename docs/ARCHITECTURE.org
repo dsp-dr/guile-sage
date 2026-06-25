@@ -94,6 +94,7 @@ System_Boundary(sage, "guile-sage process (GNU Guile 3.0)") {
   Container(openai_mod,  "openai.scm",      "Guile", "OpenAI-compat client (LiteLLM, vLLM).\nGuardrail header capture,\nJSON-string args parsing.")
   Container(gemini_mod,  "gemini.scm",      "Guile", "Google AI Gemini native client.\nfunctionCall format conversion.")
   Container(mcp_mod,     "mcp.scm",         "Guile", "MCP SSE client:\nconfig from ~/.claude.json,\nfresh SSE per tool call (FIFO),\nJSON-RPC, tool registration.")
+  Container(mcpsrv_mod,  "mcp-server.scm",  "Guile", "MCP server (inverse): serves *tools*\nover stdio JSON-RPC (tools/list,\ntools/call); safe-only by default.")
   Container(tools_mod,   "tools.scm",       "Guile", "Tool registry: 22+ built-in +\nMCP-discovered. Permission check,\nexecute-tool, coerce->int, resolve-path.")
   Container(telem_mod,   "telemetry.scm",   "Guile", "OTLP/HTTP cumulative counters.\nBackoff on failure, flush on shutdown.")
   Container(util_mod,    "util.scm",        "Guile", "HTTP clients (native + curl),\nJSON parser/writer, as-list,\njson-empty-object, debug logging.")
@@ -150,7 +151,7 @@ SHOW_LEGEND()
 @enduml
 #+END_SRC
 
-** Module Summary (27 source files, ~11.1k LOC)
+** Module Summary (28 source files, ~11.1k LOC)
 
 | Module         | File             | Role                                        | Key exports                                              |
 |----------------+------------------+---------------------------------------------+----------------------------------------------------------|

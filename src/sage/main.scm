@@ -46,6 +46,13 @@
   (format #t "Guile ~a~%" (version)))
 
 (define (main args)
+  ;; Subcommand dispatch (before option parsing). `sage mcp-server` runs the
+  ;; stdio MCP server — sage AS an MCP server (docs/MCP-SERVER-CONTRACT.org).
+  ;; This is the clean "binary" launch: claude mcp add sage -- sage mcp-server.
+  (when (and (pair? (cdr args)) (equal? (cadr args) "mcp-server"))
+    (let ((serve (module-ref (resolve-interface '(sage mcp-server)) 'mcp-serve)))
+      (serve)
+      (exit 0)))
   (let* ((options (getopt-long args option-spec))
          (help? (option-ref options 'help #f))
          (version? (option-ref options 'version #f))

@@ -26,7 +26,7 @@ GUILE_CCACHE_DIR ?= $(LIBDIR)/guile/3.0/site-ccache
 SOURCES = $(wildcard $(SRCDIR)/sage/*.scm)
 OBJECTS = $(SOURCES:.scm=.go)
 
-.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench eval tmux-session tmux-kill eval-provenance demo chaos-net mcp-server-wizard
+.PHONY: all clean check repl run run-safe init check-config help docs publish check-verbose uat uat-yolo install-hooks version build install uninstall patch minor major release tag docker docker-run docker-push claude-ollama generate-showcase generate-synthetic-session generate-test-pii monitor promote-images sage-commit test-guardrails timing-bench eval tmux-session tmux-kill eval-provenance demo chaos-net mcp-server-wizard mcp-smoke
 
 all: $(OBJECTS)
 
@@ -47,6 +47,9 @@ run:
 
 mcp-server-wizard:
 	@$(GUILE) -L $(SRCDIR) scripts/mcp-server-wizard.scm
+
+mcp-smoke:
+	@bash scripts/mcp-smoke.sh
 
 check:
 	@for test in $(TESTDIR)/test-*.scm; do \

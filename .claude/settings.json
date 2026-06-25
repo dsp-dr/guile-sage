@@ -33,6 +33,7 @@
     ]
   },
   "enabledMcpjsonServers": [
+    "sage",
     "sage-wizard"
   ]
 }

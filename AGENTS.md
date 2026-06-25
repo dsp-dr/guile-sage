@@ -418,6 +418,7 @@ src/sage/
   netpolicy.scm     Bot-compliance pre-flight (robots.txt / llms.txt) for outbound fetches
   sandbox.scm       Execution-context / confinement awareness (sandbox-confined?)
   mcp.scm           MCP SSE client (skills-hub, tools/list, tools/call)
+  mcp-server.scm    MCP server: serve *tools* over stdio JSON-RPC (sage mcp-server); safe-only default
   tools.scm         Tool registry (33+ built-in, safe/unsafe split, fetch_url, edit_file diff)
   scratch.scm       Content-addressed scratch store for large tool outputs
   hooks.scm         PreToolUse + PostToolUse lifecycle hooks with veto semantics

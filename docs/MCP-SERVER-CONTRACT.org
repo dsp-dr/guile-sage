@@ -82,6 +82,27 @@ A conformant sage MCP server, driven by the §1 probe sequence, MUST:
 - N5 reject malformed/over-permission =arguments= (B3).
 Probe harness = the newline-JSON sequence used in §1, re-pointed at sage.
 
+* 4b. The echo test (grind it — easiest to remember)
+
+Same shape as =@jwalsh/mcp-server-qrcode='s "NPM Package CLI": pipe one JSON-RPC
+line in, =jq= out. No =initialize= needed for a single call.
+
+#+begin_src sh
+# list tool names (THE echo test)
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  | guile3 -L src -c '(use-modules (sage main)) (main (list "sage" "mcp-server"))' \
+  | jq -r '.result.tools[].name'
+
+# call a safe tool
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"git_status","arguments":{}}}' \
+  | guile3 -L src -c '(use-modules (sage main)) (main (list "sage" "mcp-server"))' \
+  | jq -r '.result.content[0].text'
+#+end_src
+
+Full grind (initialize + list + safe call + unsafe-rejected + bad-name):
+=gmake mcp-smoke= (=scripts/mcp-smoke.sh=; set =SERVER="sage mcp-server"= to grind
+the installed binary, or =SERVER="mcp-server-qrcode"= to grind any stdio server).
+
 * 5. Run / wire (dogfood: Claude Code + Emacs)
 
 One stdio entrypoint serves both (= =gmake mcp-server=):
@@ -101,7 +122,12 @@ One stdio entrypoint serves both (= =gmake mcp-server=):
    prints "Entering directory" to stdout and corrupts the stream — the MCP
    command MUST be the direct =guile3 -L src scripts/mcp-server-wizard.scm=, not
    the make target. Driven OK via the probe + the exact configured command.
-3. [ ] *Prototype* — wire =tools/list=/=tools/call= to real =*tools*= (safe-only).
+3. [X] *Prototype* — =src/sage/mcp-server.scm= serves real =*tools*= (safe-only;
+   24 exposed); =sage mcp-server= subcommand in =main.scm=; =.mcp.json= server
+   =sage=; grind via =gmake mcp-smoke=. B2 verified (write_file rejected). Note:
+   read the registry via tools.scm PROCEDURES (=tools-to-schema=/=list-tools=/
+   =get-tool=), NOT the imported =*tools*= var — a set!-across-module box quirk
+   makes a direct var read see 0 tools.
 4. [ ] *Build* — full method coverage, errors, B1 stdout discipline.
 5. [ ] *Harden* — B2/B3 enforcement, schema validation, limits.
 6. [ ] *Red-team* — caller tries unsafe tool / path escape / stdout-poison /
