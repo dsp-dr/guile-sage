@@ -58,6 +58,7 @@ the sandbox. This layer is the harness's job and the substance of the roadmap.
 
 | Capability                       | Status | Where it lives / lands                 |
 |----------------------------------+--------+----------------------------------------|
+| *MCP server mode (expose sage's tools)* | *H — priority* | *the substrate play: serve =*tools*= over MCP so Claude Code / Codex / any agent call sage. Client exists (=mcp.scm=); add the stdio =tools/list= + =tools/call= server loop. (=SAGE-t2l=)* |
 | agent loop / control flow        | H      | governance tuple drives it (=src/sage/agent.scm=, =repl.scm=) |
 | tool registry + execution        | H      | LiteLLM passes schemas, never runs (=src/sage/tools.scm=, =mcp.scm=) |
 | memory                           | H      | session/context (=session.scm=, =context.scm=) |
@@ -66,6 +67,19 @@ the sandbox. This layer is the harness's job and the substance of the roadmap.
 | events / webhooks                | H      | (planned)                              |
 | scheduled deployments            | H      | (planned)                              |
 | outcomes / eval                  | H      | skill-eval lineage ([[file:EVAL-CASE-SCHEMA.org][eval schema]], =tests/eval/=) |
+
+* Strategic direction — be the MCP server, not just a client
+
+The 2026-06 coding-agent review ([[file:reports/20260625-coding-agent-feature-review.org][report]]) makes the point sharp:
+Claude Code and Codex are both MCP *clients*, and *Codex already runs as an MCP
+server* (=codex mcp-server=). The winning move for guile-sage is not to match
+their agent-UX feature-for-feature — it is to *expose sage's own surface (tool
+registry, sandbox, eval, provenance/taint boundary) as an MCP server* so those
+agents call sage. That flips guile-sage from "another coding agent" to "the
+governed tool/sandbox substrate other agents run on" — and it reuses exactly the
+L3 assets we already own. Building blocks are in place (=*tools*= +
+=register-tool= with JSON schemas in =tools.scm=; the JSON-RPC + transport code
+in =mcp.scm=); the gap is the server-side =tools/list=/=tools/call= loop.
 
 * Notes
 

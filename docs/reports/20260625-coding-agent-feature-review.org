@@ -84,8 +84,17 @@ OpenCode/Droid =?= — not runnable on FreeBSD (need a Linux/macOS host).
 
 * 4. Findings & roadmap inferences (best-effort, native Claude Code + Codex)
 
-What the two natively-runnable agents tell us for guile-sage's H-layer
-([[file:../ROADMAP.org][ROADMAP.org]]):
+*Headline: guile-sage should BE an MCP server, not just a client.* Both Claude
+Code and Codex are MCP clients; *Codex already runs as an MCP server*
+(=codex mcp-server=). The point of this review isn't to match their agent-UX
+feature-for-feature — it's to expose sage's own surface (tool registry, sandbox,
+eval, taint boundary) over MCP so those agents *call sage*. That turns
+guile-sage into the governed tool/sandbox *substrate* other agents run on, reusing
+the L3 assets we already own (=*tools*=/=register-tool= in =tools.scm=; JSON-RPC +
+transport in =mcp.scm=). Gap = the server-side =tools/list=/=tools/call= loop.
+Prioritized: =SAGE-t2l=; see [[file:../ROADMAP.org][ROADMAP.org]] "be the MCP server".
+
+What else the two natively-runnable agents tell us for guile-sage's H-layer:
 
 1. *Sandbox + permission model is table-stakes.* Codex ships a first-class
    =codex sandbox= subcommand with =sandbox_permissions= (disk-access levels);
