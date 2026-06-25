@@ -64,6 +64,7 @@ The non-negotiables, with the full rationale + reproducible experiments in
 | Contract | Governs | Invariant test |
 |----------+---------+----------------|
 | [[file:MCP-CONTRACT.org][MCP-CONTRACT.org]] | MCP SSE + JSON-RPC invariants | =test-mcp.scm= |
+| [[file:MCP-SERVER-CONTRACT.org][MCP-SERVER-CONTRACT.org]] | sage AS an MCP server (inverse of MCP-CONTRACT); stdio; default-safe exposure | (design; SAGE-t2l) |
 | [[file:HOOKS-CONTRACT.org][HOOKS-CONTRACT.org]] | hook lifecycle (Pre/PostToolUse) | =test-hooks.scm= |
 | [[file:HOOKS-CONFIG-CONTRACT.org][HOOKS-CONFIG-CONTRACT.org]] | hook configuration parsing | =test-hooks-config.scm= |
 | [[file:HOOK-NEGATIVE-CONTRACTS.org][HOOK-NEGATIVE-CONTRACTS.org]] | things the agent MUST NOT do (vetoes) | =test-negative-contracts.scm= |

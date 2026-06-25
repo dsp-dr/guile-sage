@@ -1,0 +1,111 @@
+#+TITLE: guile-sage — MCP Server Contract (sage as callee)
+#+AUTHOR: guile-sage
+#+STATUS: Design / forward-looking — contract first; not yet implemented (SAGE-t2l)
+#+DATE: 2026-06-25
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+The inverse of [[file:MCP-CONTRACT.org][MCP-CONTRACT.org]] (sage as *client*): here sage is the *server* —
+it exposes its tool registry over MCP so Claude Code / Emacs call sage. Contract
++ boundary, planned BEFORE prototyping (per the build sequence: contract →
+wizard → prototype → build → harden → red-team → deploy). Strategic rationale +
+dogfood scope: [[file:ROADMAP.org][ROADMAP.org]] "be the MCP server".
+
+* 1. Observed wire protocol (empirical, 2026-06-25)
+
+Captured by driving the reference =@modelcontextprotocol/server-everything stdio=
+with hand-fed JSON-RPC. This is the protocol we must speak.
+
+- *Framing:* newline-delimited *JSON-RPC 2.0* — one JSON object per line on
+  stdin/stdout. NOT LSP =Content-Length= framing.
+- *Transports:* server-everything offers =stdio | sse | streamableHttp=. *v1
+  scope = stdio only* (the two dogfood clients spawn a stdio subprocess).
+- *Handshake (observed):*
+  1. client → =initialize= ={protocolVersion, capabilities, clientInfo}=
+  2. server → =result{protocolVersion:"2025-06-18", capabilities:{tools:{listChanged}}, serverInfo:{name,title,version}, instructions:"…"}=
+  3. client → =notifications/initialized= (no id, no response)
+  4. client → =tools/list= → server → =result.tools[]= each
+     ={name, title, description, inputSchema(JSON-Schema draft-07), execution?}=
+  5. client → =tools/call {name, arguments}= → server → =result.content[]= (e.g.
+     ={type:"text", text:…}=)
+- The server may emit unsolicited notifications (=notifications/tools/list_changed=);
+  optional for us in v1.
+- =result.instructions= is passed to the *calling* LLM — a place to state
+  guile-sage's safety/taint posture to the caller.
+
+* 2. v1 message contract (what sage MUST implement)
+
+| Method                       | Sage response (v1) |
+|------------------------------+--------------------|
+| =initialize=                 | =protocolVersion= (echo client's if supported, else ours); =capabilities:{tools:{}}=; =serverInfo:{name:"guile-sage", version:(version-string)}=; =instructions= = sage taint/safety note |
+| =notifications/initialized=  | none (notification)                |
+| =tools/list=                 | map =*tools*= → ={name, description, inputSchema}= (=parameters= already JSON-schema); only the EXPOSED set (see B2) |
+| =tools/call {name,arguments}= | dispatch to the tool's exec-fn; return ={content:[{type:"text",text:<result>}]}=; on denied/unknown/throw → JSON-RPC =error= |
+| anything else                | JSON-RPC error =-32601 method not found= |
+
+* 3. Boundary — sage as callee (inverse trust)
+
+When sage is the *server*, the caller is semi-trusted and the host privileges are
+*ours*. The boundary inverts vs the client case:
+
+- *B1 — stdout is sacred.* stdout carries ONLY JSON-RPC. Every banner, log,
+  warning, =format #t= must go to *stderr* or a file. A stray byte on stdout
+  corrupts the stream. (mcp-server mode must suppress the REPL banner + route
+  logging off stdout.)
+- *B2 — default-safe tool exposure.* By default expose ONLY =*safe-tools*=
+  (read-only). Mutating tools (=write_file=, =git_commit=, =eval_scheme=, …) are
+  withheld unless explicitly opted in (e.g. =SAGE_MCP_EXPOSE_UNSAFE=1=). An
+  external caller must not get sage's write/exec privileges just by asking — this
+  is the inverse of the client-side "MCP tools require YOLO" rule.
+- *B3 — caller arguments are untrusted input.* Validate =arguments= against the
+  tool's =inputSchema=; apply the same path-containment / taint rules as any
+  ingress. Never =eval= caller-supplied strings.
+- *B4 — results are data, returned verbatim-in-CDATA-equivalent.* Tool output
+  goes back as =content[].text=; no secrets/host paths leaked beyond what the
+  tool already returns. (Provenance/taint applies to what the tool *reads*, as
+  today.)
+- *B5 — no fork.* Pure stdin/stdout read-print loop; no =system*=/=open-pipe*=
+  (spawn-segfault boundary, see [[file:CHAOS-TESTING.org][CHAOS-TESTING.org]]). Tools that themselves shell
+  out already use the libc-=system= path.
+- *B6 — capabilities honesty.* Advertise only what we implement (=tools= in v1;
+  no =prompts=/=resources=/=sampling= until built). Negotiate =protocolVersion=.
+
+* 4. Conformance (the wizard target + later the real test)
+
+A conformant sage MCP server, driven by the §1 probe sequence, MUST:
+- N1 answer =initialize= with =serverInfo.name="guile-sage"= + =capabilities.tools=.
+- N2 answer =tools/list= with only the exposed (default-safe) set, each carrying a
+  valid draft-07 =inputSchema=.
+- N3 answer =tools/call= for a safe tool with =content[].text=; reject an
+  un-exposed/unsafe tool with a JSON-RPC error (B2).
+- N4 emit *nothing* on stdout except JSON-RPC (B1) — assert no banner/log leaks.
+- N5 reject malformed/over-permission =arguments= (B3).
+Probe harness = the newline-JSON sequence used in §1, re-pointed at sage.
+
+* 5. Run / wire (dogfood: Claude Code + Emacs)
+
+One stdio entrypoint serves both (= =gmake mcp-server=):
+- *Claude Code:* =claude mcp add guile-sage -- gmake -C <path> mcp-server=
+  (stdio; Claude spawns it, speaks newline JSON-RPC, health-checks via
+  =initialize=). Observed: Claude also runs remote-HTTPS + local-SSE servers, so
+  stdio is the simplest correct choice for a co-located server.
+- *Emacs:* =mcp.el= / =gptel= MCP client pointed at the same =gmake … mcp-server=.
+
+* 6. Build sequence (we are at step 1–2)
+
+1. [X] *Contract* — this doc (observed protocol + boundary).
+2. [ ] *Wizard* — a mock =mcp-server= that completes the handshake and returns a
+   canned =tools/list= + stub =tools/call=, so we can =claude mcp add= it and SEE
+   it connect/health-check before any real dispatch.
+3. [ ] *Prototype* — wire =tools/list=/=tools/call= to real =*tools*= (safe-only).
+4. [ ] *Build* — full method coverage, errors, B1 stdout discipline.
+5. [ ] *Harden* — B2/B3 enforcement, schema validation, limits.
+6. [ ] *Red-team* — caller tries unsafe tool / path escape / stdout-poison /
+   arg-injection (negative tests, N1–N5).
+7. [ ] *Deploy* — document the wiring, add to dogfood loop.
+
+* 7. References
+- [[file:MCP-CONTRACT.org][MCP-CONTRACT.org]] — the client side (inverse of this).
+- [[file:ROADMAP.org][ROADMAP.org]] — strategic direction + dogfood scope.
+- [[file:CHAOS-TESTING.org][CHAOS-TESTING.org]] — taint + spawn boundary this reuses.
+- Bead =SAGE-t2l=.
