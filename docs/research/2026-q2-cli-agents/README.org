@@ -33,7 +33,30 @@ model providers · remote/cloud execution · telemetry/OTEL.
 2. *contract honoring* — which honor OTEL vs DD (lapdog backfills:
    claude/codex/pi have native wrappers; see telemetry work).
 
+* 2026 feature-review — broaden axes + use external catalogs (TODO)
+
+Add for the 2026 review, and prefer existing overviews over hand-surveying:
+
+- *Skills support* (new first-class axis). Multiple ecosystems now ship "skills":
+  Claude Code skills, *GitHub Copilot / Microsoft "skills"*, etc. Compare how each
+  harness defines/loads/scopes skills. Cross-ref guile-sage's own
+  [[file:../../SKILLS-CONTRACT.org][SKILLS-CONTRACT.org]] + [[file:../../SKILLS-IMPL-SPEC.org][SKILLS-IMPL-SPEC.org]].
+- *The landscape is ~50 harnesses — don't enumerate by hand.* Skill/rule
+  *deployment* tools already target a huge agent matrix (their "select target
+  agent(s)" pickers list ~50: GitHub Copilot, Claude Code, Cursor, Codex, Gemini
+  CLI, Antigravity, Amp, Augment, Cline, Continue, Crush, Droid, Goose, Junie,
+  Kilo/Kimi/Kiro/Kode, OpenCode, OpenHands, Pi, Qwen, Roo, Trae, Warp, Windsurf,
+  Zencoder, …). *Action:* find + cite the tool(s) that produce these pickers
+  (a rules/skills multi-target generator) and treat their agent list as the
+  authoritative catalog; also reuse curated lists (awesome-agent-runtime-security,
+  awesome-sandbox). We sample-deep only the harnesses we actually run.
+- *Ollama wrapper / agent.* Ollama's launch (https://ollama.com/blog/launch) —
+  evaluate whether it ships its own coding-agent/wrapper. Directly relevant:
+  Ollama is guile-sage's default backend, so an Ollama-native agent is both a
+  peer harness and a backend signal.
+
 * Status
 - [X] consolidation dir + source
 - [ ] capture + drive each harness (in progress)
 - [ ] cross-harness NOTES synthesis
+- [ ] 2026 axes: skills support, external agent-catalog sources, Ollama wrapper (above)
