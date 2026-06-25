@@ -1,0 +1,73 @@
+#+TITLE: guile-sage — Coding-agent feature review (2026-06)
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-25
+#+STATUS: Frozen — point-in-time snapshot (monthly review; not maintained)
+#+OPTIONS: toc:2 num:t ^:nil
+#+STARTUP: overview
+
+Monthly review of current coding-agent CLIs — Claude Code, OpenCode, Codex,
+Droid — mapping their features against the guile-sage capability/boundary map
+([[file:../ROADMAP.org][ROADMAP.org]]: what LiteLLM normalizes vs what the harness
+owns). Goal: see which agent features are table-stakes vs differentiators, and
+which belong to the L3 (harness-owned) surface guile-sage must build. Tracked as
+=SAGE-4fl=. Snapshot — replaces the removed v0.6-era CLI-COMPARISON.
+
+* 1. Install status (hydra / FreeBSD 14.4)
+
+| CLI         | Pkg                | Installed | Runs on FreeBSD | Version  |
+|-------------+--------------------+-----------+-----------------+----------|
+| Claude Code | =claude=           | yes       | *yes*           | 2.1.186  |
+| Codex       | =codex=            | yes       | *yes*           | 0.117.0  |
+| OpenCode    | npm =opencode-ai=  | no        | *no*            | — (1.17.10) |
+| Droid       | npm =droid= (Factory) | yes    | *no*            | — (0.158.0) |
+
+*Platform finding:* 2 of 4 don't run on FreeBSD.
+- =opencode-ai= is platform-gated in =package.json= =os= to =darwin,linux,win32=
+  → =npm i -g= fails =EBADPLATFORM= on freebsd-x64.
+- =droid= (Factory's real npm pkg — verified: homepage Factory-AI/factory,
+  @factory.ai maintainers) installs, but the binary aborts:
+  =Error: Unsupported platform: freebsd-x64=.
+- Implication: OpenCode/Droid must be reviewed from a *Linux/macOS host* (or a
+  Linux jail/VM); Claude Code + Codex can be reviewed natively here. This itself
+  is a data point — FreeBSD support is a differentiator guile-sage has and these
+  two lack.
+
+* 2. Feature matrix (to fill during the review)
+
+Keyed to the boundary map. For each agent, note presence + how it's done. Legend:
+=Y= yes · =P= partial · =N= no · =?= to verify.
+
+** L3 — agent runtime (the surface guile-sage must own)
+| Feature                         | Claude Code | Codex | OpenCode | Droid | guile-sage |
+|---------------------------------+-------------+-------+----------+-------+------------|
+| agent loop / control flow       | ?           | ?     | ?        | ?     | Y          |
+| tool registry + execution       | ?           | ?     | ?        | ?     | Y (native+MCP) |
+| MCP client                      | ?           | ?     | ?        | ?     | Y          |
+| sub-agents / multiagent         | ?           | ?     | ?        | ?     | P (aq/coordinator) |
+| memory / session persistence    | ?           | ?     | ?        | ?     | Y          |
+| sandbox / egress confinement    | ?           | ?     | ?        | ?     | design (RFC-003) |
+| hooks / lifecycle events        | ?           | ?     | ?        | ?     | Y          |
+| eval / outcomes                 | ?           | ?     | ?        | ?     | P (eval schema) |
+| permission model (safe/unsafe)  | ?           | ?     | ?        | ?     | Y          |
+| custom slash commands           | ?           | ?     | ?        | ?     | Y          |
+
+** L0–L2 — inference / governance (mostly proxy-provided for us)
+| Feature                         | Claude Code | Codex | OpenCode | Droid | note |
+|---------------------------------+-------------+-------+----------+-------+------|
+| multi-provider / model switch   | ?           | ?     | ?        | ?     | guile-sage via LiteLLM |
+| streaming                       | ?           | ?     | ?        | ?     |      |
+| structured output              | ?           | ?     | ?        | ?     |      |
+| prompt caching                  | ?           | ?     | ?        | ?     | leaky per provider |
+| reasoning/thinking surfacing    | ?           | ?     | ?        | ?     |      |
+| cost / spend visibility         | ?           | ?     | ?        | ?     | guile-sage: LiteLLM keys |
+| guardrails / PII redaction      | ?           | ?     | ?        | ?     | guile-sage: LiteLLM proxy |
+| telemetry / OTEL                 | ?           | ?     | ?        | ?     |      |
+
+* 3. Method
+- Review Claude Code + Codex natively here (=claude --help=, =codex --help=, docs).
+- Review OpenCode + Droid from docs / a Linux host (binaries won't run on FreeBSD).
+- For each L3 row, note whether the feature is native, plugin/MCP, or absent —
+  this tells us which differentiators to prioritize on guile-sage's H-layer.
+
+* 4. Findings
+(to be filled as the review proceeds — keep this a frozen snapshot once done)
