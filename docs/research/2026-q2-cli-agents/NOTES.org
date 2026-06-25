@@ -1,0 +1,74 @@
+#+TITLE: CLI coding agents — grind notes + handoff
+#+AUTHOR: claude-agent@mini (paired w/ jwalsh)
+#+DATE: 2026-06-23
+#+OPTIONS: toc:2 num:t ^:nil
+#+STARTUP: overview
+
+Handoff for the next agent. Each harness was ground in its own tmux
+window (=cli-grind= session); deep surface capture is in
+=<harness>/grind.txt= (version, full help, subcommand helps, config
+paths, MCP/slash mentions). This file is the synthesis + what's left.
+
+* 1. Captured matrix (mini, 2026-06-23)
+
+| harness | version | non-interactive run | MCP | config |
+|---------+---------+---------------------+-----+--------|
+| claude | 2.1.191 | =claude -p "…"= (print) | yes (16) | =~/.claude.json= |
+| codex | 0.142.1 | =codex exec "…"= | yes (7) | =~/.codex/= |
+| gemini | 0.46.0 | =gemini -p "…"= | yes (9) | =~/.gemini/= |
+| pi | 0.79.8 | (run mode TBD) | minimal (1) | =~/.pi/= |
+| opencode | 1.17.5 | =opencode run "…"= | yes (5) | =~/.config/opencode/= |
+| aider | 0.86.2 | =aider --message "…"= | minimal (1) | =~/.aider/= |
+| crush | v0.79.1 | =crush run "…"= | minimal (1) | (TBD) |
+
+Grind depth (lines captured): claude 676, aider 969, pi 524, codex 492,
+crush 297, opencode 160, gemini 154.
+
+* 2. Signals (the two the user named)
+
+** 2.1 General usage / familiarity
+   Google (gemini) chosen as the familiarity baseline — easiest API-key
+   setup. =antigravity= (Google's agent IDE) is the install-required
+   one: https://antigravity.google/download — NOT yet installed; the
+   familiarity drive should start there.
+
+** 2.2 Contract honoring (telemetry)
+   *None* expose OTEL/telemetry in =--help=. Per the lapdog work,
+   claude/codex/pi have *native lapdog backfills* (=backfill_{claude,
+   codex,pi}.py=) — they're captured via wrapper hooks+proxy, not
+   self-reported. gemini/opencode/aider/crush have no lapdog wrapper →
+   only the generic OTLP path (if any) or a proxy would capture them.
+
+* 3. Comparison axes (from SOURCE.org — to fill by interactive drive)
+
+Each needs an interactive tmux drive to complete (slash-command list +
+one real run). Axes: invocation patterns · permission models ·
+sandbox/isolation · MCP support · hooks · skills/custom-agents ·
+memory/persistence · custom model providers · remote/cloud.
+
+Quick reads from the grinds:
+- *invocation*: all have a one-shot run mode (=-p= / =exec= / =run= /
+  =--message=) — good for non-interactive driving + telemetry capture.
+- *MCP*: claude/gemini/codex/opencode are MCP-first; pi/aider/crush
+  minimal.
+- *config*: all dotfile-based; claude uses a single =~/.claude.json=,
+  others use a dir.
+
+* 4. What's left (next agent)
+
+1. *Interactive drive each* — tmux window per tool, launch the TUI,
+   capture the =/= slash-command list to =<harness>/slash.txt=, run one
+   trivial prompt (e.g. "reply OK") via the run mode to =<harness>/
+   drive.txt=. (Real LLM calls — needs each tool's provider key.)
+2. *antigravity* — install (familiarity signal §2.1), capture surface.
+3. *Cross-harness synthesis* — fill the §3 axes into a comparison table;
+   reconcile with SOURCE.org (which predates these versions).
+4. *Telemetry angle* — for the non-lapdog tools, test whether any honor
+   =OTEL_EXPORTER_OTLP_ENDPOINT= (the contract from
+   =mini-setup/docs/telemetry-env-contract.org=).
+
+* 5. Reference
+- Source note: =SOURCE.org= (wal.sh "CLI Coding Agents: 2026 Q2").
+- Per-harness raw: =<harness>/grind.txt=, =help.txt=, =version.txt=.
+- claude-api roadmap (what guile-sage borrows): =docs/reports/2026-q2-claude-api-roadmap.org=.
+- Guile claude-api skill: https://github.com/aygp-dr/anthropic-skills-claude-api-guile (private).

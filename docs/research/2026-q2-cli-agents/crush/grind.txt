@@ -1,0 +1,297 @@
+### crush grind — 2026-06-25T11:16:59Z
+## which: /opt/homebrew/bin/crush
+## version:
+crush version v0.79.1
+## help:
+
+  A glamorous, terminal-first AI assistant for software development and adjacent tasks                                  
+         
+  USAGE  
+         
+    crush [command] [--flags]                                                   
+            
+  EXAMPLES  
+            
+    # Run in interactive mode                                                   
+    crush                                                                       
+                                                                                
+    # Run non-interactively                                                     
+    crush run "Guess my 5 favorite Pokémon"                                     
+                                                                                
+    # Run a non-interactively with pipes and redirection                        
+    cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md  
+                                                                                
+    # Run with debug logging in a specific directory                            
+    crush --debug --cwd /path/to/project                                        
+                                                                                
+    # Run in yolo mode (auto-accept all permissions; use with care)             
+    crush --yolo                                                                
+                                                                                
+    # Run with custom data directory                                            
+    crush --data-dir /path/to/custom/.crush                                     
+                                                                                
+    # Continue a previous session                                               
+    crush --session {session-id}                                                
+                                                                                
+    # Continue the most recent session                                          
+    crush --continue                                                            
+            
+  COMMANDS  
+            
+    completion [command]                      Generate the autocompletion script for the specified shell
+    dirs                                      Show config and data directories
+    help [command]                            Help about any command
+    login [platform] [--flags]                Login Crush to a platform
+    logout [platform] [--flags]               Logout Crush from a platform
+    logs [--flags]                            View crush logs
+    models                                    List all available models from known providers
+    projects [--flags]                        List project directories
+    run [prompt...] [--flags]                 Run a single non-interactive prompt
+    server [--flags]                          Start the Crush server
+    session [command]                         Manage sessions
+    stats                                     Show usage statistics
+    update-providers [path-or-url] [--flags]  Update providers
+         
+  FLAGS  
+         
+    -C --continue                             Continue the most recent session
+    -c --cwd                                  Current working directory
+    -D --data-dir                             Custom crush data directory
+    -d --debug                                Debug
+    -h --help                                 Help
+    -H --host                                 Connect to a specific crush server host (for advanced users) (unix:///var/folders/3b/zb2ty38s41jbqm1xcylmbrzr0000gn/T/crush-501.sock)
+    -s --session                              Continue a previous session by ID
+    -v --version                              Version for crush
+    -y --yolo                                 Automatically accept all permissions (dangerous mode)
+
+
+## subcommand helps:
+### crush cat --help
+          
+   ERROR  
+          
+  Unknown command "cat" for "crush".                                                                                  
+
+  Try --help for usage.
+
+
+### crush completion --help
+
+  Generate the autocompletion script for crush for the specified shell.                                                 
+  See each sub-command's help for details on how to use the generated script.                                           
+                                                                                                                        
+         
+  USAGE  
+         
+    crush completion [command] [--flags]  
+            
+  COMMANDS  
+            
+    bash [--flags]        Generate the autocompletion script for bash
+    fish [--flags]        Generate the autocompletion script for fish
+    powershell [--flags]  Generate the autocompletion script for powershell
+    zsh [--flags]         Generate the autocompletion script for zsh
+         
+  FLAGS  
+         
+    -c --cwd              Current working directory
+    -D --data-dir         Custom crush data directory
+    -d --debug            Debug
+    -h --help             Help for completion
+    -H --host             Connect to a specific crush server host (for advanced users) (unix:///var/folders/3b/zb2ty38s41jbqm1xcylmbrzr0000gn/T/crush-501.sock)
+
+
+### crush crush --help
+          
+   ERROR  
+          
+  Unknown command "crush" for "crush".                                                                                
+
+  Try --help for usage.
+
+
+### crush dirs --help
+
+  Show where Crush stores its configuration and data,                                                                   
+  including any project-level config files discovered                                                                   
+  from the current directory up to the project root.                                                                    
+         
+  USAGE  
+         
+    crush dirs [--flags]    
+            
+  EXAMPLES  
+            
+    # Show all directories  
+    crush dirs              
+         
+  FLAGS  
+         
+    -c --cwd       Current working directory
+    -D --data-dir  Custom crush data directory
+    -d --debug     Debug
+    -h --help      Help for dirs
+    -H --host      Connect to a specific crush server host (for advanced users) (unix:///var/folders/3b/zb2ty38s41jbqm1xcylmbrzr0000gn/T/crush-501.sock)
+
+
+### crush help --help
+
+  Help provides help for any command in the application.                                                                
+  Simply type crush help [path to command] for full details.                                                            
+         
+  USAGE  
+         
+    crush help [command] [--flags]  
+         
+  FLAGS  
+         
+    -c --cwd       Current working directory
+    -D --data-dir  Custom crush data directory
+    -d --debug     Debug
+    -h --help      Help for help
+    -H --host      Connect to a specific crush server host (for advanced users) (unix:///var/folders/3b/zb2ty38s41jbqm1xcylmbrzr0000gn/T/crush-501.sock)
+
+
+### crush login --help
+
+  Login Crush to a specified platform.                                                                                  
+  The platform should be provided as an argument.                                                                       
+  Available platforms are: hyper, copilot.                                                                              
+         
+  USAGE  
+         
+    crush login [platform] [--flags]                     
+            
+  EXAMPLES  
+            
+    # Authenticate with Charm Hyper                      
+    crush login                                          
+                                                         
+    # Authenticate with GitHub Copilot                   
+    crush login copilot                                  
+                                                         
+    # Force re-authentication even if already logged in  
+    crush login -f copilot                               
+         
+  FLAGS  
+         
+    -c --cwd       Current working directory
+    -D --data-dir  Custom crush data directory
+    -d --debug     Debug
+    -f --force     Force re-authentication even if already logged in
+    -h --help      Help for login
+    -H --host      Connect to a specific crush server host (for advanced users) (unix:///var/folders/3b/zb2ty38s41jbqm1xcylmbrzr0000gn/T/crush-501.sock)
+
+
+### crush logout --help
+
+  Logout Crush from a specified platform, removing stored credentials.                                                  
+  The platform should be provided as an argument.                                                                       
+  If no argument is given, a list of logged-in platforms will be shown.                                                 
+  Available platforms are: hyper, copilot.                                                                              
+         
+  USAGE  
+         
+    crush logout [platform] [--flags]  
+            
+  EXAMPLES  
+            
+    # Sign out from Charm Hyper        
+    crush logout hyper                 
+                                       
+    # Sign out from GitHub Copilot     
+    crush logout copilot               
+         
+  FLAGS  
+         
+    -c --cwd       Current working directory
+    -D --data-dir  Custom crush data directory
+    -d --debug     Debug
+    -f --force     Skip logout confirmation prompt
+    -h --help      Help for logout
+    -H --host      Connect to a specific crush server host (for advanced users) (unix:///var/folders/3b/zb2ty38s41jbqm1xcylmbrzr0000gn/T/crush-501.sock)
+
+
+### crush logs --help
+
+  View the logs generated by Crush. This command allows you to see the log output for debugging and monitoring.         
+         
+  USAGE  
+         
+    crush logs [--flags]  
+         
+  FLAGS  
+         
+    -c --cwd       Current working directory
+    -D --data-dir  Custom crush data directory
+    -d --debug     Debug
+    -f --follow    Follow log output
+    -h --help      Help for logs
+    -H --host      Connect to a specific crush server host (for advanced users) (unix:///var/folders/3b/zb2ty38s41jbqm1xcylmbrzr0000gn/T/crush-501.sock)
+    -t --tail      Show only the last N lines default: 1000 for performance (1000)
+
+
+### crush models --help
+
+  List all available models from known providers. Shows provider name and model IDs. Unconfigured providers are marked  
+  with (not configured).                                                                                                
+         
+  USAGE  
+         
+    crush models [--flags]       
+            
+  EXAMPLES  
+            
+    # List all available models  
+    crush models                 
+                                 
+    # Search models              
+    crush models gpt5            
+         
+  FLAGS  
+         
+    -c --cwd       Current working directory
+    -D --data-dir  Custom crush data directory
+    -d --debug     Debug
+    -h --help      Help for models
+    -H --host      Connect to a specific crush server host (for advanced users) (unix:///var/folders/3b/zb2ty38s41jbqm1xcylmbrzr0000gn/T/crush-501.sock)
+
+
+### crush projects --help
+
+  List directories where Crush project data is known to exist                                                           
+         
+  USAGE  
+         
+    crush projects [--flags]        
+            
+  EXAMPLES  
+            
+    # List all projects in a table  
+    crush projects                  
+                                    
+    # Output projects data as JSON  
+    crush projects --json           
+         
+  FLAGS  
+         
+    -c --cwd       Current working directory
+    -D --data-dir  Custom crush data directory
+    -d --debug     Debug
+    -h --help      Help for projects
+    -H --host      Connect to a specific crush server host (for advanced users) (unix:///var/folders/3b/zb2ty38s41jbqm1xcylmbrzr0000gn/T/crush-501.sock)
+    --json         Output as JSON
+
+
+## config/dotfiles:
+## mcp/telemetry/slash mentions in help:
+    # Run in interactive mode                                                   
+    # Run non-interactively                                                     
+    crush run "Guess my 5 favorite Pokémon"                                     
+    # Run a non-interactively with pipes and redirection                        
+    cat README.md | crush run "make this more glamorous" > GLAMOROUS_README.md  
+    # Run with debug logging in a specific directory                            
+    # Run in yolo mode (auto-accept all permissions; use with care)             
+    # Run with custom data directory                                            
+    dirs                                      Show config and data directories
+    run [prompt...] [--flags]                 Run a single non-interactive prompt

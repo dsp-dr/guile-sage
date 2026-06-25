@@ -1,0 +1,160 @@
+### opencode grind — 2026-06-25T11:16:59Z
+## which: /opt/homebrew/bin/opencode
+## version:
+1.17.5
+## help:
+⠀                                ▄     
+█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+█  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+Commands:
+  opencode completion          generate shell completion script
+  opencode acp                 start ACP (Agent Client Protocol) server
+  opencode mcp                 manage MCP (Model Context Protocol) servers
+  opencode [project]           start opencode tui                                          [default]
+  opencode attach <url>        attach to a running opencode server
+  opencode run [message..]     run opencode with a message
+  opencode debug               debugging and troubleshooting tools
+  opencode providers           manage AI providers and credentials                   [aliases: auth]
+  opencode agent               manage agents
+  opencode upgrade [target]    upgrade opencode to the latest or a specific version
+  opencode uninstall           uninstall opencode and remove all related files
+  opencode serve               starts a headless opencode server
+  opencode web                 start opencode server and open web interface
+  opencode models [provider]   list all available models
+  opencode stats               show token usage and cost statistics
+  opencode export [sessionID]  export session data as JSON
+  opencode import <file>       import session data from JSON file or URL
+  opencode github              manage GitHub agent
+  opencode pr <number>         fetch and checkout a GitHub PR branch, then run opencode
+  opencode session             manage sessions
+  opencode plugin <module>     install plugin and update config                      [aliases: plug]
+  opencode db                  database tools
+
+Positionals:
+  project  path to start opencode in                                                        [string]
+
+Options:
+  -h, --help         show help                                                             [boolean]
+  -v, --version      show version number                                                   [boolean]
+      --print-logs   print logs to stderr                                                  [boolean]
+      --log-level    log level                  [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure         run without external plugins                                          [boolean]
+      --port         port to listen on                                         [number] [default: 0]
+      --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
+      --mdns         enable mDNS service discovery (defaults hostname to 0.0.0.0)
+                                                                          [boolean] [default: false]
+      --mdns-domain  custom domain name for mDNS service (default: opencode.local)
+                                                                [string] [default: "opencode.local"]
+      --cors         additional domains to allow for CORS                      [array] [default: []]
+  -m, --model        model to use in the format of provider/model                           [string]
+  -c, --continue     continue the last session                                             [boolean]
+  -s, --session      session id to continue                                                 [string]
+      --fork         fork the session when continuing (use with --continue or --session)   [boolean]
+      --prompt       prompt to use                                                          [string]
+      --agent        agent to use                                                           [string]
+
+## subcommand helps:
+### opencode opencode --help
+⠀                                ▄     
+█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+█  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+Commands:
+  opencode completion          generate shell completion script
+  opencode acp                 start ACP (Agent Client Protocol) server
+  opencode mcp                 manage MCP (Model Context Protocol) servers
+  opencode [project]           start opencode tui                                          [default]
+  opencode attach <url>        attach to a running opencode server
+  opencode run [message..]     run opencode with a message
+  opencode debug               debugging and troubleshooting tools
+  opencode providers           manage AI providers and credentials                   [aliases: auth]
+  opencode agent               manage agents
+  opencode upgrade [target]    upgrade opencode to the latest or a specific version
+  opencode uninstall           uninstall opencode and remove all related files
+  opencode serve               starts a headless opencode server
+  opencode web                 start opencode server and open web interface
+  opencode models [provider]   list all available models
+  opencode stats               show token usage and cost statistics
+  opencode export [sessionID]  export session data as JSON
+  opencode import <file>       import session data from JSON file or URL
+  opencode github              manage GitHub agent
+  opencode pr <number>         fetch and checkout a GitHub PR branch, then run opencode
+  opencode session             manage sessions
+  opencode plugin <module>     install plugin and update config                      [aliases: plug]
+  opencode db                  database tools
+
+Positionals:
+  project  path to start opencode in                                                        [string]
+
+Options:
+  -h, --help         show help                                                             [boolean]
+  -v, --version      show version number                                                   [boolean]
+      --print-logs   print logs to stderr                                                  [boolean]
+      --log-level    log level                  [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure         run without external plugins                                          [boolean]
+      --port         port to listen on                                         [number] [default: 0]
+      --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
+
+### opencode project --help
+⠀                                ▄     
+█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+█  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀  ▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+Commands:
+  opencode completion          generate shell completion script
+  opencode acp                 start ACP (Agent Client Protocol) server
+  opencode mcp                 manage MCP (Model Context Protocol) servers
+  opencode [project]           start opencode tui                                          [default]
+  opencode attach <url>        attach to a running opencode server
+  opencode run [message..]     run opencode with a message
+  opencode debug               debugging and troubleshooting tools
+  opencode providers           manage AI providers and credentials                   [aliases: auth]
+  opencode agent               manage agents
+  opencode upgrade [target]    upgrade opencode to the latest or a specific version
+  opencode uninstall           uninstall opencode and remove all related files
+  opencode serve               starts a headless opencode server
+  opencode web                 start opencode server and open web interface
+  opencode models [provider]   list all available models
+  opencode stats               show token usage and cost statistics
+  opencode export [sessionID]  export session data as JSON
+  opencode import <file>       import session data from JSON file or URL
+  opencode github              manage GitHub agent
+  opencode pr <number>         fetch and checkout a GitHub PR branch, then run opencode
+  opencode session             manage sessions
+  opencode plugin <module>     install plugin and update config                      [aliases: plug]
+  opencode db                  database tools
+
+Positionals:
+  project  path to start opencode in                                                        [string]
+
+Options:
+  -h, --help         show help                                                             [boolean]
+  -v, --version      show version number                                                   [boolean]
+      --print-logs   print logs to stderr                                                  [boolean]
+      --log-level    log level                  [string] [choices: "DEBUG", "INFO", "WARN", "ERROR"]
+      --pure         run without external plugins                                          [boolean]
+      --port         port to listen on                                         [number] [default: 0]
+      --hostname     hostname to listen on                           [string] [default: "127.0.0.1"]
+
+## config/dotfiles:
+/Users/jwalsh/.config/opencode:
+total 56
+drwxr-xr-x   7 jwalsh  staff    224 May 11 11:52 .
+drwxr-x--x  21 jwalsh  staff    672 Jun 20 00:48 ..
+-rw-r--r--   1 jwalsh  staff     63 May 11 08:14 .gitignore
+drwxr-xr-x  28 jwalsh  staff    896 May 11 08:15 node_modules
+-rw-r--r--   1 jwalsh  staff    145 Jun 25 06:19 opencode.json
+-rw-r--r--   1 jwalsh  staff  13746 May 11 08:15 package-lock.json
+-rw-r--r--   1 jwalsh  staff     65 May 11 08:15 package.json
+## mcp/telemetry/slash mentions in help:
+  opencode mcp                 manage MCP (Model Context Protocol) servers
+  opencode attach <url>        attach to a running opencode server
+  opencode run [message..]     run opencode with a message
+  opencode pr <number>         fetch and checkout a GitHub PR branch, then run opencode
+  opencode plugin <module>     install plugin and update config                      [aliases: plug]
+      --print-logs   print logs to stderr                                                  [boolean]
+      --pure         run without external plugins                                          [boolean]
