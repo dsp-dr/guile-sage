@@ -38,18 +38,23 @@ Keyed to the boundary map. For each agent, note presence + how it's done. Legend
 =Y= yes · =P= partial · =N= no · =?= to verify.
 
 ** L3 — agent runtime (the surface guile-sage must own)
+Claude Code 2.1.186 + Codex 0.117.0 inferred from =--help= (best-effort, native).
+OpenCode/Droid =?= — not runnable on FreeBSD (need a Linux/macOS host).
 | Feature                         | Claude Code | Codex | OpenCode | Droid | guile-sage |
 |---------------------------------+-------------+-------+----------+-------+------------|
-| agent loop / control flow       | ?           | ?     | ?        | ?     | Y          |
-| tool registry + execution       | ?           | ?     | ?        | ?     | Y (native+MCP) |
-| MCP client                      | ?           | ?     | ?        | ?     | Y          |
-| sub-agents / multiagent         | ?           | ?     | ?        | ?     | P (aq/coordinator) |
-| memory / session persistence    | ?           | ?     | ?        | ?     | Y          |
-| sandbox / egress confinement    | ?           | ?     | ?        | ?     | design (RFC-003) |
-| hooks / lifecycle events        | ?           | ?     | ?        | ?     | Y          |
-| eval / outcomes                 | ?           | ?     | ?        | ?     | P (eval schema) |
-| permission model (safe/unsafe)  | ?           | ?     | ?        | ?     | Y          |
-| custom slash commands           | ?           | ?     | ?        | ?     | Y          |
+| agent loop / control flow       | Y (interactive + -p) | Y (interactive + =exec=) | ? | ? | Y |
+| tool registry + execution       | Y (=--allowedTools=, Bash/Edit) | Y | ? | ? | Y (native+MCP) |
+| MCP client                      | Y (=--mcp-config=) | Y (=codex mcp=) | ? | ? | Y |
+| MCP *server* mode               | N | Y (=codex mcp-server= stdio) | ? | ? | N (forward-looking: LSP) |
+| sub-agents / multiagent         | Y (=--agent=, =--agents= JSON) | P (=fork= sessions) | ? | ? | P (aq/coordinator) |
+| memory / session persistence    | Y (=-c/--continue=, auto-memory, CLAUDE.md) | Y (=resume=/=fork=) | ? | ? | Y |
+| sandbox / egress confinement    | P (perm-modes; "sandbox, no internet" guidance) | Y (first-class =codex sandbox= + =sandbox_permissions=) | ? | ? | design (RFC-003) |
+| hooks / lifecycle events        | Y (hooks; =--bare= skips them) | ? | ? | ? | Y |
+| eval / outcomes                 | ? | P (=codex review= non-interactive) | ? | ? | P (eval schema) |
+| permission model (safe/unsafe)  | Y (=--permission-mode=, allow/deny tools) | Y (disk-access levels in =sandbox_permissions=) | ? | ? | Y |
+| custom slash commands / skills  | Y (skills, =/skill-name=, =--disable-slash-commands=) | ? | ? | ? | Y |
+| plugins                         | Y (=--plugin-dir=, =--plugin-url=) | ? | ? | ? | design (PLUGINS-SPEC) |
+| cloud / remote tasks            | P (=--chrome=, web) | Y (=codex cloud=, =--remote=) | ? | ? | N |
 
 ** L0–L2 — inference / governance (mostly proxy-provided for us)
 | Feature                         | Claude Code | Codex | OpenCode | Droid | note |
@@ -69,5 +74,43 @@ Keyed to the boundary map. For each agent, note presence + how it's done. Legend
 - For each L3 row, note whether the feature is native, plugin/MCP, or absent —
   this tells us which differentiators to prioritize on guile-sage's H-layer.
 
-* 4. Findings
-(to be filled as the review proceeds — keep this a frozen snapshot once done)
+** L0–L2 — inference / governance (Claude Code + Codex, best-effort)
+| Feature                         | Claude Code | Codex | note |
+|---------------------------------+-------------+-------+------|
+| multi-provider / model switch   | P (Anthropic + Bedrock/Vertex/Foundry) | Y (=-c model=…=, local-OSS provider flag, config.toml) | guile-sage: any via LiteLLM |
+| non-interactive / scriptable    | Y (=-p/--print=) | Y (=codex exec=) | both pipe-friendly |
+| code review (built-in)          | ? | Y (=codex review=) | a table-stakes verb |
+| config surface                  | =--settings=, setting-sources | =~/.codex/config.toml=, =-c k=v=, feature flags | |
+
+* 4. Findings & roadmap inferences (best-effort, native Claude Code + Codex)
+
+What the two natively-runnable agents tell us for guile-sage's H-layer
+([[file:../ROADMAP.org][ROADMAP.org]]):
+
+1. *Sandbox + permission model is table-stakes.* Codex ships a first-class
+   =codex sandbox= subcommand with =sandbox_permissions= (disk-access levels);
+   Claude Code has permission-modes + "recommended only for sandboxes with no
+   internet" guidance. Both validate RFC-003's direction. *Concrete to mirror:*
+   Codex's tiered =sandbox_permissions= (e.g. disk-full-read-access) is a clean
+   model for our HC-01 fs-confinement levels.
+2. *MCP is universal — and "be an MCP server" is emerging.* Both are MCP
+   clients; *Codex can also run AS an MCP server* (=codex mcp-server= stdio).
+   guile-sage is client-only; an MCP-server mode (we have it only as
+   forward-looking LSP) would let other agents call sage's tools. Roadmap candidate.
+3. *First-class sub-agents.* Claude Code takes =--agents= JSON to define custom
+   sub-agents inline; Codex has session =fork=. guile-sage's multiagent is
+   =P= (aq/coordinator) — promoting sub-agents to a first-class, inline-definable
+   surface is a gap worth a bead.
+4. *Session fork/resume.* Codex =resume=/=fork=, Claude =--continue=. guile-sage
+   has session persistence (=Y=) but no explicit *fork* (branch a session) —
+   small, high-value add.
+5. *Built-in code review verb.* =codex review= (non-interactive) is a discrete
+   capability; pairs with our eval lineage. Consider a =sage review= path.
+6. *Cloud/remote tasks.* Codex =cloud= + =--remote= app-server; out of scope for
+   a self-hosted/LAN posture, but notable as a direction the field is taking.
+7. *Platform reality:* Claude Code + Codex run on FreeBSD; OpenCode + Droid do
+   not — FreeBSD support is a guile-sage differentiator. Finish the matrix's
+   OpenCode/Droid columns from a Linux/macOS host (=SAGE-4fl=).
+
+These are =--help=-level inferences, not a hands-on feature test — good enough to
+steer the roadmap; deepen per-feature if a row drives a real decision.
