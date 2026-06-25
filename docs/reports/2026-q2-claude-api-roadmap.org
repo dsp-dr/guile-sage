@@ -1,0 +1,95 @@
+#+TITLE: Claude-API features → guile-sage roadmap (direct + via LiteLLM generic wrappers)
+#+AUTHOR: claude-agent (paired w/ jwalsh)
+#+DATE: 2026-06-23
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+How to add Anthropic Claude-API features to guile-sage *incrementally*,
+choosing per-feature between the *direct Anthropic wire* (the Guile
+=claude-api= skill:
+[[https://github.com/aygp-dr/anthropic-skills-claude-api-guile][anthropic-skills-claude-api-guile]])
+and the *LiteLLM generic wrapper* (OpenAI-shape, already wired). The
+LiteLLM column is the user's leak analysis — where the generic wrapper
+does *not* fully carry a feature.
+
+Legend (from the leak table):
+=N= native/clean · =S= small mapping · =L= leaks (partial / provider-uneven)
+· =H= harness-owned (LiteLLM never does it — guile-sage must).
+
+* 1. L0/L1 — inference + plumbing
+
+| Feature (claude-api)            | LiteLLM | direct Anthropic | guile-sage status / next |
+|---------------------------------+---------+------------------+--------------------------|
+| chat completion (messages)      | N       | =/v1/messages=   | DONE (ollama+openai+gemini); add anthropic-direct provider |
+| streaming                       | N (SSE→unified) | SSE deltas | DONE for ollama NDJSON; add SSE assembler ([[https://github.com/aygp-dr/anthropic-skills-claude-api-guile/blob/main/guile/claude-api/streaming.md][streaming.md]]) |
+| tool use / function calling     | N (tool_choice + parallel vary) | =tool_use=/=tool_result= | DONE for ollama; add Anthropic block shape ([[https://github.com/aygp-dr/anthropic-skills-claude-api-guile/blob/main/guile/claude-api/tool-use.md][tool-use.md]]) |
+| structured output / json schema | L (some emulate) | =output_config.format= + =strict= | ROADMAP — eval cases want it |
+| multimodal input (vision/audio) | L (matrix) | image/document blocks | ROADMAP (image-in; we already image-OUT) |
+| files-as-input                  | L (upload diverges) | =/v1/files= | ROADMAP — pairs with scratch store ([[https://github.com/aygp-dr/anthropic-skills-claude-api-guile/blob/main/guile/claude-api/files-api.md][files-api.md]]) |
+| embeddings                      | N (=/embeddings=) | n/a (use a provider) | ROADMAP — for memory/RAG |
+| token counting                  | S (tiktoken ≠ provider) | =/v1/messages/count_tokens= (native) | *PRIORITY* — guile-sage estimates; native is accurate (Fable 5 ~+30%) |
+| prompt caching                  | L (Bedrock drops beta; TTL/cache_creation Anthropic-only) | =cache_control: ephemeral= | *PRIORITY* — big cost win on stable system prompt + tools |
+| reasoning/thinking output       | L (thinking_blocks replay) | adaptive thinking blocks | ROADMAP — must replay blocks unchanged same-model |
+| reasoning_effort / budget       | S (mapped per provider) | =output_config.effort= | ROADMAP — map our model-tier to effort |
+| cost / usage accounting         | L (cached-token cost still landing) | =usage.*= incl. cache tokens | guile-sage has counters; wire real $ (we pass cost=0 for ollama) |
+| error taxonomy                  | N (→ OpenAI exc types) | Anthropic codes | DONE-ish (http-post retries 429/5xx); map refusal stop_reason |
+| batches                         | L (only some providers) | =/v1/messages/batches= 50% | ROADMAP — run eval suite as one batch ([[https://github.com/aygp-dr/anthropic-skills-claude-api-guile/blob/main/guile/claude-api/batches.md][batches.md]]) |
+| files API (storage)             | L (lifecycle diverges) | =/v1/files= | ROADMAP |
+| model migration / aliasing      | N (model_list indirection) | model id strings | DONE (provider.scm); pin Anthropic ids |
+| endpoint routing (chat vs /responses) | L (param forces route) | n/a | note: affects reproducibility |
+
+* 2. L2 — governance (LiteLLM proxy owns these)
+
+| Feature                         | LiteLLM | guile-sage |
+|---------------------------------+---------+------------|
+| virtual keys / auth             | N (proxy) | DONE — the Issuer + ephemeral keys (RFC-003) |
+| spend / budget per project      | N (proxy) | DONE — team/key budgets |
+| telemetry callbacks (OTEL)      | N (hook) — bind to your OTLP | guile-sage emits OTLP; nexus pipeline WIP ([[file:../../aygp-dr/mini-setup/docs/telemetry-env-contract.org][B1–B4]]) |
+| guardrails                      | L (partial, provider-uneven) | proxy-side; phone-redact gap found |
+
+L2 is why we keep LiteLLM in the path for *governed* runs: it gives
+virtual keys + spend + guardrails for free. For *isolated* tests we go
+direct (avoid the dot-product).
+
+* 3. L3 — agent runtime (HARNESS-OWNED — guile-sage generalizes managed-agents)
+
+LiteLLM passes schemas, never runs the loop. These are guile-sage's to
+own — and they map onto the Anthropic *Managed Agents* surface, which we
+mirror *locally* (Bastille jails + the aq coordinator instead of
+Anthropic-hosted containers).
+
+| Feature (managed-agents surface) | guile-sage analog |
+|----------------------------------+-------------------|
+| agent loop / control flow        | the REPL multi-step tool chain (governance tuple drives it) |
+| tool registry + execution        | =(sage tools)= registry + execute-tool (we run tools; LiteLLM never does) |
+| memory                           | ROADMAP — scratch store is the seed; embeddings + recall |
+| environments / sandboxes         | RFC-003 — Bastille jails / sandbox-exec / sbx / Deno (our self-hosted) |
+| multiagent coordination          | aq / the Issuer / petclinic coordinator |
+| events / webhooks                | ROADMAP — hooks.scm is the local event spine |
+| scheduled deployments            | cron routines (the /loop + schedule skill) |
+| outcomes / eval                  | eval-sage.sh + skill-eval lineage |
+
+* 4. Incremental order (what to land first)
+
+1. *token counting* (L0, native) — accuracy now; cheap; unblocks budget.
+2. *prompt caching* (L1) — biggest cost win; stable system+tools prefix.
+3. *anthropic-direct provider* (=SAGE_PROVIDER=anthropic=) — the Guile
+   wrapper's =/v1/messages= path, so we can A/B direct vs LiteLLM.
+4. *structured output* (=output_config.format=) — hardens eval cases.
+5. *batches* — run the eval suite at 50% offline.
+6. *memory* (L3) — embeddings + scratch recall (the managed-agents memory
+   analog, harness-owned).
+
+Each is a small, testable slice. Direct-Anthropic features come from the
+Guile skill repo; governed runs stay on LiteLLM; L3 is ours regardless of
+provider.
+
+* 5. References
+
+- Guile claude-api skill: https://github.com/aygp-dr/anthropic-skills-claude-api-guile
+- Clojure placeholder: https://github.com/aygp-dr/anthropic-skills-claude-api-clojure (private)
+- upstream =claude-api= skill (=shared/=): agent-design, prompt-caching,
+  token-counting, tool-use-concepts, managed-agents-*
+- RFC-003 (sandboxes / managed-agents local analog): =docs/rfc/003-ephemeral-key-sandbox.org=
+- telemetry contract: =mini-setup/docs/telemetry-env-contract.org=
+- CLI-agents survey: =docs/research/2026-q2-cli-agents/= (this consolidation)

@@ -1,0 +1,607 @@
+#+TITLE: CLI Coding Agents: 2026 Q2 Comparison
+#+SUBTITLE: Claude Code, Copilot CLI, Gemini CLI, Codex CLI, Kiro, OpenCode
+#+AUTHOR: Jason Walsh
+#+EMAIL: j@wal.sh
+#+DATE: 2026-04-18
+#+URL: https://wal.sh/research/2026-q2-cli-coding-agents/
+#+KEYWORDS: claude code, copilot cli, gemini cli, codex cli, kiro, opencode, ai agents, terminal, mcp, comparison
+#+DESCRIPTION: Feature-surface comparison of six terminal-based AI coding agents in 2026 Q2 -- invocation, permissions, MCP, hooks, skills, memory, sandboxing, custom models.
+#+OPTIONS: toc:2 num:t
+
+#+ATTR_HTML: :alt CLI Coding Agents -- 2026 Q2 Comparison banner :class banner-leaderboard :width 728 :height 90
+[[file:banner.png]]
+
+
+* Overview
+
+Six terminal-based AI coding agents compete for the developer's
+shell in 2026 Q2. This note compares their feature surfaces ---
+not their model quality (which changes monthly) but their
+*architectural bets*: what contract does each offer between the
+developer, the agent, and the tools the agent can invoke?
+
+The comparison is structured around the surfaces that matter for an
+operator choosing a daily driver: invocation patterns, permission
+models, MCP support, hooks, skills/agents, memory, sandboxing, and
+model portability.
+
+*Scope note:* this covers the six agents with the deepest CLI
+surfaces as of April 2026. Other notable tools (Aider, Cursor Agent,
+Windsurf/Cline, Continue) are omitted either because their primary
+surface is an IDE extension rather than a terminal CLI, or because
+their CLI surface is thin enough that comparison at this level of
+detail is not informative. See
+[[file:../2025-terminal-ai-agents/index.org][Terminal AI Agents 2025]] for
+the broader landscape including IDE-first tools.
+
+* The agents
+
+| Agent         | Vendor    | CLI command  | Default model                  | License     | FreeBSD 15.0 |
+|---------------+-----------+--------------+--------------------------------+-------------+--------------|
+| Claude Code   | Anthropic | =claude=     | Opus 4.6 (1M ctx)              | Proprietary | 2.1.89       |
+| Copilot CLI   | GitHub    | =copilot=    | Claude Sonnet 4.5 (1x)         | Proprietary | IDE only     |
+| Gemini CLI    | Google    | =gemini=     | Gemini 2.5 Pro / 3 Pro Preview | Open source | 0.47.0       |
+| Codex CLI     | OpenAI    | =codex=      | GPT-5.4                        | Proprietary | BLOCKED      |
+| Kiro          | AWS       | =kiro-cli=   | Claude Sonnet 4 (via Bedrock)  | Proprietary | IDE only     |
+| OpenCode      | Anomaly   | =opencode=   | User-configured (75+ providers)| Open source | BLOCKED      |
+| Goose         | Block     | =goose=      | User-configured                | Open source | 0.9.11       |
+| Aider         | Gauthier  | =aider=      | User-configured                | Open source | 0.86.1 (pkg) |
+
+Notable: Copilot CLI defaults to a /Claude/ model, not a GitHub/OpenAI
+model. Gemini CLI, OpenCode, Goose, and Aider are open source. Goose
+and Aider are added in the June 2026 update as they have full CLI
+surfaces comparable to the original six. On FreeBSD 15.0, only Claude
+Code, Gemini CLI, and Goose run natively; Codex CLI and OpenCode have
+hard platform checks that block FreeBSD.
+
+* Invocation patterns
+
+| Feature              | Claude Code       | Copilot CLI     | Gemini CLI         | Codex CLI            | Kiro              | OpenCode         |
+|----------------------+-------------------+-----------------+--------------------+----------------------+-------------------+------------------|
+| Interactive          | =claude=          | =copilot=       | =gemini=           | =codex=              | =kiro-cli=        | =opencode=       |
+| Non-interactive      | =claude -p=       | =copilot -p=    | =gemini -p=        | =codex exec= / =e=  | headless mode     | -                |
+| Continue session     | =claude -c=       | -               | =gemini -r latest= | =codex resume=       | -                 | -                |
+| Resume by ID         | =claude -r <id>=  | -               | =gemini -r <id>=   | =codex resume <id>=  | -                 | -                |
+| Fork session         | =/branch=         | -               | -                  | =codex fork=         | -                 | -                |
+| Pipe stdin           | =cat f \vert claude -p= | =cat f \vert copilot= | =cat f \vert gemini= | =- (stdin)=    | -                 | -                |
+| Image input          | -                 | -               | -                  | =--image=            | -                 | image drag-drop  |
+| Worktree             | =-w=              | -               | -                  | -                    | -                 | -                |
+| Tmux integration     | =--tmux=          | -               | -                  | -                    | -                 | -                |
+| Output format        | text/json/stream  | -               | text/json/stream   | text/json            | -                 | -                |
+| JSON schema output   | =--json-schema=   | -               | -                  | =--output-schema=    | -                 | -                |
+| Budget cap           | =--max-budget-usd= | -              | -                  | -                    | -                 | -                |
+
+Claude Code and Codex CLI have the deepest non-interactive / scripting
+surfaces. Gemini CLI matches on output format and session management.
+Copilot CLI is the simplest invocation surface. Kiro's CLI is the
+least publicly documented.
+
+* Permission models
+
+| Feature                     | Claude Code            | Copilot CLI          | Gemini CLI          | Codex CLI                | Kiro             | OpenCode            |
+|-----------------------------+------------------------+----------------------+---------------------+--------------------------+------------------+---------------------|
+| Per-tool allow/deny         | =--allowedTools=       | =--allow-tool=       | Policy Engine       | =--allow-tool=           | Whitelist        | =ask/allow/deny=    |
+| Per-tool deny               | =--disallowedTools=    | =--deny-tool=        | Policy Engine       | =--deny-tool=            | -                | =deny= per tool     |
+| Session auto-allow          | =/permissions=         | Option 2 (session)   | =/permissions=      | =/permissions=           | Trusted commands | =/permissions=      |
+| Permission modes            | 6 modes                | 3 options            | 4 modes             | 3 tiers                  | via custom agents | per-tool config     |
+| Skip all permissions        | =--dangerously-skip=   | =--allow-all-tools=  | =--yolo= (deprecated) | =--yolo=              | agent allowedTools | -                  |
+| Bare / minimal mode         | =--bare=               | -                    | -                   | =--ephemeral=            | -                | -                   |
+
+** Permission mode comparison
+
+| Mode                  | Claude Code                    | Copilot CLI           | Gemini CLI         | Codex CLI              |
+|-----------------------+--------------------------------+-----------------------+--------------------+------------------------|
+| Read-only / plan      | =--permission-mode plan=       | -                     | =--approval-mode plan= | =--sandbox read-only= |
+| Ask per action        | =--permission-mode default=    | Option 1 (each time)  | =--approval-mode default= | =--ask-for-approval untrusted= |
+| Auto-edit, ask shell  | =--permission-mode acceptEdits= | -                    | =--approval-mode auto_edit= | =--ask-for-approval on-request= |
+| Full auto             | =--permission-mode bypassPermissions= | =--allow-all-tools= | =--approval-mode yolo= | =--ask-for-approval never= |
+| Classifier-driven     | =--permission-mode auto=       | -                     | -                  | -                      |
+
+Claude Code's =auto= mode (permission classifier) is unique --- no
+other agent has a model-driven permission tier. Codex CLI's separation
+of =--sandbox= (filesystem) from =--ask-for-approval= (tool invocation)
+is architecturally cleaner than a single permission mode.
+
+* Sandbox / isolation
+
+| Feature               | Claude Code         | Copilot CLI        | Gemini CLI                  | Codex CLI                    | Kiro        | OpenCode      |
+|-----------------------+---------------------+--------------------+-----------------------------+------------------------------+-------------+---------------|
+| OS-level sandbox      | -                   | -                  | macOS Seatbelt, gVisor,     | macOS Seatbelt, Linux        | -           | -             |
+|                       |                     |                    | Docker/Podman, LXC          | Landlock+seccomp             |             |               |
+| Sandbox tiers         | -                   | -                  | permissive/restrictive/strict | read-only/workspace-write/  | -           | Snapshot only |
+|                       |                     |                    |                             | danger-full-access           |             |               |
+| Worktree isolation    | =isolation: worktree= | -                | =-w= (experimental)         | -                            | -           | -             |
+| Network deny          | =sandbox.network.deniedDomains= | -     | -                           | -                            | -           | -             |
+| Sandbox CLI tool      | -                   | -                  | -                           | =codex sandbox=              | -           | -             |
+
+Gemini CLI has the most mature OS-level sandboxing (four backends).
+Codex CLI has the cleanest tier model and a standalone =codex sandbox=
+tool for running arbitrary commands under the agent's sandbox policy.
+Claude Code has no OS-level sandbox --- worktree isolation is
+filesystem-only, not process or network isolated. Kiro and OpenCode
+have no sandbox primitives.
+
+* MCP support
+
+| Feature                | Claude Code        | Copilot CLI       | Gemini CLI          | Codex CLI          | Kiro            | OpenCode         |
+|------------------------+--------------------+-------------------+---------------------+--------------------+-----------------+------------------|
+| MCP config file        | =.mcp.json=        | settings          | =settings.json=     | =config.toml=     | settings file   | =opencode.json=  |
+| CLI MCP management     | =claude mcp=       | -                 | =gemini mcp=        | =codex mcp=       | MCP panel       | -                |
+| Multiple configs       | =--mcp-config a b= | -                 | -                   | -                  | -               | -                |
+| Strict (ignore others) | =--strict-mcp-config= | -              | -                   | -                  | -               | -                |
+| Server auth (OAuth)    | =claude setup-token= | -               | -                   | =codex mcp login=  | -               | -                |
+| MCP mention syntax     | -                  | -                 | =@server=           | -                  | =#= prefix      | -                |
+| Run as MCP server      | -                  | -                 | -                   | =codex mcp-server= | -               | -                |
+
+Codex CLI's =codex mcp-server= is unique --- it can run /as/ an MCP
+server, meaning another agent can consume Codex as a tool. Claude Code
+has the most flexible multi-config story (=--mcp-config= accepts
+multiple files).
+
+* Hooks
+
+| Feature                | Claude Code                | Copilot CLI       | Gemini CLI     | Codex CLI        | Kiro                    | OpenCode |
+|------------------------+----------------------------+-------------------+----------------+------------------+-------------------------+----------|
+| Hook support           | Yes                        | Yes                    | Yes            | Yes              | Yes                 | No       |
+| Pre/Post tool use      | Yes                        | Yes                    | Yes            | Yes              | Yes                 | -        |
+| Session lifecycle      | SessionStart/End           | sessionStart/End       | -              | -                | AgentSpawn/Stop     | -        |
+| User prompt hook       | UserPromptSubmit           | userPromptSubmitted    | -              | -                | UserPromptSubmit    | -        |
+| Response hook          | AssistantResponseComplete  | -                      | -              | -                | -                   | -        |
+| Error hook             | -                          | errorOccurred          | -              | -                | -                   | -        |
+| Pre-compact            | PreCompact                 | -                      | -              | -                | -                   | -        |
+| Conditional hooks      | =if= hooks                 | -                      | -              | -                | -                   | -        |
+| Veto capability        | Yes (deny decision)        | -                      | -              | -                | Yes (exit code 2)   | -        |
+
+Claude Code has the most complete hook surface (7 event types +
+conditional =if= hooks). Copilot CLI is close with 6 hook types
+including an =errorOccurred= hook that no other agent has. Kiro has
+5 triggers including =AgentSpawn= and veto via exit code 2 on
+=PreToolUse=. Earlier versions of this note incorrectly attributed
+file-event hooks to Kiro; the official docs show no file-event
+triggers.
+
+* Skills and custom agents
+
+| Feature                   | Claude Code               | Copilot CLI           | Gemini CLI              | Codex CLI            | Kiro                | OpenCode          |
+|---------------------------+---------------------------+-----------------------+-------------------------+----------------------+---------------------+-------------------|
+| Skills directory          | =.claude/skills/=         | =.github/skills/= etc | discoverable on disk    | -                    | =.kiro/agents/=     | -                 |
+| Skill format              | =SKILL.md=                | =SKILL.md=            | -                       | -                    | -                   | -                 |
+| Skills install/manage     | -                         | -                     | =gemini skills install= | -                    | -                   | -                 |
+| Custom agents             | =.claude/agents/*.json=   | custom agents         | =/agents=               | =AGENTS.md=          | =.kiro/agents/=      | =agent= config    |
+| Agent CLI flag             | =--agent=                 | -                     | -                       | -                    | -                   | =default_agent=   |
+| Subagent delegation       | Agent tool (typed)        | -                     | =/agents=               | =/agent=             | -                   | -                 |
+| Built-in skills           | =/simplify=, =/batch= etc | -                     | extensible via install  | -                    | Specs system        | Custom commands   |
+| Bundled skill count       | ~6                        | 0 (reads convention)  | extensible              | 0                    | -                   | -                 |
+| Cross-harness portability | =.claude/skills/=         | =.claude/skills/=     | -                       | =AGENTS.md=          | =AGENTS.md=         | =.claude/skills/= |
+
+The =SKILL.md= convention (originated by Anthropic) is now read by
+Claude Code, Copilot CLI, and OpenCode --- the closest thing to a
+cross-harness standard. Copilot CLI ships no built-in skills but
+discovers =SKILL.md= files in =.claude/skills/= and =.agents/=, so
+project-level skills written for Claude Code work without changes. Gemini CLI has the most developed
+install/manage surface for skills. Codex CLI and Kiro use =AGENTS.md=
+as the project-level agent configuration (different convention, same
+purpose).
+
+* Memory and persistence
+
+| Feature                  | Claude Code               | Copilot CLI          | Gemini CLI           | Codex CLI           | Kiro                  | OpenCode          |
+|--------------------------+---------------------------+----------------------+----------------------+---------------------+-----------------------+-------------------|
+| Project instructions     | =CLAUDE.md=               | =AGENTS.md=?         | =GEMINI.md=          | =AGENTS.md=         | =.kiro/steering/=     | =AGENTS.md=       |
+| Auto-generated context   | -                         | -                    | -                    | -                   | =product/tech/structure.md= | -           |
+| Cross-session memory     | =~/.claude/.../memory/=   | Copilot Memory       | =/memory=            | memories system     | steering files        | -                 |
+| Memory categories        | user/feedback/project/ref | -                    | hierarchical         | -                   | Always/FileMatch/etc  | -                 |
+| Auto-compaction          | Yes (at 95%)              | Yes (at 95%)         | -                    | -                   | -                     | -                 |
+| Manual compact           | =/compact=                | =/compact=           | -                    | =/compact=          | -                     | -                 |
+| Context visualization    | =/context=                | =/context=           | -                    | -                   | -                     | -                 |
+| Session export           | =/export=                 | -                    | -                    | =--json=            | -                     | =/share=          |
+
+Kiro's auto-generated =product.md=, =tech.md=, =structure.md= are
+unique --- the agent bootstraps its own project understanding on first
+run. Claude Code has the most structured memory system (typed
+categories with an indexed =MEMORY.md=). Gemini CLI and Copilot CLI
+both have auto-compaction at the 95% threshold.
+
+* Custom model providers
+
+| Feature              | Claude Code            | Copilot CLI             | Gemini CLI        | Codex CLI            | Kiro          | OpenCode              |
+|----------------------+------------------------+-------------------------+-------------------+----------------------+---------------+-----------------------|
+| Provider override    | API key only           | Env vars                | =--model= + auth  | =config.toml=       | Bedrock only  | 75+ via Models.dev    |
+| Local models         | Ollama (via API-compat) | -                      | -                 | Ollama (=--oss=)     | -             | Ollama/llama.cpp/etc  |
+| OpenAI-compatible    | -                      | Yes (env vars)          | -                 | Yes (native)         | -             | Yes (=baseURL= config) |
+| Anthropic direct     | Yes (native)           | -                      | -                 | Yes (env vars)       | Yes (Bedrock) | Yes (provider config) |
+| Azure OpenAI         | -                      | Yes (env var)           | -                 | Yes (provider type)  | -             | -                     |
+| Vertex AI            | =/setup-vertex=        | -                      | Yes (native)      | -                    | -             | -                     |
+| Bedrock              | =/setup-bedrock=       | -                      | -                 | -                    | Yes (native)  | -                     |
+
+OpenCode has the broadest provider story (75+ via Models.dev). Codex
+CLI has the cleanest multi-provider config (=config.toml= profiles).
+Claude Code's provider flexibility is limited to API key and
+Vertex/Bedrock setup wizards. Kiro is locked to AWS Bedrock.
+
+* Remote and cloud execution
+
+| Feature             | Claude Code                | Copilot CLI  | Gemini CLI  | Codex CLI                 | Kiro      | OpenCode     |
+|---------------------+----------------------------+--------------+-------------+---------------------------+-----------+--------------|
+| Remote control      | =/remote-control=          | -            | -           | =--remote ws://=          | -         | -            |
+| Cloud execution     | -                          | -            | -           | =codex cloud=             | -         | -            |
+| Desktop app         | =/desktop=                 | -            | -           | =codex app= (macOS)       | IDE only  | -            |
+| Run as MCP server   | -                          | -            | -           | =codex mcp-server=        | -         | -            |
+| ACP protocol        | -                          | Yes          | experimental| -                         | -         | -            |
+
+Codex CLI is the only agent with cloud-execution (=codex cloud=) and
+MCP-server modes. Copilot CLI supports ACP (Agent Client Protocol) ---
+a competing open standard to MCP for agent interop. Claude Code's
+=/remote-control= provides browser-to-terminal bridging.
+
+* Convergent patterns
+
+Reading across all six agents, the convergent surfaces are:
+
+1. *Non-interactive mode with =-p= / =exec=* --- every agent has a
+   script-friendly mode. The shell integration pattern is settled.
+2. *MCP as the tool-extension protocol* --- all six support MCP.
+   Configuration format varies (JSON, TOML, settings) but the
+   transport is standard.
+3. *Project instruction files* --- =CLAUDE.md=, =GEMINI.md=,
+   =AGENTS.md=, =.kiro/steering/=. Every agent auto-loads a
+   project-level context document. No standard name.
+4. *Permission tiering* --- every agent has at least a read-only / ask
+   / auto-approve ladder. The number of tiers varies (2--6) but the
+   shape is the same.
+5. *Session persistence + resume* --- all but OpenCode support
+   continuing a prior conversation.
+
+* Divergent bets
+
+Where the agents disagree reveals what each vendor considers the
+hard problem:
+
+1. *Sandboxing.* Gemini CLI and Codex CLI invest heavily in OS-level
+   sandboxing (Seatbelt, gVisor, Landlock). Claude Code invests in
+   worktree isolation and permission hooks. Kiro and OpenCode punt
+   entirely. The question: is isolation the agent's job or the
+   operator's?
+2. *Hooks and lifecycle events.* Claude Code and Kiro have rich
+   hook surfaces; the others have basic or no hooks. The question:
+   should the harness be programmable, or should external tooling
+   (CI, scripts) handle lifecycle?
+3. *Skills portability.* =SKILL.md= is becoming a cross-harness
+   convention (Claude Code, Copilot CLI, OpenCode). =AGENTS.md= is a
+   competing convention (Codex CLI, Kiro, OpenCode). The question:
+   does the project instruct the agent (=AGENTS.md=) or does the
+   agent discover capabilities (=SKILL.md=)?
+4. *Cloud execution.* Only Codex CLI has a cloud-execution tier
+   (=codex cloud=). The question: is the terminal the boundary, or
+   is it just the client for a remote agent?
+5. *Model portability.* OpenCode supports 75+ providers; Kiro locks
+   to Bedrock. The question: is the agent married to a model, or
+   is the model a pluggable backend?
+
+* Landscape diagram
+
+The diagram below positions the six agents by their primary
+architectural bet. Clusters group agents that share the same
+divergent commitment; edges to the central hub show the feature each
+agent contributes to the convergent baseline.
+
+#+ATTR_HTML: :alt Architectural landscape of six CLI coding agents in 2026 Q2, showing OS-sandbox cluster (Gemini CLI, Codex CLI), rich-hooks cluster (Claude Code, Kiro), open-source cluster (OpenCode), and IDE-ecosystem cluster (Copilot CLI), all connected to a central convergent-patterns hub. :width 900
+[[file:diagram-agent-landscape.png]]
+
+#+begin_src dot :file diagram-agent-landscape.png :tangle diagram-agent-landscape.dot :cmdline -Tpng :exports none
+// CLI Coding Agents -- 2026 Q2 Landscape
+// Comparison diagram: 6 agents clustered by primary architectural bet.
+// Clusters are border-only per style guide (no fill on cluster backgrounds).
+// Colors follow wal.sh Tailwind 100/700 palette.
+
+digraph agent_landscape {
+    rankdir=TB;
+    bgcolor=white;
+    label="CLI Coding Agents -- 2026 Q2 Architectural Landscape";
+    labelloc=t;
+    fontname="Helvetica";
+    fontsize=11;
+    fontcolor="#374151";
+    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];
+    edge [color="#888888", fontcolor="#555555", fontname="Helvetica", fontsize=9];
+
+    // ── Central hub: convergent patterns ──────────────────────────────────
+
+    hub [
+        label="Convergent Patterns\n--\nMCP · Non-interactive · Permission tiers\nProject instructions · Session resume",
+        shape=box,
+        style="rounded,filled",
+        fillcolor="#fef3c7",
+        color="#b45309",
+        fontcolor="#b45309",
+        fontsize=10,
+        width=3.2
+    ];
+
+    // ── Cluster A: Deep sandbox + OS isolation ────────────────────────────
+    // Gemini CLI: macOS Seatbelt, gVisor, Docker, LXC (4 backends)
+    // Codex CLI:  macOS Seatbelt, Linux Landlock+seccomp; codex sandbox tool
+
+    subgraph cluster_sandbox {
+        label="OS-level Sandbox";
+        style="rounded";
+        color="#1d4ed8";
+        fontcolor="#1d4ed8";
+        fontname="Helvetica";
+        fontsize=10;
+
+        gemini [
+            label="Gemini CLI\n(Google)\ngemini",
+            fillcolor="#dbeafe",
+            color="#1d4ed8",
+            fontcolor="#1d4ed8"
+        ];
+        codex [
+            label="Codex CLI\n(OpenAI)\ncodex",
+            fillcolor="#dbeafe",
+            color="#1d4ed8",
+            fontcolor="#1d4ed8"
+        ];
+    }
+
+    // ── Cluster B: Rich hooks + lifecycle programmability ─────────────────
+    // Claude Code: 7 event types, conditional if-hooks, classifier permission mode
+    // Kiro:        AgentSpawn/Stop, veto via exit-code 2, steering-file memory
+
+    subgraph cluster_hooks {
+        label="Rich Hook Surface";
+        style="rounded";
+        color="#6b21a8";
+        fontcolor="#6b21a8";
+        fontname="Helvetica";
+        fontsize=10;
+
+        claude [
+            label="Claude Code\n(Anthropic)\nclaude",
+            fillcolor="#ede9fe",
+            color="#6b21a8",
+            fontcolor="#6b21a8"
+        ];
+        kiro [
+            label="Kiro\n(AWS)\nkiro-cli",
+            fillcolor="#ede9fe",
+            color="#6b21a8",
+            fontcolor="#6b21a8"
+        ];
+    }
+
+    // ── Cluster C: Model portability + open source ────────────────────────
+    // OpenCode: 75+ providers via Models.dev, open source
+
+    subgraph cluster_open {
+        label="Open Source / Model Portability";
+        style="rounded";
+        color="#15803d";
+        fontcolor="#15803d";
+        fontname="Helvetica";
+        fontsize=10;
+
+        opencode [
+            label="OpenCode\n(Anomaly)\nopencode",
+            fillcolor="#dcfce7",
+            color="#15803d",
+            fontcolor="#15803d"
+        ];
+    }
+
+    // ── Cluster D: IDE-adjacent + ecosystem lock-in ───────────────────────
+    // Copilot CLI: GitHub/VS Code ecosystem, ACP protocol, Claude model default
+
+    subgraph cluster_ide {
+        label="IDE-Ecosystem Aligned";
+        style="rounded";
+        color="#b45309";
+        fontcolor="#b45309";
+        fontname="Helvetica";
+        fontsize=10;
+
+        copilot [
+            label="Copilot CLI\n(GitHub)\ncopilot",
+            fillcolor="#fef3c7",
+            color="#b45309",
+            fontcolor="#b45309"
+        ];
+    }
+
+    // ── Divergent-bet annotation nodes ────────────────────────────────────
+
+    bet_sandbox [
+        label="Bet: isolation is\nthe agent's job",
+        shape=plaintext,
+        fontname="Helvetica",
+        fontsize=9,
+        fontcolor="#1d4ed8"
+    ];
+
+    bet_hooks [
+        label="Bet: harness\nshould be programmable",
+        shape=plaintext,
+        fontname="Helvetica",
+        fontsize=9,
+        fontcolor="#6b21a8"
+    ];
+
+    bet_model [
+        label="Bet: model is\na pluggable backend",
+        shape=plaintext,
+        fontname="Helvetica",
+        fontsize=9,
+        fontcolor="#15803d"
+    ];
+
+    bet_cloud [
+        label="Bet: cloud execution\nbeyond the terminal",
+        shape=plaintext,
+        fontname="Helvetica",
+        fontsize=9,
+        fontcolor="#b91c1c"
+    ];
+
+    cloud_node [
+        label="Cloud Execution\n(Codex only)",
+        shape=box,
+        style="rounded,filled",
+        fillcolor="#fee2e2",
+        color="#b91c1c",
+        fontcolor="#b91c1c",
+        fontsize=9
+    ];
+
+    // ── Hub spokes: convergent edges ──────────────────────────────────────
+
+    claude   -> hub [label="7 hook types\nclassifier perms", color="#6b21a8", fontcolor="#6b21a8"];
+    copilot  -> hub [label="ACP + 6 hooks\nClaude default model", color="#b45309", fontcolor="#b45309"];
+    gemini   -> hub [label="4 sandbox backends\nopen source", color="#1d4ed8", fontcolor="#1d4ed8"];
+    codex    -> hub [label="codex mcp-server\ncloud execution", color="#1d4ed8", fontcolor="#1d4ed8"];
+    kiro     -> hub [label="Bedrock-native\nsteering memory", color="#6b21a8", fontcolor="#6b21a8"];
+    opencode -> hub [label="75+ providers\nSKILL.md compat", color="#15803d", fontcolor="#15803d"];
+
+    // ── Divergent-bet annotations ─────────────────────────────────────────
+
+    bet_sandbox -> gemini   [style=dashed, color="#1d4ed8", arrowhead=none];
+    bet_sandbox -> codex    [style=dashed, color="#1d4ed8", arrowhead=none];
+    bet_hooks   -> claude   [style=dashed, color="#6b21a8", arrowhead=none];
+    bet_hooks   -> kiro     [style=dashed, color="#6b21a8", arrowhead=none];
+    bet_model   -> opencode [style=dashed, color="#15803d", arrowhead=none];
+    bet_cloud   -> cloud_node [style=dashed, color="#b91c1c", arrowhead=none];
+    codex       -> cloud_node [label="codex cloud", color="#b91c1c", fontcolor="#b91c1c", style=dashed];
+}
+#+end_src
+
+#+RESULTS:
+[[file:diagram-agent-landscape.png]]
+
+* Verification provenance (2026-04-18)
+
+Each agent's claims were independently verified by a subagent
+checking official documentation or local =--help= output. This
+section records what was checked, what version, and what was
+corrected.
+
+| Agent       | Method                                | Version/Date           | Errors found and fixed                                             |
+|-------------+---------------------------------------+------------------------+--------------------------------------------------------------------|
+| Claude Code | =claude --help= (local install)      | 2.1.114, 2026-04-18    | None in core claims; ~25 power-user flags omitted (in scope)       |
+| Copilot CLI | =docs.github.com= official docs      | 2026-04-18 fetch       | Hooks understated (6 types, not 0); skills dir, custom agents,     |
+|             |                                       |                        | =/compact=, =/context=, Azure provider were all incorrectly "-"    |
+| Gemini CLI  | =geminicli.com= (v0.38.2 stable)     | 2026-04-18 fetch       | =-w= worktree flag was fabricated (removed); Windows sandbox       |
+|             |                                       |                        | backend omitted; =gemini skills install= unverified as CLI subcmd  |
+| Codex CLI   | =github.com/openai/codex= (v0.121.0) | 2026-04-15 release     | None wrong; missing newer subcmds (apply, execpolicy, features)    |
+| Kiro        | =kiro.dev/docs/cli/=                  | 2026-04-18 fetch       | CLI is =kiro-cli= not =kiro=; permission model not "Autopilot/     |
+|             |                                       |                        | Supervised"; only 5 hook triggers (not 8); no file-event hooks;    |
+|             |                                       |                        | =#= mention syntax not found; inclusion mode names not in docs     |
+| OpenCode    | =opencode.ai/docs/= (v1.4.11)        | 2026-04-18 fetch       | =/connect= and =/permissions= not slash cmds (config-only);        |
+|             |                                       |                        | repo is =anomalyco/opencode= not =nichochar/opencode=;            |
+|             |                                       |                        | Copilot/ChatGPT auth not explicitly documented (may work via       |
+|             |                                       |                        | provider config); skills in =.opencode/skills/= confirmed          |
+
+All corrections have been applied to the tables above. The note is
+accurate as of the versions listed; flag surfaces change frequently
+and should be re-verified quarterly.
+
+*Channel note:* Claude Code 2.1.114 is from the npm/=latest= channel
+(FreeBSD). Homebrew's =stable= channel ships 2.1.98 as of the same
+date. All flags in the comparison tables are present in both versions;
+the gap is power-user flags (=--effort=, =--from-pr=, =--chrome=,
+etc.) that the note intentionally omits as out of scope.
+
+* Harness availability on FreeBSD 15.0 (2026-06-21)
+:PROPERTIES:
+:CUSTOM_ID: freebsd-harness-audit
+:REVIEW: 2026-06-21 -- vetted against uname -a on nexus
+:VERIFIED_AT: 2026-06-21T14:15Z
+:VERIFIED_BY: literate-exec
+:VERDICT: verified
+:FINDING: 3 of 6 agents run on FreeBSD; codex/opencode block on platform check; kiro IDE-only
+:END:
+
+Vetted against =FreeBSD nexus 15.0-RELEASE amd64= (the machine that
+publishes this site). The question: which harnesses can run on a
+non-Linux, non-macOS server?
+
+** Agent harnesses
+
+| Agent | FreeBSD status | Version | Install method | Blocker |
+|-------+----------------+---------+----------------+---------|
+| Claude Code | INSTALLED | 2.1.89 | =npm install -g @anthropic-ai/claude-code= | -- |
+| Gemini CLI | INSTALLED | 0.47.0 | =npm install -g @google/gemini-cli= | -- |
+| Goose | INSTALLED | 0.9.11 | =pip install --user goose-ai= | -- |
+| Aider | AVAILABLE | 0.86.1 | =sudo pkg install py311-aider_chat= | needs sudo |
+| Codex CLI | BLOCKED | 0.141.0 | -- | =Unsupported platform: freebsd= (hard check in bin/codex.js) |
+| OpenCode | BLOCKED | 1.17.9 | -- | =wanted os: darwin,linux,win32= (package.json =os= field) |
+| Kiro | N/A | -- | -- | IDE-only (VS Code / JetBrains), no standalone CLI binary |
+| Copilot CLI | N/A | -- | -- | VS Code extension, not a standalone binary |
+
+Three of six agents run on FreeBSD. Codex CLI and OpenCode have hard
+platform checks that could be patched (the underlying Node.js runtime
+works) but are not officially supported. Aider is a pure Python package
+and would work after =sudo pkg install=.
+
+** Language runtimes and formal methods
+
+| Tool | Version | Notes |
+|------+---------+-------|
+| Node.js | 24.14.1 | -- |
+| Deno | 2.6.6 | FreeBSD native binary |
+| Python | 3.11.15 | -- |
+| GHC | 9.10.3 | =lens=, =boomerang=, =profunctors= installed |
+| OCaml | 4.14.2 | opam + =lens= installed |
+| Clojure (clj) | 1.12.0.1488 | JVM, full REPL |
+| Babashka (bb) | 1.12.206 | GraalVM native |
+| Racket | 9.0 [cs] | -- |
+| Lean 4 | 4.27.0-pre | -- |
+| Guile | 3.0.10 | -- |
+| Emacs | 32.0.50 | custom build at =~/opt/emacs/= |
+| Ruby | 3.3.10 | -- |
+| Z3 | 4.16.0 | SMT solver |
+| Spin | AVAILABLE | =sudo pkg install spin= (model checker, v6.5.2) |
+| Graphviz (dot) | 14.1.4 | -- |
+
+** Infrastructure and deployment
+
+| Tool | Version | Notes |
+|------+---------+-------|
+| Bastille | 1.4.3 | FreeBSD jails; needs sudo |
+| Docker | unknown | installed but version unknown; jails preferred |
+| Terraform | 1.14.7 | -- |
+| Git | 2.53.0 | -- |
+| GitHub CLI (gh) | 2.83.2 | -- |
+| Wrangler (CF) | BLOCKED | =workerd= has no FreeBSD binary |
+| Vale | master | prose linter |
+| jq | 1.8.1 | -- |
+| tmux | installed | -- |
+| opam | 2.5.1 | OCaml package manager |
+| cabal | 3.16.1.0 | Haskell package manager |
+
+** Commands requiring sudo
+
+#+begin_src bash :tangle no
+# Install aider (Python AI pair programming)
+sudo pkg install py311-aider_chat
+
+# Install Spin (model checker)
+sudo pkg install spin
+
+# Bastille jail operations
+sudo bastille list
+sudo bastille create <name> 15.0-RELEASE <ip>
+
+# Bun runtime (not packaged for FreeBSD as of 2026-06-21)
+# Alternative: use Deno 2.6.6 (native FreeBSD binary)
+#+end_src
+
+* Related
+
+- [[file:../claude-code-workshop-2026/index.org][Claude Code Workshop 2026]] ---
+  deep-dive on Claude Code's surface.
+- [[file:../2026-q2-claude-code-features/index.org][Claude Code Features --- 2026 Q2]] ---
+  speculative notes on Claude Code's direction.
+- [[file:../2025-terminal-ai-agents/index.org][Terminal AI Agents 2025]] ---
+  prior landscape survey; this note is the Q2 2026 update.
+- [[file:../2026-q2-cloudflare-agents/index.org][Cloudflare Agents Week 2026]] ---
+  where the agent infrastructure (sandbox, memory, identity)
+  sits relative to these CLI surfaces.

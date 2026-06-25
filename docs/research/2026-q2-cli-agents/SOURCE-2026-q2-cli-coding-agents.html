@@ -1,0 +1,2020 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+<!-- 2026-06-21 Sun 22:11 -->
+<meta http-equiv="Content-Type" content="text/html;charset=utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CLI Coding Agents: 2026 Q2 Comparison</title>
+<meta name="author" content="Jason Walsh" />
+<meta name="description" content="Feature-surface comparison of six terminal-based AI coding agents in 2026 Q2 -- invocation, permissions, MCP, hooks, skills, memory, sandboxing, custom models." />
+<meta name="keywords" content="claude code, copilot cli, gemini cli, codex cli, kiro, opencode, ai agents, terminal, mcp, comparison" />
+<meta name="generator" content="Org Mode" />
+<link rel="stylesheet" href="/static/css/style.css" type="text/css"/>
+<link rel="icon" type="image/x-icon" href="/favicon.ico"/>
+<link rel="icon" type="image/png" href="/favicon.png"/>
+<link rel="alternate" type="application/atom+xml" title="wal.sh site updates" href="/site.atom">
+<link rel="alternate" type="application/atom+xml" title="wal.sh research picks" href="/current/research.atom">
+<link rel="stylesheet" href="/static/css/webring.css" type="text/css"/>
+<link rel="canonical" href="https://wal.sh/research/2026-q2-cli-coding-agents/"/>
+</head>
+<body>
+<div id="preamble" class="status">
+<header class="site-header">
+  <div class="container">
+    <a href="/" class="wordmark wordmark-sm">wal<span class="dot">.</span><span class="sh">sh</span></a>
+    <nav>
+      <ul>
+        <li><a href="/current/research">Current</a></li>
+        <li><a href="/tools/">Tools</a></li>
+        <li><a href="/events/">Events</a></li>
+        <li><a href="/search">Search</a></li>
+      </ul>
+    </nav>
+  </div>
+</header><div class="breadcrumbs"><a href="/">home</a> &gt; <a href="/research">research</a> &gt; <a href="/research/2026-q2-cli-coding-agents">2026-q2-cli-coding-agents</a><span class="breadcrumb-date"> · Apr 18, 2026</span></div><div class="page-tags"><div class="page-tags-inner"><a href="/search?q=claude%20code" class="pes-kw">claude code</a><a href="/search?q=copilot%20cli" class="pes-kw">copilot cli</a><a href="/search?q=gemini%20cli" class="pes-kw">gemini cli</a><a href="/search?q=codex%20cli" class="pes-kw">codex cli</a><a href="/search?q=kiro" class="pes-kw">kiro</a><a href="/search?q=opencode" class="pes-kw">opencode</a><a href="/search?q=ai%20agents" class="pes-kw">ai agents</a><a href="/search?q=terminal" class="pes-kw">terminal</a><a href="/search?q=mcp" class="pes-kw">mcp</a><a href="/search?q=comparison" class="pes-kw">comparison</a></div></div>
+</div>
+<div id="content" class="content">
+<h1 class="title">CLI Coding Agents: 2026 Q2 Comparison
+<br />
+<span class="subtitle">Claude Code, Copilot CLI, Gemini CLI, Codex CLI, Kiro, OpenCode</span>
+</h1>
+<div id="table-of-contents" role="doc-toc">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents" role="doc-toc">
+<ul>
+<li><a href="#orgc26d8f8">1. Overview</a></li>
+<li><a href="#org0d0e96c">2. The agents</a></li>
+<li><a href="#org59e04ce">3. Invocation patterns</a></li>
+<li><a href="#org4a177dc">4. Permission models</a>
+<ul>
+<li><a href="#orgb48466e">4.1. Permission mode comparison</a></li>
+</ul>
+</li>
+<li><a href="#org99b1fa6">5. Sandbox / isolation</a></li>
+<li><a href="#orgfb39a54">6. MCP support</a></li>
+<li><a href="#org5c40e7b">7. Hooks</a></li>
+<li><a href="#org4542169">8. Skills and custom agents</a></li>
+<li><a href="#org312887b">9. Memory and persistence</a></li>
+<li><a href="#orgd2138c4">10. Custom model providers</a></li>
+<li><a href="#orgf5d86de">11. Remote and cloud execution</a></li>
+<li><a href="#org361167b">12. Convergent patterns</a></li>
+<li><a href="#orgdc05ada">13. Divergent bets</a></li>
+<li><a href="#org33a6cb7">14. Landscape diagram</a></li>
+<li><a href="#org5e4246d">15. Verification provenance (2026-04-18)</a></li>
+<li><a href="#freebsd-harness-audit">16. Harness availability on FreeBSD 15.0 (2026-06-21)</a>
+<ul>
+<li><a href="#org5e1ccc9">16.1. Agent harnesses</a></li>
+<li><a href="#org4e00a9b">16.2. Language runtimes and formal methods</a></li>
+<li><a href="#org7907d00">16.3. Infrastructure and deployment</a></li>
+<li><a href="#org17423a8">16.4. Commands requiring sudo</a></li>
+</ul>
+</li>
+<li><a href="#org3b76cc4">17. Related</a></li>
+</ul>
+</div>
+</div>
+
+<div id="org014aa18" class="figure">
+<p><img src="banner.png" alt="CLI Coding Agents -- 2026 Q2 Comparison banner" class="banner-leaderboard" width="728" height="90" />
+</p>
+</div>
+<div id="outline-container-orgc26d8f8" class="outline-2">
+<h2 id="orgc26d8f8"><span class="section-number-2">1.</span> <a href="#orgc26d8f8">Overview</a></h2>
+<div class="outline-text-2" id="text-1">
+<p>
+Six terminal-based AI coding agents compete for the developer's
+shell in 2026 Q2. This note compares their feature surfaces &#x2014;
+not their model quality (which changes monthly) but their
+<b>architectural bets</b>: what contract does each offer between the
+developer, the agent, and the tools the agent can invoke?
+</p>
+
+<p>
+The comparison is structured around the surfaces that matter for an
+operator choosing a daily driver: invocation patterns, permission
+models, MCP support, hooks, skills/agents, memory, sandboxing, and
+model portability.
+</p>
+
+<p>
+<b>Scope note:</b> this covers the six agents with the deepest CLI
+surfaces as of April 2026. Other notable tools (Aider, Cursor Agent,
+Windsurf/Cline, Continue) are omitted either because their primary
+surface is an IDE extension rather than a terminal CLI, or because
+their CLI surface is thin enough that comparison at this level of
+detail is not informative. See
+<a href="../2025-terminal-ai-agents/">Terminal AI Agents 2025</a> for
+the broader landscape including IDE-first tools.
+</p>
+</div>
+</div>
+<div id="outline-container-org0d0e96c" class="outline-2">
+<h2 id="org0d0e96c"><span class="section-number-2">2.</span> <a href="#org0d0e96c">The agents</a></h2>
+<div class="outline-text-2" id="text-2">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Agent</th>
+<th scope="col" class="org-left">Vendor</th>
+<th scope="col" class="org-left">CLI command</th>
+<th scope="col" class="org-left">Default model</th>
+<th scope="col" class="org-left">License</th>
+<th scope="col" class="org-left">FreeBSD 15.0</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Claude Code</td>
+<td class="org-left">Anthropic</td>
+<td class="org-left"><code>claude</code></td>
+<td class="org-left">Opus 4.6 (1M ctx)</td>
+<td class="org-left">Proprietary</td>
+<td class="org-left">2.1.89</td>
+</tr>
+
+<tr>
+<td class="org-left">Copilot CLI</td>
+<td class="org-left">GitHub</td>
+<td class="org-left"><code>copilot</code></td>
+<td class="org-left">Claude Sonnet 4.5 (1x)</td>
+<td class="org-left">Proprietary</td>
+<td class="org-left">IDE only</td>
+</tr>
+
+<tr>
+<td class="org-left">Gemini CLI</td>
+<td class="org-left">Google</td>
+<td class="org-left"><code>gemini</code></td>
+<td class="org-left">Gemini 2.5 Pro / 3 Pro Preview</td>
+<td class="org-left">Open source</td>
+<td class="org-left">0.47.0</td>
+</tr>
+
+<tr>
+<td class="org-left">Codex CLI</td>
+<td class="org-left">OpenAI</td>
+<td class="org-left"><code>codex</code></td>
+<td class="org-left">GPT-5.4</td>
+<td class="org-left">Proprietary</td>
+<td class="org-left">BLOCKED</td>
+</tr>
+
+<tr>
+<td class="org-left">Kiro</td>
+<td class="org-left">AWS</td>
+<td class="org-left"><code>kiro-cli</code></td>
+<td class="org-left">Claude Sonnet 4 (via Bedrock)</td>
+<td class="org-left">Proprietary</td>
+<td class="org-left">IDE only</td>
+</tr>
+
+<tr>
+<td class="org-left">OpenCode</td>
+<td class="org-left">Anomaly</td>
+<td class="org-left"><code>opencode</code></td>
+<td class="org-left">User-configured (75+ providers)</td>
+<td class="org-left">Open source</td>
+<td class="org-left">BLOCKED</td>
+</tr>
+
+<tr>
+<td class="org-left">Goose</td>
+<td class="org-left">Block</td>
+<td class="org-left"><code>goose</code></td>
+<td class="org-left">User-configured</td>
+<td class="org-left">Open source</td>
+<td class="org-left">0.9.11</td>
+</tr>
+
+<tr>
+<td class="org-left">Aider</td>
+<td class="org-left">Gauthier</td>
+<td class="org-left"><code>aider</code></td>
+<td class="org-left">User-configured</td>
+<td class="org-left">Open source</td>
+<td class="org-left">0.86.1 (pkg)</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Notable: Copilot CLI defaults to a <i>Claude</i> model, not a GitHub/OpenAI
+model. Gemini CLI, OpenCode, Goose, and Aider are open source. Goose
+and Aider are added in the June 2026 update as they have full CLI
+surfaces comparable to the original six. On FreeBSD 15.0, only Claude
+Code, Gemini CLI, and Goose run natively; Codex CLI and OpenCode have
+hard platform checks that block FreeBSD.
+</p>
+</div>
+</div>
+<div id="outline-container-org59e04ce" class="outline-2">
+<h2 id="org59e04ce"><span class="section-number-2">3.</span> <a href="#org59e04ce">Invocation patterns</a></h2>
+<div class="outline-text-2" id="text-3">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Feature</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+<th scope="col" class="org-left">Kiro</th>
+<th scope="col" class="org-left">OpenCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Interactive</td>
+<td class="org-left"><code>claude</code></td>
+<td class="org-left"><code>copilot</code></td>
+<td class="org-left"><code>gemini</code></td>
+<td class="org-left"><code>codex</code></td>
+<td class="org-left"><code>kiro-cli</code></td>
+<td class="org-left"><code>opencode</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Non-interactive</td>
+<td class="org-left"><code>claude -p</code></td>
+<td class="org-left"><code>copilot -p</code></td>
+<td class="org-left"><code>gemini -p</code></td>
+<td class="org-left"><code>codex exec</code> / <code>e</code></td>
+<td class="org-left">headless mode</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Continue session</td>
+<td class="org-left"><code>claude -c</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>gemini -r latest</code></td>
+<td class="org-left"><code>codex resume</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Resume by ID</td>
+<td class="org-left"><code>claude -r &lt;id&gt;</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>gemini -r &lt;id&gt;</code></td>
+<td class="org-left"><code>codex resume &lt;id&gt;</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Fork session</td>
+<td class="org-left"><code>/branch</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>codex fork</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Pipe stdin</td>
+<td class="org-left"><code>cat f \vert claude -p</code></td>
+<td class="org-left"><code>cat f \vert copilot</code></td>
+<td class="org-left"><code>cat f \vert gemini</code></td>
+<td class="org-left"><code>- (stdin)</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Image input</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>--image</code></td>
+<td class="org-left">-</td>
+<td class="org-left">image drag-drop</td>
+</tr>
+
+<tr>
+<td class="org-left">Worktree</td>
+<td class="org-left"><code>-w</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Tmux integration</td>
+<td class="org-left"><code>--tmux</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Output format</td>
+<td class="org-left">text/json/stream</td>
+<td class="org-left">-</td>
+<td class="org-left">text/json/stream</td>
+<td class="org-left">text/json</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">JSON schema output</td>
+<td class="org-left"><code>--json-schema</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>--output-schema</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Budget cap</td>
+<td class="org-left"><code>--max-budget-usd</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Claude Code and Codex CLI have the deepest non-interactive / scripting
+surfaces. Gemini CLI matches on output format and session management.
+Copilot CLI is the simplest invocation surface. Kiro's CLI is the
+least publicly documented.
+</p>
+</div>
+</div>
+<div id="outline-container-org4a177dc" class="outline-2">
+<h2 id="org4a177dc"><span class="section-number-2">4.</span> <a href="#org4a177dc">Permission models</a></h2>
+<div class="outline-text-2" id="text-4">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Feature</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+<th scope="col" class="org-left">Kiro</th>
+<th scope="col" class="org-left">OpenCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Per-tool allow/deny</td>
+<td class="org-left"><code>--allowedTools</code></td>
+<td class="org-left"><code>--allow-tool</code></td>
+<td class="org-left">Policy Engine</td>
+<td class="org-left"><code>--allow-tool</code></td>
+<td class="org-left">Whitelist</td>
+<td class="org-left"><code>ask/allow/deny</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Per-tool deny</td>
+<td class="org-left"><code>--disallowedTools</code></td>
+<td class="org-left"><code>--deny-tool</code></td>
+<td class="org-left">Policy Engine</td>
+<td class="org-left"><code>--deny-tool</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>deny</code> per tool</td>
+</tr>
+
+<tr>
+<td class="org-left">Session auto-allow</td>
+<td class="org-left"><code>/permissions</code></td>
+<td class="org-left">Option 2 (session)</td>
+<td class="org-left"><code>/permissions</code></td>
+<td class="org-left"><code>/permissions</code></td>
+<td class="org-left">Trusted commands</td>
+<td class="org-left"><code>/permissions</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Permission modes</td>
+<td class="org-left">6 modes</td>
+<td class="org-left">3 options</td>
+<td class="org-left">4 modes</td>
+<td class="org-left">3 tiers</td>
+<td class="org-left">via custom agents</td>
+<td class="org-left">per-tool config</td>
+</tr>
+
+<tr>
+<td class="org-left">Skip all permissions</td>
+<td class="org-left"><code>--dangerously-skip</code></td>
+<td class="org-left"><code>--allow-all-tools</code></td>
+<td class="org-left"><code>--yolo</code> (deprecated)</td>
+<td class="org-left"><code>--yolo</code></td>
+<td class="org-left">agent allowedTools</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Bare / minimal mode</td>
+<td class="org-left"><code>--bare</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>--ephemeral</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="outline-container-orgb48466e" class="outline-3">
+<h3 id="orgb48466e"><span class="section-number-3">4.1.</span> <a href="#orgb48466e">Permission mode comparison</a></h3>
+<div class="outline-text-3" id="text-4-1">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Mode</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Read-only / plan</td>
+<td class="org-left"><code>--permission-mode plan</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>--approval-mode plan</code></td>
+<td class="org-left"><code>--sandbox read-only</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Ask per action</td>
+<td class="org-left"><code>--permission-mode default</code></td>
+<td class="org-left">Option 1 (each time)</td>
+<td class="org-left"><code>--approval-mode default</code></td>
+<td class="org-left"><code>--ask-for-approval untrusted</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Auto-edit, ask shell</td>
+<td class="org-left"><code>--permission-mode acceptEdits</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>--approval-mode auto_edit</code></td>
+<td class="org-left"><code>--ask-for-approval on-request</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Full auto</td>
+<td class="org-left"><code>--permission-mode bypassPermissions</code></td>
+<td class="org-left"><code>--allow-all-tools</code></td>
+<td class="org-left"><code>--approval-mode yolo</code></td>
+<td class="org-left"><code>--ask-for-approval never</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Classifier-driven</td>
+<td class="org-left"><code>--permission-mode auto</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Claude Code's <code>auto</code> mode (permission classifier) is unique &#x2014; no
+other agent has a model-driven permission tier. Codex CLI's separation
+of <code>--sandbox</code> (filesystem) from <code>--ask-for-approval</code> (tool invocation)
+is architecturally cleaner than a single permission mode.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org99b1fa6" class="outline-2">
+<h2 id="org99b1fa6"><span class="section-number-2">5.</span> <a href="#org99b1fa6">Sandbox / isolation</a></h2>
+<div class="outline-text-2" id="text-5">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Feature</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+<th scope="col" class="org-left">Kiro</th>
+<th scope="col" class="org-left">OpenCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">OS-level sandbox</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">macOS Seatbelt, gVisor,</td>
+<td class="org-left">macOS Seatbelt, Linux</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">Docker/Podman, LXC</td>
+<td class="org-left">Landlock+seccomp</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+</tr>
+
+<tr>
+<td class="org-left">Sandbox tiers</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">permissive/restrictive/strict</td>
+<td class="org-left">read-only/workspace-write/</td>
+<td class="org-left">-</td>
+<td class="org-left">Snapshot only</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">danger-full-access</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+</tr>
+
+<tr>
+<td class="org-left">Worktree isolation</td>
+<td class="org-left"><code>isolation: worktree</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>-w</code> (experimental)</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Network deny</td>
+<td class="org-left"><code>sandbox.network.deniedDomains</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Sandbox CLI tool</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>codex sandbox</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Gemini CLI has the most mature OS-level sandboxing (four backends).
+Codex CLI has the cleanest tier model and a standalone <code>codex sandbox</code>
+tool for running arbitrary commands under the agent's sandbox policy.
+Claude Code has no OS-level sandbox &#x2014; worktree isolation is
+filesystem-only, not process or network isolated. Kiro and OpenCode
+have no sandbox primitives.
+</p>
+</div>
+</div>
+<div id="outline-container-orgfb39a54" class="outline-2">
+<h2 id="orgfb39a54"><span class="section-number-2">6.</span> <a href="#orgfb39a54">MCP support</a></h2>
+<div class="outline-text-2" id="text-6">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Feature</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+<th scope="col" class="org-left">Kiro</th>
+<th scope="col" class="org-left">OpenCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">MCP config file</td>
+<td class="org-left"><code>.mcp.json</code></td>
+<td class="org-left">settings</td>
+<td class="org-left"><code>settings.json</code></td>
+<td class="org-left"><code>config.toml</code></td>
+<td class="org-left">settings file</td>
+<td class="org-left"><code>opencode.json</code></td>
+</tr>
+
+<tr>
+<td class="org-left">CLI MCP management</td>
+<td class="org-left"><code>claude mcp</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>gemini mcp</code></td>
+<td class="org-left"><code>codex mcp</code></td>
+<td class="org-left">MCP panel</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Multiple configs</td>
+<td class="org-left"><code>--mcp-config a b</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Strict (ignore others)</td>
+<td class="org-left"><code>--strict-mcp-config</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Server auth (OAuth)</td>
+<td class="org-left"><code>claude setup-token</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>codex mcp login</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">MCP mention syntax</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>@server</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>#</code> prefix</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Run as MCP server</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>codex mcp-server</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Codex CLI's <code>codex mcp-server</code> is unique &#x2014; it can run <i>as</i> an MCP
+server, meaning another agent can consume Codex as a tool. Claude Code
+has the most flexible multi-config story (<code>--mcp-config</code> accepts
+multiple files).
+</p>
+</div>
+</div>
+<div id="outline-container-org5c40e7b" class="outline-2">
+<h2 id="org5c40e7b"><span class="section-number-2">7.</span> <a href="#org5c40e7b">Hooks</a></h2>
+<div class="outline-text-2" id="text-7">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Feature</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+<th scope="col" class="org-left">Kiro</th>
+<th scope="col" class="org-left">OpenCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Hook support</td>
+<td class="org-left">Yes</td>
+<td class="org-left">Yes</td>
+<td class="org-left">Yes</td>
+<td class="org-left">Yes</td>
+<td class="org-left">Yes</td>
+<td class="org-left">No</td>
+</tr>
+
+<tr>
+<td class="org-left">Pre/Post tool use</td>
+<td class="org-left">Yes</td>
+<td class="org-left">Yes</td>
+<td class="org-left">Yes</td>
+<td class="org-left">Yes</td>
+<td class="org-left">Yes</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Session lifecycle</td>
+<td class="org-left">SessionStart/End</td>
+<td class="org-left">sessionStart/End</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">AgentSpawn/Stop</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">User prompt hook</td>
+<td class="org-left">UserPromptSubmit</td>
+<td class="org-left">userPromptSubmitted</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">UserPromptSubmit</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Response hook</td>
+<td class="org-left">AssistantResponseComplete</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Error hook</td>
+<td class="org-left">-</td>
+<td class="org-left">errorOccurred</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Pre-compact</td>
+<td class="org-left">PreCompact</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Conditional hooks</td>
+<td class="org-left"><code>if</code> hooks</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Veto capability</td>
+<td class="org-left">Yes (deny decision)</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">Yes (exit code 2)</td>
+<td class="org-left">-</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Claude Code has the most complete hook surface (7 event types +
+conditional <code>if</code> hooks). Copilot CLI is close with 6 hook types
+including an <code>errorOccurred</code> hook that no other agent has. Kiro has
+5 triggers including <code>AgentSpawn</code> and veto via exit code 2 on
+<code>PreToolUse</code>. Earlier versions of this note incorrectly attributed
+file-event hooks to Kiro; the official docs show no file-event
+triggers.
+</p>
+</div>
+</div>
+<div id="outline-container-org4542169" class="outline-2">
+<h2 id="org4542169"><span class="section-number-2">8.</span> <a href="#org4542169">Skills and custom agents</a></h2>
+<div class="outline-text-2" id="text-8">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Feature</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+<th scope="col" class="org-left">Kiro</th>
+<th scope="col" class="org-left">OpenCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Skills directory</td>
+<td class="org-left"><code>.claude/skills/</code></td>
+<td class="org-left"><code>.github/skills/</code> etc</td>
+<td class="org-left">discoverable on disk</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>.kiro/agents/</code></td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Skill format</td>
+<td class="org-left"><code>SKILL.md</code></td>
+<td class="org-left"><code>SKILL.md</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Skills install/manage</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>gemini skills install</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Custom agents</td>
+<td class="org-left"><code>.claude/agents/*.json</code></td>
+<td class="org-left">custom agents</td>
+<td class="org-left"><code>/agents</code></td>
+<td class="org-left"><code>AGENTS.md</code></td>
+<td class="org-left"><code>.kiro/agents/</code></td>
+<td class="org-left"><code>agent</code> config</td>
+</tr>
+
+<tr>
+<td class="org-left">Agent CLI flag</td>
+<td class="org-left"><code>--agent</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>default_agent</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Subagent delegation</td>
+<td class="org-left">Agent tool (typed)</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>/agents</code></td>
+<td class="org-left"><code>/agent</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Built-in skills</td>
+<td class="org-left"><code>/simplify</code>, <code>/batch</code> etc</td>
+<td class="org-left">-</td>
+<td class="org-left">extensible via install</td>
+<td class="org-left">-</td>
+<td class="org-left">Specs system</td>
+<td class="org-left">Custom commands</td>
+</tr>
+
+<tr>
+<td class="org-left">Bundled skill count</td>
+<td class="org-left">~6</td>
+<td class="org-left">0 (reads convention)</td>
+<td class="org-left">extensible</td>
+<td class="org-left">0</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Cross-harness portability</td>
+<td class="org-left"><code>.claude/skills/</code></td>
+<td class="org-left"><code>.claude/skills/</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>AGENTS.md</code></td>
+<td class="org-left"><code>AGENTS.md</code></td>
+<td class="org-left"><code>.claude/skills/</code></td>
+</tr>
+</tbody>
+</table>
+
+<p>
+The <code>SKILL.md</code> convention (originated by Anthropic) is now read by
+Claude Code, Copilot CLI, and OpenCode &#x2014; the closest thing to a
+cross-harness standard. Copilot CLI ships no built-in skills but
+discovers <code>SKILL.md</code> files in <code>.claude/skills/</code> and <code>.agents/</code>, so
+project-level skills written for Claude Code work without changes. Gemini CLI has the most developed
+install/manage surface for skills. Codex CLI and Kiro use <code>AGENTS.md</code>
+as the project-level agent configuration (different convention, same
+purpose).
+</p>
+</div>
+</div>
+<div id="outline-container-org312887b" class="outline-2">
+<h2 id="org312887b"><span class="section-number-2">9.</span> <a href="#org312887b">Memory and persistence</a></h2>
+<div class="outline-text-2" id="text-9">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Feature</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+<th scope="col" class="org-left">Kiro</th>
+<th scope="col" class="org-left">OpenCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Project instructions</td>
+<td class="org-left"><code>CLAUDE.md</code></td>
+<td class="org-left"><code>AGENTS.md</code>?</td>
+<td class="org-left"><code>GEMINI.md</code></td>
+<td class="org-left"><code>AGENTS.md</code></td>
+<td class="org-left"><code>.kiro/steering/</code></td>
+<td class="org-left"><code>AGENTS.md</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Auto-generated context</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>product/tech/structure.md</code></td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Cross-session memory</td>
+<td class="org-left"><code>~/.claude/.../memory/</code></td>
+<td class="org-left">Copilot Memory</td>
+<td class="org-left"><code>/memory</code></td>
+<td class="org-left">memories system</td>
+<td class="org-left">steering files</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Memory categories</td>
+<td class="org-left">user/feedback/project/ref</td>
+<td class="org-left">-</td>
+<td class="org-left">hierarchical</td>
+<td class="org-left">-</td>
+<td class="org-left">Always/FileMatch/etc</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Auto-compaction</td>
+<td class="org-left">Yes (at 95%)</td>
+<td class="org-left">Yes (at 95%)</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Manual compact</td>
+<td class="org-left"><code>/compact</code></td>
+<td class="org-left"><code>/compact</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>/compact</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Context visualization</td>
+<td class="org-left"><code>/context</code></td>
+<td class="org-left"><code>/context</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Session export</td>
+<td class="org-left"><code>/export</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>--json</code></td>
+<td class="org-left">-</td>
+<td class="org-left"><code>/share</code></td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Kiro's auto-generated <code>product.md</code>, <code>tech.md</code>, <code>structure.md</code> are
+unique &#x2014; the agent bootstraps its own project understanding on first
+run. Claude Code has the most structured memory system (typed
+categories with an indexed <code>MEMORY.md</code>). Gemini CLI and Copilot CLI
+both have auto-compaction at the 95% threshold.
+</p>
+</div>
+</div>
+<div id="outline-container-orgd2138c4" class="outline-2">
+<h2 id="orgd2138c4"><span class="section-number-2">10.</span> <a href="#orgd2138c4">Custom model providers</a></h2>
+<div class="outline-text-2" id="text-10">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Feature</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+<th scope="col" class="org-left">Kiro</th>
+<th scope="col" class="org-left">OpenCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Provider override</td>
+<td class="org-left">API key only</td>
+<td class="org-left">Env vars</td>
+<td class="org-left"><code>--model</code> + auth</td>
+<td class="org-left"><code>config.toml</code></td>
+<td class="org-left">Bedrock only</td>
+<td class="org-left">75+ via Models.dev</td>
+</tr>
+
+<tr>
+<td class="org-left">Local models</td>
+<td class="org-left">Ollama (via API-compat)</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">Ollama (<code>--oss</code>)</td>
+<td class="org-left">-</td>
+<td class="org-left">Ollama/llama.cpp/etc</td>
+</tr>
+
+<tr>
+<td class="org-left">OpenAI-compatible</td>
+<td class="org-left">-</td>
+<td class="org-left">Yes (env vars)</td>
+<td class="org-left">-</td>
+<td class="org-left">Yes (native)</td>
+<td class="org-left">-</td>
+<td class="org-left">Yes (<code>baseURL</code> config)</td>
+</tr>
+
+<tr>
+<td class="org-left">Anthropic direct</td>
+<td class="org-left">Yes (native)</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">Yes (env vars)</td>
+<td class="org-left">Yes (Bedrock)</td>
+<td class="org-left">Yes (provider config)</td>
+</tr>
+
+<tr>
+<td class="org-left">Azure OpenAI</td>
+<td class="org-left">-</td>
+<td class="org-left">Yes (env var)</td>
+<td class="org-left">-</td>
+<td class="org-left">Yes (provider type)</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Vertex AI</td>
+<td class="org-left"><code>/setup-vertex</code></td>
+<td class="org-left">-</td>
+<td class="org-left">Yes (native)</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Bedrock</td>
+<td class="org-left"><code>/setup-bedrock</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">Yes (native)</td>
+<td class="org-left">-</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+OpenCode has the broadest provider story (75+ via Models.dev). Codex
+CLI has the cleanest multi-provider config (<code>config.toml</code> profiles).
+Claude Code's provider flexibility is limited to API key and
+Vertex/Bedrock setup wizards. Kiro is locked to AWS Bedrock.
+</p>
+</div>
+</div>
+<div id="outline-container-orgf5d86de" class="outline-2">
+<h2 id="orgf5d86de"><span class="section-number-2">11.</span> <a href="#orgf5d86de">Remote and cloud execution</a></h2>
+<div class="outline-text-2" id="text-11">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Feature</th>
+<th scope="col" class="org-left">Claude Code</th>
+<th scope="col" class="org-left">Copilot CLI</th>
+<th scope="col" class="org-left">Gemini CLI</th>
+<th scope="col" class="org-left">Codex CLI</th>
+<th scope="col" class="org-left">Kiro</th>
+<th scope="col" class="org-left">OpenCode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Remote control</td>
+<td class="org-left"><code>/remote-control</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>--remote ws://</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Cloud execution</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>codex cloud</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Desktop app</td>
+<td class="org-left"><code>/desktop</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>codex app</code> (macOS)</td>
+<td class="org-left">IDE only</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">Run as MCP server</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left"><code>codex mcp-server</code></td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+
+<tr>
+<td class="org-left">ACP protocol</td>
+<td class="org-left">-</td>
+<td class="org-left">Yes</td>
+<td class="org-left">experimental</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+<td class="org-left">-</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Codex CLI is the only agent with cloud-execution (<code>codex cloud</code>) and
+MCP-server modes. Copilot CLI supports ACP (Agent Client Protocol) &#x2014;
+a competing open standard to MCP for agent interop. Claude Code's
+<code>/remote-control</code> provides browser-to-terminal bridging.
+</p>
+</div>
+</div>
+<div id="outline-container-org361167b" class="outline-2">
+<h2 id="org361167b"><span class="section-number-2">12.</span> <a href="#org361167b">Convergent patterns</a></h2>
+<div class="outline-text-2" id="text-12">
+<p>
+Reading across all six agents, the convergent surfaces are:
+</p>
+
+<ol class="org-ol">
+<li><b>Non-interactive mode with <code>-p</code> / <code>exec</code></b> &#x2014; every agent has a
+script-friendly mode. The shell integration pattern is settled.</li>
+<li><b>MCP as the tool-extension protocol</b> &#x2014; all six support MCP.
+Configuration format varies (JSON, TOML, settings) but the
+transport is standard.</li>
+<li><b>Project instruction files</b> &#x2014; <code>CLAUDE.md</code>, <code>GEMINI.md</code>,
+<code>AGENTS.md</code>, <code>.kiro/steering/</code>. Every agent auto-loads a
+project-level context document. No standard name.</li>
+<li><b>Permission tiering</b> &#x2014; every agent has at least a read-only / ask
+/ auto-approve ladder. The number of tiers varies (2&#x2013;6) but the
+shape is the same.</li>
+<li><b>Session persistence + resume</b> &#x2014; all but OpenCode support
+continuing a prior conversation.</li>
+</ol>
+</div>
+</div>
+<div id="outline-container-orgdc05ada" class="outline-2">
+<h2 id="orgdc05ada"><span class="section-number-2">13.</span> <a href="#orgdc05ada">Divergent bets</a></h2>
+<div class="outline-text-2" id="text-13">
+<p>
+Where the agents disagree reveals what each vendor considers the
+hard problem:
+</p>
+
+<ol class="org-ol">
+<li><b>Sandboxing.</b> Gemini CLI and Codex CLI invest heavily in OS-level
+sandboxing (Seatbelt, gVisor, Landlock). Claude Code invests in
+worktree isolation and permission hooks. Kiro and OpenCode punt
+entirely. The question: is isolation the agent's job or the
+operator's?</li>
+<li><b>Hooks and lifecycle events.</b> Claude Code and Kiro have rich
+hook surfaces; the others have basic or no hooks. The question:
+should the harness be programmable, or should external tooling
+(CI, scripts) handle lifecycle?</li>
+<li><b>Skills portability.</b> <code>SKILL.md</code> is becoming a cross-harness
+convention (Claude Code, Copilot CLI, OpenCode). <code>AGENTS.md</code> is a
+competing convention (Codex CLI, Kiro, OpenCode). The question:
+does the project instruct the agent (<code>AGENTS.md</code>) or does the
+agent discover capabilities (<code>SKILL.md</code>)?</li>
+<li><b>Cloud execution.</b> Only Codex CLI has a cloud-execution tier
+(<code>codex cloud</code>). The question: is the terminal the boundary, or
+is it just the client for a remote agent?</li>
+<li><b>Model portability.</b> OpenCode supports 75+ providers; Kiro locks
+to Bedrock. The question: is the agent married to a model, or
+is the model a pluggable backend?</li>
+</ol>
+</div>
+</div>
+<div id="outline-container-org33a6cb7" class="outline-2">
+<h2 id="org33a6cb7"><span class="section-number-2">14.</span> <a href="#org33a6cb7">Landscape diagram</a></h2>
+<div class="outline-text-2" id="text-14">
+<p>
+The diagram below positions the six agents by their primary
+architectural bet. Clusters group agents that share the same
+divergent commitment; edges to the central hub show the feature each
+agent contributes to the convergent baseline.
+</p>
+
+
+<div id="orgc461554" class="figure">
+<p><img src="diagram-agent-landscape.png" alt="Architectural landscape of six CLI coding agents in 2026 Q2, showing OS-sandbox cluster (Gemini CLI, Codex CLI), rich-hooks cluster (Claude Code, Kiro), open-source cluster (OpenCode), and IDE-ecosystem cluster (Copilot CLI), all connected to a central convergent-patterns hub." width="900" />
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org5e4246d" class="outline-2">
+<h2 id="org5e4246d"><span class="section-number-2">15.</span> <a href="#org5e4246d">Verification provenance (2026-04-18)</a></h2>
+<div class="outline-text-2" id="text-15">
+<p>
+Each agent's claims were independently verified by a subagent
+checking official documentation or local <code>--help</code> output. This
+section records what was checked, what version, and what was
+corrected.
+</p>
+
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Agent</th>
+<th scope="col" class="org-left">Method</th>
+<th scope="col" class="org-left">Version/Date</th>
+<th scope="col" class="org-left">Errors found and fixed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Claude Code</td>
+<td class="org-left"><code>claude --help</code> (local install)</td>
+<td class="org-left">2.1.114, 2026-04-18</td>
+<td class="org-left">None in core claims; ~25 power-user flags omitted (in scope)</td>
+</tr>
+
+<tr>
+<td class="org-left">Copilot CLI</td>
+<td class="org-left"><code>docs.github.com</code> official docs</td>
+<td class="org-left">2026-04-18 fetch</td>
+<td class="org-left">Hooks understated (6 types, not 0); skills dir, custom agents,</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left"><code>/compact</code>, <code>/context</code>, Azure provider were all incorrectly "-"</td>
+</tr>
+
+<tr>
+<td class="org-left">Gemini CLI</td>
+<td class="org-left"><code>geminicli.com</code> (v0.38.2 stable)</td>
+<td class="org-left">2026-04-18 fetch</td>
+<td class="org-left"><code>-w</code> worktree flag was fabricated (removed); Windows sandbox</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">backend omitted; <code>gemini skills install</code> unverified as CLI subcmd</td>
+</tr>
+
+<tr>
+<td class="org-left">Codex CLI</td>
+<td class="org-left"><code>github.com/openai/codex</code> (v0.121.0)</td>
+<td class="org-left">2026-04-15 release</td>
+<td class="org-left">None wrong; missing newer subcmds (apply, execpolicy, features)</td>
+</tr>
+
+<tr>
+<td class="org-left">Kiro</td>
+<td class="org-left"><code>kiro.dev/docs/cli/</code></td>
+<td class="org-left">2026-04-18 fetch</td>
+<td class="org-left">CLI is <code>kiro-cli</code> not <code>kiro</code>; permission model not "Autopilot/</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">Supervised"; only 5 hook triggers (not 8); no file-event hooks;</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left"><code>#</code> mention syntax not found; inclusion mode names not in docs</td>
+</tr>
+
+<tr>
+<td class="org-left">OpenCode</td>
+<td class="org-left"><code>opencode.ai/docs/</code> (v1.4.11)</td>
+<td class="org-left">2026-04-18 fetch</td>
+<td class="org-left"><code>/connect</code> and <code>/permissions</code> not slash cmds (config-only);</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">repo is <code>anomalyco/opencode</code> not <code>nichochar/opencode</code>;</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">Copilot/ChatGPT auth not explicitly documented (may work via</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">provider config); skills in <code>.opencode/skills/</code> confirmed</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+All corrections have been applied to the tables above. The note is
+accurate as of the versions listed; flag surfaces change frequently
+and should be re-verified quarterly.
+</p>
+
+<p>
+<b>Channel note:</b> Claude Code 2.1.114 is from the npm/=latest= channel
+(FreeBSD). Homebrew's <code>stable</code> channel ships 2.1.98 as of the same
+date. All flags in the comparison tables are present in both versions;
+the gap is power-user flags (<code>--effort</code>, <code>--from-pr</code>, <code>--chrome</code>,
+etc.) that the note intentionally omits as out of scope.
+</p>
+</div>
+</div>
+<div id="outline-container-freebsd-harness-audit" class="outline-2">
+<h2 id="freebsd-harness-audit"><span class="section-number-2">16.</span> <a href="#freebsd-harness-audit">Harness availability on FreeBSD 15.0 (2026-06-21)</a></h2>
+<div class="outline-text-2" id="text-freebsd-harness-audit">
+<p>
+Vetted against <code>FreeBSD nexus 15.0-RELEASE amd64</code> (the machine that
+publishes this site). The question: which harnesses can run on a
+non-Linux, non-macOS server?
+</p>
+</div>
+<div id="outline-container-org5e1ccc9" class="outline-3">
+<h3 id="org5e1ccc9"><span class="section-number-3">16.1.</span> <a href="#org5e1ccc9">Agent harnesses</a></h3>
+<div class="outline-text-3" id="text-16-1">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-right" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Agent</th>
+<th scope="col" class="org-left">FreeBSD status</th>
+<th scope="col" class="org-right">Version</th>
+<th scope="col" class="org-left">Install method</th>
+<th scope="col" class="org-left">Blocker</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Claude Code</td>
+<td class="org-left">INSTALLED</td>
+<td class="org-right">2.1.89</td>
+<td class="org-left"><code>npm install -g @anthropic-ai/claude-code</code></td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Gemini CLI</td>
+<td class="org-left">INSTALLED</td>
+<td class="org-right">0.47.0</td>
+<td class="org-left"><code>npm install -g @google/gemini-cli</code></td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Goose</td>
+<td class="org-left">INSTALLED</td>
+<td class="org-right">0.9.11</td>
+<td class="org-left"><code>pip install --user goose-ai</code></td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Aider</td>
+<td class="org-left">AVAILABLE</td>
+<td class="org-right">0.86.1</td>
+<td class="org-left"><code>sudo pkg install py311-aider_chat</code></td>
+<td class="org-left">needs sudo</td>
+</tr>
+
+<tr>
+<td class="org-left">Codex CLI</td>
+<td class="org-left">BLOCKED</td>
+<td class="org-right">0.141.0</td>
+<td class="org-left">--</td>
+<td class="org-left"><code>Unsupported platform: freebsd</code> (hard check in bin/codex.js)</td>
+</tr>
+
+<tr>
+<td class="org-left">OpenCode</td>
+<td class="org-left">BLOCKED</td>
+<td class="org-right">1.17.9</td>
+<td class="org-left">--</td>
+<td class="org-left"><code>wanted os: darwin,linux,win32</code> (package.json <code>os</code> field)</td>
+</tr>
+
+<tr>
+<td class="org-left">Kiro</td>
+<td class="org-left">N/A</td>
+<td class="org-right">--</td>
+<td class="org-left">--</td>
+<td class="org-left">IDE-only (VS Code / JetBrains), no standalone CLI binary</td>
+</tr>
+
+<tr>
+<td class="org-left">Copilot CLI</td>
+<td class="org-left">N/A</td>
+<td class="org-right">--</td>
+<td class="org-left">--</td>
+<td class="org-left">VS Code extension, not a standalone binary</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Three of six agents run on FreeBSD. Codex CLI and OpenCode have hard
+platform checks that could be patched (the underlying Node.js runtime
+works) but are not officially supported. Aider is a pure Python package
+and would work after <code>sudo pkg install</code>.
+</p>
+</div>
+</div>
+<div id="outline-container-org4e00a9b" class="outline-3">
+<h3 id="org4e00a9b"><span class="section-number-3">16.2.</span> <a href="#org4e00a9b">Language runtimes and formal methods</a></h3>
+<div class="outline-text-3" id="text-16-2">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-right" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Tool</th>
+<th scope="col" class="org-right">Version</th>
+<th scope="col" class="org-left">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Node.js</td>
+<td class="org-right">24.14.1</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Deno</td>
+<td class="org-right">2.6.6</td>
+<td class="org-left">FreeBSD native binary</td>
+</tr>
+
+<tr>
+<td class="org-left">Python</td>
+<td class="org-right">3.11.15</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">GHC</td>
+<td class="org-right">9.10.3</td>
+<td class="org-left"><code>lens</code>, <code>boomerang</code>, <code>profunctors</code> installed</td>
+</tr>
+
+<tr>
+<td class="org-left">OCaml</td>
+<td class="org-right">4.14.2</td>
+<td class="org-left">opam + <code>lens</code> installed</td>
+</tr>
+
+<tr>
+<td class="org-left">Clojure (clj)</td>
+<td class="org-right">1.12.0.1488</td>
+<td class="org-left">JVM, full REPL</td>
+</tr>
+
+<tr>
+<td class="org-left">Babashka (bb)</td>
+<td class="org-right">1.12.206</td>
+<td class="org-left">GraalVM native</td>
+</tr>
+
+<tr>
+<td class="org-left">Racket</td>
+<td class="org-right">9.0 [cs]</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Lean 4</td>
+<td class="org-right">4.27.0-pre</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Guile</td>
+<td class="org-right">3.0.10</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Emacs</td>
+<td class="org-right">32.0.50</td>
+<td class="org-left">custom build at <code>~/opt/emacs/</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Ruby</td>
+<td class="org-right">3.3.10</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Z3</td>
+<td class="org-right">4.16.0</td>
+<td class="org-left">SMT solver</td>
+</tr>
+
+<tr>
+<td class="org-left">Spin</td>
+<td class="org-right">AVAILABLE</td>
+<td class="org-left"><code>sudo pkg install spin</code> (model checker, v6.5.2)</td>
+</tr>
+
+<tr>
+<td class="org-left">Graphviz (dot)</td>
+<td class="org-right">14.1.4</td>
+<td class="org-left">--</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div id="outline-container-org7907d00" class="outline-3">
+<h3 id="org7907d00"><span class="section-number-3">16.3.</span> <a href="#org7907d00">Infrastructure and deployment</a></h3>
+<div class="outline-text-3" id="text-16-3">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-right" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Tool</th>
+<th scope="col" class="org-right">Version</th>
+<th scope="col" class="org-left">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Bastille</td>
+<td class="org-right">1.4.3</td>
+<td class="org-left">FreeBSD jails; needs sudo</td>
+</tr>
+
+<tr>
+<td class="org-left">Docker</td>
+<td class="org-right">unknown</td>
+<td class="org-left">installed but version unknown; jails preferred</td>
+</tr>
+
+<tr>
+<td class="org-left">Terraform</td>
+<td class="org-right">1.14.7</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Git</td>
+<td class="org-right">2.53.0</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">GitHub CLI (gh)</td>
+<td class="org-right">2.83.2</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">Wrangler (CF)</td>
+<td class="org-right">BLOCKED</td>
+<td class="org-left"><code>workerd</code> has no FreeBSD binary</td>
+</tr>
+
+<tr>
+<td class="org-left">Vale</td>
+<td class="org-right">master</td>
+<td class="org-left">prose linter</td>
+</tr>
+
+<tr>
+<td class="org-left">jq</td>
+<td class="org-right">1.8.1</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">tmux</td>
+<td class="org-right">installed</td>
+<td class="org-left">--</td>
+</tr>
+
+<tr>
+<td class="org-left">opam</td>
+<td class="org-right">2.5.1</td>
+<td class="org-left">OCaml package manager</td>
+</tr>
+
+<tr>
+<td class="org-left">cabal</td>
+<td class="org-right">3.16.1.0</td>
+<td class="org-left">Haskell package manager</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div id="outline-container-org17423a8" class="outline-3">
+<h3 id="org17423a8"><span class="section-number-3">16.4.</span> <a href="#org17423a8">Commands requiring sudo</a></h3>
+<div class="outline-text-3" id="text-16-4">
+<div class="org-src-container">
+<pre class="src src-bash"><span class="org-comment-delimiter"># </span><span class="org-comment">Install aider (Python AI pair programming)
+</span>sudo pkg install py311-aider_chat
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Install Spin (model checker)
+</span>sudo pkg install spin
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Bastille jail operations
+</span>sudo bastille list
+sudo bastille create &lt;name&gt; 15.0-RELEASE &lt;ip&gt;
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Bun runtime (not packaged for FreeBSD as of 2026-06-21)
+</span><span class="org-comment-delimiter"># </span><span class="org-comment">Alternative: use Deno 2.6.6 (native FreeBSD binary)</span>
+</pre>
+</div>
+</div>
+</div>
+</div>
+<div id="outline-container-org3b76cc4" class="outline-2">
+<h2 id="org3b76cc4"><span class="section-number-2">17.</span> <a href="#org3b76cc4">Related</a></h2>
+<div class="outline-text-2" id="text-17">
+<ul class="org-ul">
+<li><a href="../claude-code-workshop-2026/">Claude Code Workshop 2026</a> &#x2014;
+deep-dive on Claude Code's surface.</li>
+<li><a href="../2026-q2-claude-code-features/">Claude Code Features &#x2014; 2026 Q2</a> &#x2014;
+speculative notes on Claude Code's direction.</li>
+<li><a href="../2025-terminal-ai-agents/">Terminal AI Agents 2025</a> &#x2014;
+prior landscape survey; this note is the Q2 2026 update.</li>
+<li><a href="../2026-q2-cloudflare-agents/">Cloudflare Agents Week 2026</a> &#x2014;
+where the agent infrastructure (sandbox, memory, identity)
+sits relative to these CLI surfaces.</li>
+</ul>
+</div>
+</div>
+</div>
+<div id="postamble" class="status">
+<footer class="site-footer">
+  <div class="container">
+    <a href="/" class="wordmark wordmark-sm">wal<span class="dot">.</span><span class="sh">sh</span></a>
+    <span class="footer-meta">Updated Jun 21, 2026 · <code>build: 2026-06-21 22:11 | sha: c335c7c0</code> · <a href="/site.atom" title="Site updates (Atom)">&#x25C9; feed</a></span>
+  </div>
+</footer><script src="/static/js/adtech/ceddl.js"></script>
+
+<script src="/static/js/adtech/tag-manager.js"></script>
+
+<script src="/static/js/adtech/beacon.js"></script>
+
+<script src="/static/js/adtech/attribution.js"></script>
+
+<script src="/static/js/adtech/sponsored-products.js"></script>
+
+<script src="/static/js/adtech/search-ads.js"></script>
+
+<script src="/static/js/adtech/prebid-lite.js"></script>
+
+<script src="/static/js/adtech/native-ads.js"></script>
+
+<script src="/static/js/adtech/metered-access.js"></script>
+
+<script src="/static/js/adtech/content-gate.js"></script>
+
+<script src="/static/js/adtech/pricing-engine.js"></script>
+
+<script src="/static/js/adtech/affiliate-engine.js"></script>
+
+<script src="/static/js/adtech/referral-program.js"></script>
+
+<script src="/static/js/adtech/promo-engine.js"></script>
+
+<script src="/static/js/adtech/influencer-links.js"></script>
+
+<script src="/static/js/adtech/ab-engine.js"></script>
+
+<script src="/static/js/adtech/clean-room.js"></script>
+
+<script src="/static/js/adtech/bot-greeting.js"></script>
+<script type="module" src="/static/js/web-vitals-init.js"></script>
+
+<script src="/static/js/heading-anchors.js"></script>
+
+<script src="/static/js/event-pixel.js"></script>
+
+<script src="/static/js/color-swatches.js"></script>
+
+<script src="/static/js/research-checklist.js"></script>
+
+<script src="/static/js/bot-signal.js"></script>
+
+<script src="/static/js/global-pollution.js"></script>
+<nav class="webring" data-wwn data-wwn-rewrite-links="true" aria-label="Webring navigation">
+  <a id="webring-prev" rel="prev">&larr; prev</a>
+  <span id="webring-status"></span>
+  <a id="webring-next" rel="next">next &rarr;</a>
+</nav>
+<script src="/static/js/webring.js"></script>
+</div>
+</body>
+</html>
