@@ -1,0 +1,81 @@
+#+TITLE: guile-sage — Roadmap & LiteLLM capability/boundary map
+#+AUTHOR: guile-sage
+#+DATE: 2026-06-25
+#+STATUS: Design / forward-looking — capability map drives the roadmap
+#+OPTIONS: toc:2 num:t ^:nil
+#+STARTUP: overview
+
+The roadmap is driven by *where the system boundary sits*: what the LiteLLM
+proxy normalizes for us (with leaks to watch) vs. what the *harness* (guile-sage)
+must own. New features that change that boundary update this map first.
+
+*Legend* — how much LiteLLM does for us:
+- =N= Normalized — proxy provides a unified surface; use it directly.
+- =S= Some — mapped, but imperfect (offline vs provider truth, per-provider).
+- =L= Leaky — partial / provider-uneven / silent no-op on unsupported; verify.
+- =H= Harness-owned — LiteLLM does NOT do this; guile-sage must build it.
+
+Everything =N/S/L= is *below the LiteLLM line* (proxy provides; watch the leaks).
+Everything =H= is *above the line* (the harness owns it). Boundary-changing
+features move items across that line — re-check [[file:CHAOS-TESTING.org][CHAOS-TESTING.org]] /
+[[file:SANDBOX-HARNESS-CONTRACT.org][SANDBOX-HARNESS-CONTRACT.org]] when they do.
+
+* L0/L1/L2 — inference + plumbing (LiteLLM-provided)
+
+| Feature (from claude-api)        | Status | Leak / note                          |
+|----------------------------------+--------+--------------------------------------|
+| chat completion (messages)       | N      | unified schema                       |
+| streaming                        | N      | SSE → unified chunk format           |
+| tool use / function calling      | N      | tool_choice + parallel-call; semantics vary per provider |
+| structured output / json schema  | L      | some providers emulate, not enforce  |
+| multimodal input (vision/audio)  | L      | per-provider support matrix          |
+| files-as-input                   | L      | upload semantics diverge             |
+| embeddings                       | N      | /embeddings                          |
+| token counting                   | S      | tiktoken offline ≠ provider count; Anthropic has native count endpoint |
+| prompt caching                   | L      | cache_control normalized BUT Bedrock Converse drops the beta header; TTL + cache_creation tokens Anthropic-only; silent no-op on unsupported |
+| reasoning / thinking output      | L      | reasoning_content normalized; thinking + tool-use multi-turn needs thinking_blocks replayed (modify_params=true papers over it) |
+| reasoning_effort / budget        | S      | mapped per provider                  |
+| cost / usage accounting          | L      | cost map; cached-token cost calc corrections still landing |
+| error taxonomy                   | N      | mapped to OpenAI exception types     |
+| batches                          | L      | only some providers; /batches xform  |
+| files API (storage)              | L      | provider-specific lifecycle          |
+| model migration / aliasing       | N      | model_list indirection               |
+| endpoint routing (chat vs /responses) | L | same model string routes to /chat or /responses by param (e.g. websearch forces /responses on xai); affects reproducibility |
+
+* L2 — governance (LiteLLM-provided)
+
+| Capability                       | Status                                  |
+|----------------------------------+-----------------------------------------|
+| virtual keys / auth              | N (proxy)                               |
+| spend / budget per project       | N (proxy)                               |
+| telemetry callbacks (OTEL etc)   | N (hook) — bind to your OTLP            |
+| guardrails                       | L — partial, provider-uneven           |
+
+* L3 — agent runtime (HARNESS-OWNED — guile-sage's roadmap)
+
+LiteLLM passes schemas and routes calls; it never runs the loop, the tools, or
+the sandbox. This layer is the harness's job and the substance of the roadmap.
+
+| Capability                       | Status | Where it lives / lands                 |
+|----------------------------------+--------+----------------------------------------|
+| agent loop / control flow        | H      | governance tuple drives it (=src/sage/agent.scm=, =repl.scm=) |
+| tool registry + execution        | H      | LiteLLM passes schemas, never runs (=src/sage/tools.scm=, =mcp.scm=) |
+| memory                           | H      | session/context (=session.scm=, =context.scm=) |
+| environments / sandboxes         | H      | Bastille jails / self-hosted ([[file:rfc/003-ephemeral-key-sandbox.org][RFC-003]], [[file:SANDBOX-HARNESS-CONTRACT.org][harness contract]]) |
+| multiagent coordination          | H      | aq / petclinic coordinator             |
+| events / webhooks                | H      | (planned)                              |
+| scheduled deployments            | H      | (planned)                              |
+| outcomes / eval                  | H      | skill-eval lineage ([[file:EVAL-CASE-SCHEMA.org][eval schema]], =tests/eval/=) |
+
+* Notes
+
+- This supersedes the old v0.1-era roadmap (removed 2026-06-24). It is a
+  *boundary map*, not a feature checklist: the value is in the =Status= column,
+  which says who owns each capability.
+- The =L= rows are the active risk surface — each is a place a feature can
+  silently no-op or diverge per provider. Treat them like the taint/guardrail
+  boundaries: verify, don't assume (cf. the guardrail "applied ≠ redacted"
+  finding in [[file:VALIDATION-INDEX.org::#live-runs][VALIDATION-INDEX]]).
+- When a new feature moves an item across the LiteLLM line (e.g. a guardrail
+  going from =L= to =N=, or a new =H= runtime capability), update this table and
+  the affected contract docs in the same change.

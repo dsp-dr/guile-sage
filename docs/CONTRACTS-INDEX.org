@@ -56,6 +56,7 @@ The non-negotiables, with the full rationale + reproducible experiments in
 | [[file:COMMANDS.org][COMMANDS.org]] | slash-command reference | any =/command= change |
 | [[file:TELEMETRY.org][TELEMETRY.org]] | OTLP metrics, counters, verification | counters/endpoints change |
 | [[file:TIMING-PROTOCOL.org][TIMING-PROTOCOL.org]] | benchmark methodology | model/provider defaults change |
+| [[file:ROADMAP.org][ROADMAP.org]] | LiteLLM capability/boundary map (N/S/L/H) driving the harness roadmap | boundary shifts |
 | [[file:EU-AI-ACT-GUARDRAILS.org][EU-AI-ACT-GUARDRAILS.org]] | LiteLLM guardrail setup (Article 5) | guardrail policy changes |
 
 * Contracts
