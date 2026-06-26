@@ -1,6 +1,6 @@
 #+TITLE: guile-sage — MCP Server Contract (sage as callee)
 #+AUTHOR: guile-sage
-#+STATUS: Design / forward-looking — contract first; not yet implemented (SAGE-t2l)
+#+STATUS: Implemented — sage mcp-server serves *tools* over stdio (SAGE-t2l); consumer config below
 #+DATE: 2026-06-25
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
@@ -105,12 +105,27 @@ the installed binary, or =SERVER="mcp-server-qrcode"= to grind any stdio server)
 
 * 5. Run / wire (dogfood: Claude Code + Emacs)
 
-One stdio entrypoint serves both (= =gmake mcp-server=):
-- *Claude Code:* =claude mcp add guile-sage -- gmake -C <path> mcp-server=
-  (stdio; Claude spawns it, speaks newline JSON-RPC, health-checks via
-  =initialize=). Observed: Claude also runs remote-HTTPS + local-SSE servers, so
-  stdio is the simplest correct choice for a co-located server.
-- *Emacs:* =mcp.el= / =gptel= MCP client pointed at the same =gmake … mcp-server=.
+One stdio entrypoint: =sage mcp-server= (installed binary; =gmake install=).
+Do NOT wrap it in =gmake -C … mcp-server= — gmake prints "Entering directory" to
+stdout and corrupts the JSON-RPC stream (B1). Verified clean as a one-shot, same
+shape as =npx @jwalsh/mcp-server-qrcode=:
+
+#+begin_src sh
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  | sage mcp-server | jq -r '.result.tools[].name'
+#+end_src
+
+How a consumer adds it via config:
+- *Claude Code (installed):* =claude mcp add sage -- sage mcp-server=, or in
+  =.mcp.json=: ={"mcpServers":{"sage":{"command":"sage","args":["mcp-server"]}}}=.
+- *Claude Code (in-tree, no install):* the dev form in this repo's =.mcp.json=
+  (=guile3 -L src -c '(use-modules (sage main)) (main (list "sage" "mcp-server"))'=).
+- *Emacs:* =mcp.el= / =gptel= MCP client pointed at =sage mcp-server=.
+
+Prereq for the installed form: =gmake install= (puts =sage= on =~/.local/bin=;
+the wrapper runs =guile --no-auto-compile= so a stale global ccache can't shadow
+it — the v1.0.1-banner fix). Default-safe: 24 read-only tools; unsafe behind
+=SAGE_MCP_EXPOSE_UNSAFE=1=.
 
 * 6. Build sequence (we are at step 1–2)
 
