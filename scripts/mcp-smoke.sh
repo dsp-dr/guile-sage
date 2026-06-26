@@ -42,15 +42,17 @@ echo "-- tools/call git_status (safe) -> first lines --"
 rpc "tools/call" '{"name":"git_status","arguments":{}}' \
   | jq -r '.result.content[0].text' | head -3 | sed 's/^/   /'
 
-echo "-- tools/call write_file (UNSAFE) -> must be rejected (B2) --"
-ERR=$(rpc "tools/call" '{"name":"write_file","arguments":{"path":"x","content":"y"}}' | jq -r '.error.message // "UNEXPECTED-OK"')
-echo "   $ERR"
-case "$ERR" in
-  *"not exposed"*) echo "   PASS: unsafe tool blocked" ;;
-  *)               echo "   FAIL: unsafe tool was not blocked"; exit 1 ;;
-esac
-
-echo "-- tools/call bad-name -> -32601 --"
-rpc "tools/call" '{"name":"nope","arguments":{}}' | jq -c '{code:.error.code, msg:.error.message}'
+echo "-- tools/call write_file (UNSAFE) -> blocked, and INDISTINGUISHABLE from unknown (no oracle) --"
+UNSAFE=$(rpc "tools/call" '{"name":"write_file","arguments":{"path":"x","content":"y"}}' \
+          | jq -c '{code:.error.code, msg:(.error.message|gsub("write_file";"<n>"))}')
+UNKNOWN=$(rpc "tools/call" '{"name":"nope","arguments":{}}' \
+          | jq -c '{code:.error.code, msg:(.error.message|gsub("nope";"<n>"))}')
+echo "   unsafe : $UNSAFE"
+echo "   unknown: $UNKNOWN"
+if [ "$UNSAFE" = "$UNKNOWN" ]; then
+  echo "   PASS: unexposed == unknown (-32601, no oracle leak)"
+else
+  echo "   FAIL: unexposed leaks an oracle (differs from unknown)"; exit 1
+fi
 
 echo "== ok =="

@@ -25,10 +25,20 @@ subcommand). Runtime: guile3/guild3.
   =SAGE_OPENAI_BASE=, =SAGE_OPENAI_API_KEY= (proxy/virtual key only).
 - Per-provider: chat, streaming, tool-calling, token-usage extraction, model list.
 - *Error normalization* (all providers): non-200 → a single clean
-  =[<Provider> <label>: <msg>]= assistant line (never throw the raw body);
-  permanent (401/403/404) vs transient (0/408/429/5xx) distinguished. =<msg>=
-  MUST be *single-line and length-bounded* (whitespace collapsed, ≤200 chars) —
-  a provider body may not inject newlines into the transcript or dump kilobytes.
+  =[<Provider> <label>: <msg>]= assistant line.
+  - =<label>= is a *provider-normalized human-readable reason* — phrasing is
+    provider-specific (e.g. 404 → gemini "model not found", openai "request
+    failed (HTTP 404)"; 401 → "authentication failed (invalid/expired key)").
+    The *stable contract* is the classification (below) + the shape, NOT
+    byte-identical tokens across providers. Canonical buckets: =connection
+    failed= (0), =authentication failed …= (401/403), =rate limited= (429),
+    =server error= (5xx), provider-specific or =request failed (HTTP <n>)= else.
+  - =<msg>= is a *sanitized, bounded excerpt* of the body — whitespace collapsed
+    to single spaces, ≤200 chars. "Never throw the raw body" means no newlines /
+    no kilobytes / never a thrown Scheme value; a short excerpt IS allowed.
+  - *Classification ≠ retry policy.* Codes are classified permanent (401/403/404)
+    vs transient (0/408/429/5xx) for the label; the *retry* set (§8) is
+    408/429/5xx only — code 0 is classified transient but fails fast.
 - *Model-tier auto-select*: fast/standard tiers (defaults =llama3.2:latest=,
   ceilings 4000/8000); probe installed models, fall back if missing.
 
@@ -38,9 +48,12 @@ subcommand). Runtime: guile3/guild3.
 - *Permission model*: safe tools always allowed; mutating tools (write_file,
   edit_file, git_commit, git_push, eval_scheme, …) require YOLO mode or
   confirmation. =SAGE_YOLO_MODE=1= permits all.
-- Path containment (=safe-path?=): workspace-relative; =/tmp/= allowed; reject
-  *NUL bytes* and =..=; block =.env=, =.git/=, =.ssh=, =.gnupg=; symlink-safe
-  canonicalization. MUST be total (never raises on hostile input).
+- Path containment (=safe-path?=): bare/relative paths resolve against the
+  workspace (default-allow workspace-relative); =/tmp/= allowed; empty path
+  rejected. Reject *NUL bytes* and any =..= (substring match). Block =.env=,
+  =.git/=, =.ssh=, =.gnupg= by *path segment* (so =my.env= / =gitconfig= are
+  fine, =foo/.env= is not). Symlink-safe canonicalization. MUST be *total*
+  (never raises on hostile input).
 - Tool families: file read/list/glob/search; file write/edit (unsafe); git
   status/diff/log/fetch (+ commit/push/add-note unsafe); fetch_url; log
   search/stats (self-inspection); agent tasks (beads-backed); generate_image;
@@ -56,6 +69,13 @@ subcommand). Runtime: guile3/guild3.
   =SAGE_MCP_EXPOSE_UNSAFE=1=; stdout is JSON-RPC only (logs→stderr). Error codes:
   =-32700= (parse error, id null — malformed JSON MUST get a reply, not a silent
   drop), =-32600=, =-32601=, =-32602=. Lets Claude Code / Emacs call sage.
+  - *No oracle*: =tools/call= on an unknown tool AND on an unexposed (gated)
+    tool MUST return the *identical* response (=-32601=, same message) — a peer
+    client must not be able to tell a gated tool from a nonexistent one, nor be
+    told how to escalate. The =SAGE_MCP_EXPOSE_UNSAFE= hint goes to stderr only.
+  - *Framing*: blank / whitespace-only stdin lines are transport framing, not
+    messages — skipped silently (NOT =-32700=). =-32700= is only for non-blank
+    input that fails to parse.
   *Taint scope*: served results are *plain MCP content* — the taint envelope
   (§7) is for sage's OWN-LLM path, NOT the server wire; a peer client owns its
   own trust boundary (a server-side guard may sanitize but must not wrap).

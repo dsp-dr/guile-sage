@@ -85,12 +85,16 @@
          (args (or (assoc-ref params "arguments") '()))
          (tool (and name (get-tool name))))
     (cond
-     ((not tool)
+     ((or (not tool) (not (tool-exposed? name)))
+      ;; B2 + no-oracle: an external caller must not run mutating tools by
+      ;; default, AND must not be able to tell an unexposed tool from a
+      ;; nonexistent one (else it can enumerate gated tools / learn how to
+      ;; escalate). Unknown and unexposed return the IDENTICAL response; the
+      ;; SAGE_MCP_EXPOSE_UNSAFE hint goes to stderr for the operator only.
+      ;; (Surfaced by the sage-lua port, 2026-06.)
+      (when (and tool (not (tool-exposed? name)))
+        (logmsg "   (refused unexposed unsafe tool: ~a — set SAGE_MCP_EXPOSE_UNSAFE=1)~%" name))
       (reply-error id -32601 (string-append "Unknown tool: " (if name (format #f "~a" name) "?"))))
-     ((not (tool-exposed? name))
-      ;; B2: an external caller must not run mutating tools by default.
-      (reply-error id -32600
-                   (string-append "Tool not exposed (unsafe; set SAGE_MCP_EXPOSE_UNSAFE=1 to allow): " name)))
      (else
       (catch #t
         (lambda ()

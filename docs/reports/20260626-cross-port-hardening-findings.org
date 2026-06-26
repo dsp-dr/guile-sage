@@ -61,8 +61,26 @@ now separated from dispatch; a parse failure emits the canonical
 are injection-tested. Added a byte-faithful round-trip regression (the ports all
 had one; guile-sage's was implicit).
 
+* Round 2 — sage-lua (Lua 5.4), the first port of the *hardened* spec
+41/41 property checks pass; it validated round-1's clarifications (408,
+single-line bound, NUL, -32700, served-results-plain) AND surfaced more:
+
+- *Oracle leak (security, FIXED in guile-sage):* =tools/call= on an unknown tool
+  returned =-32601 "Unknown tool"=, but on an unexposed unsafe tool =-32600
+  "Tool not exposed (set SAGE_MCP_EXPOSE_UNSAFE=1)"= — revealing that a gated
+  tool *exists* and how to escalate. Now both return the *identical* =-32601=;
+  the env-var hint is stderr-only. Regression in =scripts/mcp-smoke.sh=.
+- *Spec ambiguities clarified (§2/§3/§4):* =<label>= is provider-normalized
+  (NOT byte-identical across providers — the classification is the contract);
+  =<msg>= is explicitly a sanitized bounded *excerpt* (not "no body at all");
+  classification ≠ retry policy (code 0 is transient-classified but fails fast);
+  dotfile blocklist is *path-segment* match (=my.env= ok), =..= is substring;
+  bare/relative paths resolve workspace-relative, empty rejected; blank/
+  whitespace-only stdin lines are framing (skipped, NOT =-32700=).
+- *Porting note (not a spec issue):* Lua =require()= returns a 2nd value
+  (loader path) in 5.3/5.4 — silently expands a table; any Lua port will hit it.
+
 * What the ports did NOT change
 The agent-loop surface (repl, sessions/compaction, streaming, hooks, telemetry,
 mcp-client) was stubbed in every port — confirming §12: the *boundaries* are the
-hard contract; that surface is where each impl legitimately differs. No
-boundary divergence beyond the six above.
+hard contract; that surface is where each impl legitimately differs.
