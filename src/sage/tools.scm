@@ -95,21 +95,42 @@
    ((string-prefix? "/" path) path)
    (else (string-append (workspace) "/" path))))
 
-;;; safe-path?: Check if path is within workspace
+;;; blocked-segment?: per-token sensitivity rule for one path component.
+;;; Cross-port audit 2026-06 showed neither substring (over-blocks "my.env",
+;;; ".gitignore") nor plain exact-segment (MISSES the secret-bearing ".env.local"
+;;; / ".env.production") is correct — the rule is per token:
+;;;   .env     : the segment is ".env" OR starts with ".env." (dotenv + variants)
+;;;   .git/.ssh/.gnupg : exact segment (so ".gitignore"/".gitattributes" are fine)
+(define (blocked-segment? seg)
+  (or (string=? seg ".env")
+      (string-prefix? ".env." seg)
+      (string=? seg ".git")
+      (string=? seg ".ssh")
+      (string=? seg ".gnupg")))
+
+;;; path-blocked-segment?: true if ANY path segment is sensitive (segment match).
+(define (path-blocked-segment? path)
+  (let loop ((segs (string-split path #\/)))
+    (cond ((null? segs) #f)
+          ((blocked-segment? (car segs)) #t)
+          (else (loop (cdr segs))))))
+
+;;; safe-path?: Check if path is within workspace (total — never raises).
 (define (safe-path? path)
-  ;; Reject NUL bytes (truncation attacks) and ".." traversal globally — no such
-  ;; path is ever safe. NUL guard made explicit per cross-port hardening audit
-  ;; (2026-06): the ports rejected NUL up front; guile-sage relied on implicit
-  ;; canonicalize-path behaviour.
-  (if (or (string-index path #\nul)
+  ;; Reject non-strings, empty, NUL bytes, and ".." traversal globally.
+  (if (or (not (string? path))
+          (string-null? path)
+          (string-index path #\nul)
           (string-contains path ".."))
       #f
-      (let ((ws (workspace))
-            (expanded (resolve-path path)))
-        ;; Allow /tmp for temporary files, otherwise check workspace containment
-        (or (string-prefix? "/tmp/" expanded)
-            (and (string-prefix? ws (canonicalize-path-safe expanded))
-                 (not (regexp-exec (make-regexp "(\\.env|\\.git/|\\.ssh|\\.gnupg)") path)))))))
+      (let ((expanded (resolve-path path)))
+        ;; The sensitive-segment block applies to ALL paths, INCLUDING /tmp —
+        ;; this closes the /tmp/.ssh/id_rsa read gap the ports flagged. Then
+        ;; containment: /tmp scratch OR canonical workspace prefix.
+        (and (not (path-blocked-segment? path))
+             (not (path-blocked-segment? expanded))
+             (or (string-prefix? "/tmp/" expanded)
+                 (string-prefix? (workspace) (canonicalize-path-safe expanded)))))))
 
 ;;; coerce->int: Force a JSON-supplied value to a Scheme exact integer.
 ;;;

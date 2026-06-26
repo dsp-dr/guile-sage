@@ -32,7 +32,11 @@
     (test "bounds length (<=200 + ellipsis)"
       (lambda () (assert-true (<= (string-length (clean-error-message (make-string 500 #\x))) 201) "bounded")))
     (test "tolerates non-strings"
-      (lambda () (assert-equal (clean-error-message 42) "" "non-string -> empty")))))
+      (lambda () (assert-equal (clean-error-message 42) "" "non-string -> empty")))
+    (test "neutralizes ALL control bytes (NUL/BEL), not just whitespace"
+      (lambda () (assert-true (not (string-any (lambda (c) (or (char<? c #\space) (char=? c #\delete)))
+                                               (clean-error-message (string #\a #\nul #\x07 #\b))))
+                              "no control bytes")))))
 
 (test-suite "HTTP retryable status set (408/429/5xx)"
   (lambda ()
@@ -43,10 +47,21 @@
     (test "400 NOT retryable"             (lambda () (assert-false (retryable? 400) "400")))
     (test "0 fails fast (not retried)"    (lambda () (assert-false (retryable? 0)   "0")))))
 
-(test-suite "safe-path? hostile input (NUL + traversal)"
+(test-suite "safe-path? hostile input + per-token dotfile rule (cross-port 2026-06)"
   (lambda ()
-    (test "rejects embedded NUL"  (lambda () (assert-false (safe-path? (string #\a #\nul #\b)) "NUL")))
-    (test "rejects .. traversal"  (lambda () (assert-false (safe-path? "../etc/passwd") "..")))
-    (test "blocks .env"           (lambda () (assert-false (safe-path? "foo/.env") ".env")))))
+    (test "rejects embedded NUL"     (lambda () (assert-false (safe-path? (string #\a #\nul #\b)) "NUL")))
+    (test "rejects empty"            (lambda () (assert-false (safe-path? "") "empty")))
+    (test "rejects .. traversal"     (lambda () (assert-false (safe-path? "../etc/passwd") "..")))
+    (test "blocks .env"              (lambda () (assert-false (safe-path? "foo/.env") ".env")))
+    (test "blocks .env.local"        (lambda () (assert-false (safe-path? ".env.local") ".env.local")))
+    (test "blocks .env.production"   (lambda () (assert-false (safe-path? ".env.production") ".env.production")))
+    (test "blocks .ssh"              (lambda () (assert-false (safe-path? ".ssh/id_rsa") ".ssh")))
+    (test "blocks .git dir"          (lambda () (assert-false (safe-path? ".git/config") ".git")))
+    (test "blocks dotfiles even in /tmp (gap closed)"
+                                     (lambda () (assert-false (safe-path? "/tmp/.ssh/id_rsa") "/tmp/.ssh")))
+    (test "ALLOWS my.env (segment, not substring)"
+                                     (lambda () (assert-true (safe-path? "my.env") "my.env")))
+    (test "ALLOWS .gitignore (exact .git only)"
+                                     (lambda () (assert-true (safe-path? ".gitignore") ".gitignore")))))
 
 (test-summary)

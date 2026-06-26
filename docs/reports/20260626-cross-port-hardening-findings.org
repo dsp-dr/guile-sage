@@ -80,6 +80,40 @@ single-line bound, NUL, -32700, served-results-plain) AND surfaced more:
 - *Porting note (not a spec issue):* Lua =require()= returns a 2nd value
   (loader path) in 5.3/5.4 — silently expands a table; any Lua port will hit it.
 
+* Round 3 — v2 cohort (C++, Ruby, Haskell, Clojure, Scala, Kotlin)
+Six ports against the twice-hardened spec; cross-port *agreement* is the signal.
+Pass counts: C++ 55 (~45k trials), Ruby 64, Haskell 50 (~64k), Clojure 33,
+Scala 31, Kotlin 75. All green, all local.
+
+Fixed in guile-sage (code):
+- *=safe-path?= per-token + =/tmp= block (security).* The old substring regex
+  over-blocked (=my.env=, =.gitignore=) AND under-protected (=/tmp/.ssh/id_rsa=
+  was readable). Pure segment-match (what the ports did) then MISSED the
+  secret-bearing =.env.local= — caught by the existing test suite. Final rule is
+  *per token*: =.env= or =.env.*=; exact =.git=/=.ssh=/=.gnupg=; applied to ALL
+  paths incl =/tmp=. (Neither substring nor exact-segment alone is correct.)
+- *=clean-error-message= neutralizes ALL control bytes* (NUL/BEL/…), not just
+  whitespace (C++: a provider body can smuggle control chars into the transcript).
+- *No-oracle message is now name-free* (=Unknown tool=, no name). Haskell's =Eq=
+  on the response type FAILED on the name-bearing message — "identical response"
+  is only literally true if name-free; also stops reflecting attacker input.
+- *=openai.scm= label =[Provider …]= → =[OpenAI …]=* (was the literal word
+  "Provider" while gemini/ollama used their name; C++ + Clojure flagged).
+
+Clarified in spec (every typed port surfaced independently):
+- *JSON null vs empty-object vs absent are THREE states* — drives MCP =id: null=
+  (reply) vs absent =id= (notification) and =capabilities = {}=. (6/6 ports.)
+- *JSON int coercion* contract (=20= / =20.0= / ="20"=; reference rounds, typed
+  ports may reject non-integral; MUST NOT crash).
+- *Error excerpt* = ≤200 *bytes*, UTF-8-safe, control-neutralized.
+- *Retry set is exactly 408/429/5xx*; unlisted 4xx → permanent/non-retried.
+- *No-oracle MUST NOT include the tool name*; trust lattice is a *chain*
+  (join/meet = max/min); CDATA =unwrap= must parse sections (the breakout marker
+  itself contains =]]>=). Fixed the inverted §12/§13 section order.
+
+Regression: =tests/test-hardening.scm= (23, incl per-token safe-path + control
+bytes); =scripts/mcp-smoke.sh= (name-free no-oracle).
+
 * What the ports did NOT change
 The agent-loop surface (repl, sessions/compaction, streaming, hooks, telemetry,
 mcp-client) was stubbed in every port — confirming §12: the *boundaries* are the

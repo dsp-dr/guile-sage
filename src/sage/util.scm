@@ -557,7 +557,15 @@ Cloudflare AI Gateway (cf-aig-authorization)."
 (define (clean-error-message s)
   (if (not (string? s))
       ""
-      (let* ((collapsed (regexp-substitute/global #f "[ \t\r\n]+" s 'pre " " 'post))
+      ;; Neutralize ALL control bytes (C0 <0x20 and DEL 0x7f) to spaces — not
+      ;; just [ \t\r\n] — so a provider body carrying NUL/escape/etc. cannot
+      ;; smuggle control characters into the one-line transcript. Cross-port
+      ;; audit 2026-06 (sage-cpp): whitespace-only collapse left control bytes.
+      (let* ((mapped (string-map (lambda (c)
+                                   (if (or (char<? c #\space) (char=? c #\delete))
+                                       #\space c))
+                                 s))
+             (collapsed (regexp-substitute/global #f " +" mapped 'pre " " 'post))
              (trimmed (string-trim-both collapsed)))
         (if (> (string-length trimmed) *error-message-max-length*)
             (string-append (substring trimmed 0 *error-message-max-length*) "…")

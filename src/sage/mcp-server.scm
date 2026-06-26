@@ -92,9 +92,14 @@
       ;; escalate). Unknown and unexposed return the IDENTICAL response; the
       ;; SAGE_MCP_EXPOSE_UNSAFE hint goes to stderr for the operator only.
       ;; (Surfaced by the sage-lua port, 2026-06.)
-      (when (and tool (not (tool-exposed? name)))
-        (logmsg "   (refused unexposed unsafe tool: ~a — set SAGE_MCP_EXPOSE_UNSAFE=1)~%" name))
-      (reply-error id -32601 (string-append "Unknown tool: " (if name (format #f "~a" name) "?"))))
+      ;; Name-free message: the response bytes must be IDENTICAL for unknown and
+      ;; unexposed across all tool names — echoing the caller-supplied name back
+      ;; makes responses differ per call (a typed port's Eq property caught this)
+      ;; and reflects attacker input. The name + escalation hint go to stderr.
+      (logmsg "   (tools/call refused: ~a~a)~%"
+              (if name (format #f "~a" name) "?")
+              (if (and tool (not (tool-exposed? name))) " — unexposed; set SAGE_MCP_EXPOSE_UNSAFE=1" " — unknown"))
+      (reply-error id -32601 "Unknown tool"))
      (else
       (catch #t
         (lambda ()
