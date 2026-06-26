@@ -1,0 +1,90 @@
+#+TITLE: guile-sage — guile-* project consistency audit (2026-06)
+#+AUTHOR: guile-sage
+#+STATUS: Frozen — point-in-time snapshot (cross-project audit; not maintained)
+#+DATE: 2026-06-26
+#+OPTIONS: toc:2 num:t ^:nil
+#+STARTUP: overview
+
+Audit of the sibling =dsp-dr/guile-*= projects for build/test/Makefile
+consistency, run on a guile3-only FreeBSD host after a userland rebuild. Method:
+an interactive =claude= session per project (tmux, no =-p=) ran =gmake help= +
+the build/test targets and reported drift. guile-sage is the reference
+(gmake build/check/help, guile3/guild3 auto-detect, custom test runner, lint
+gates). Snapshot — projects iterate; re-run to refresh.
+
+* Per-project results
+
+| Project | Makefile | guile3 | help | check | build | tests | key issue |
+|---------+----------+--------+------+-------+-------+-------+-----------|
+| guile-git-scratch | y | y | not-.PHONY | no (uses =test=) | builds | *SEGFAULT, masked* | tests crash, hidden by =\|\| echo= |
+| guile-llm-scratch | y | y | y | y | *FAILS* | — | syntax error compiling =transformer.scm= |
+| guile-meaning-theory | y | y | *broken* | no | tangle-only (no validate) | none | help grep =?= rejected by ugrep; no test harness |
+| guile-monkey-interpreter | y | *guile (not guile3)* | y | y | n/a here | 562 pass/10 fail (forced) | hardcoded =guile= + shebangs; default=help |
+| guile-mas | y | *guile flip* | no | ? | — | — | test runs =guile -L lib= (not guile3) |
+| guile-nimbus | y | y (auto) | y | — | *broken* | unreachable | compile rule missing =-L=; test loop masked |
+| guile-orchestrator-scratch | y | y | — | — | builds | *0 load* | runner path bug (=tests/tests/=); install hardcodes =/usr/local= |
+| guile-par | y | y(FBSD)/*guile* else | y(default) | — | *broken* | wrong file | =default=help= masks; test-euler≠test-jsonl; =(json)= dep missing |
+| guile-replay | y | y | *broken* | *broken* | compiles | pass (direct) | =\= in quoted str + grep =*?= break help/check/test; default=help |
+| guile-the-system | template only | y | no | y(default) | n/a | n/a | only a downstream template Makefile; no help; default=check |
+| gwm | *none* | n/a | n/a | n/a | shell scripts | n/a | no Makefile; direct script invocation |
+| iteral | y (literate) | y | no | no | tangle | — | masked detangle loop; re-tangles each run |
+| hegel-guile | y | y (auto) | y | y | builds | green | *masked SRFI-64* (default runner exits 0 on assert-fail) |
+| moltbook | y | y | y | y (=test= alias) | builds | 9/9 green | *masked SRFI-64* (same) |
+| guile-walsh-research | y | y | no | no (=test=) | builds | 59 pass | *not masked* (custom runner =quit 1=) — good |
+
+* Recurring problems (the consistency drift)
+
+1. *guile vs guile3.* Hardcoded =guile=/=guild= + =#!/usr/bin/env guile=
+   shebangs that don't exist on a guile3-only host → nothing runs.
+   Hit: monkey-interpreter, mas, par (non-FreeBSD branch). Done right
+   (auto-detect with =>=3= gate): nimbus, hegel-guile, the-system.
+2. *Masked failures — two kinds, pervasive:*
+   - shell: =\|\| echo/true=, loops with no exit tracking, no =pipefail= →
+     green on crashes (git-scratch SEGFAULT, par, orchestrator, iteral, nimbus,
+     the-system compile).
+   - *SRFI-64 default runner exits 0 even on failing =test-assert=* — only
+     crashes propagate; real regressions show green (hegel-guile, moltbook;
+     git-scratch). Fix pattern (from walsh-research): a custom runner that
+     =(exit 1)= when fail-count > 0.
+3. *Broken help/check/test from a non-POSIX grep pattern.* =?= / =*?= lazy
+   quantifier or a =\= line-continuation inside a quoted Scheme string →
+   FreeBSD =ugrep= rejects it; masked by an un-=pipefail='d pipe so =gmake=
+   still exits 0 (meaning-theory, replay).
+4. *=default= goal hides a broken build.* =all: help= (or =check=) means a bare
+   =gmake= is green while building/validating nothing (par, meaning-theory,
+   replay; the-system default=check).
+5. *Actually-broken builds.* llm-scratch (syntax error), nimbus (no =-L= in
+   compile), par (missing =(json)=), orchestrator (test path bug).
+6. *Missing convention targets.* No =help=: mas, iteral, the-system, gwm,
+   walsh-research. No =check= (only =test=): git-scratch, par, walsh-research,
+   meaning-theory. No Makefile: gwm.
+7. *Sandbox violation.* orchestrator =install= hardcodes =/usr/local= (the
+   global CLAUDE.md mandates stay-within-$HOME).
+
+* Recommended guile-project Makefile standard (derived from guile-sage + the good runners)
+
+1. =GUILE ?= $(shell command -v guile3 || command -v guile)= with a =>=3= gate;
+   same for =GUILD=. No bare =guile= / =#!/usr/bin/env guile= shebangs.
+2. =help= as the *self-documenting default*, with a POSIX-safe pattern
+   (no =?=/=*?=/=\= inside the grep; prefer pure =awk=). =build= for artifacts.
+3. =check= target (the convention) — alias to =test= if needed, so
+   =gmake check= always works.
+4. *No masked failures*: custom SRFI-64 runner that =(exit 1)= on any failure
+   (like guile-walsh-research); no =\|\| true/echo=; use =set -o pipefail= or
+   explicit exit tracking in recipe loops.
+5. compile rule carries =-L src= (or =.=) and orders inter-module deps.
+6. =install= stays within =$HOME= (XDG paths), never =/usr/local=.
+
+* Cleanest projects
+- *guile-walsh-research* — correct guile3, non-masked custom test runner
+  (only ergonomic gap: add =help= + =check= alias).
+- *hegel-guile* / *moltbook* — good structure + guile3 auto-detect; one fix each
+  (the SRFI-64 masked-failure runner).
+- *guile-par* — only repo with a clean git tree.
+
+* Notes
+- This audit did NOT modify any sibling repo (read-only =gmake= probes). Each
+  per-project claude session left an un-submitted fix suggestion (e.g. "use
+  guile3", "add a check target") — none were applied.
+- guile-mas report was truncated mid-investigation; the guile-vs-guile3 finding
+  is confirmed, deeper findings TBD on re-run.
