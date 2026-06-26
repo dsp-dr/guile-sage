@@ -1,7 +1,7 @@
-#+TITLE: guile-sage — Feature Specification (v1.1)
+#+TITLE: guile-sage — Feature Specification (v1.2)
 #+AUTHOR: dsp-dr
 #+DATE: 2026-06-26
-#+VERSION: 1.1
+#+VERSION: 1.2
 #+STATUS: Current — language-agnostic boundary spec; reference impl = guile-sage v1.1.0
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
@@ -116,8 +116,9 @@ new port milestone.
 |------+----------+------+-----+--------|
 | 1.1 | Guile (reference) | =dsp-dr/guile-sage= | test-pbt.scm | shipped (impl v1.1.0) |
 | 1.1 | Python | =dsp-dr/sage-py-1.1.0= | hypothesis | boundaries done (29 props) |
-| 1.2 | Go | =dsp-dr/sage-go-1.2= | rapid / testing-quick | this milestone |
-| 1.3 | Janet | =dsp-dr/sage-janet-1.3= | hand-rolled generators | this milestone |
+| 1.2 | Go | =dsp-dr/sage-go-1.2= | testing/quick | shipped (go test green) |
+| 1.3 | Janet | =dsp-dr/sage-janet-1.3= | hand-rolled generators | in progress |
+| 1.4 | Common Lisp (ECL) | =dsp-dr/sage-cl-1.4= | hand-rolled (dep-free) | in progress |
 | 2.0 | (TBD ×2) | — | — | after eng+product+mgmt audit → v2 spec |
 
 Roadmap to v2: once 1.3 lands, run a full engineering + product + management
