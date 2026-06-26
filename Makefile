@@ -81,11 +81,13 @@ install: build | $(BINDIR)/ $(GUILE_SITE_DIR)/sage/ $(GUILE_CCACHE_DIR)/sage/ $(
 	@for f in $(SRCDIR)/sage/*.scm; do \
 		install -m 644 "$$f" $(GUILE_SITE_DIR)/sage/; \
 	done
-	@# Install compiled files
-	@for f in $(SRCDIR)/sage/*.go; do \
-		if [ -f "$$f" ]; then \
-			install -m 644 "$$f" $(GUILE_CCACHE_DIR)/sage/; \
-		fi; \
+	@# Compile IN PLACE against the installed sources so each .go embeds the
+	@# installed source path/mtime and Guile trusts it. (Copying the dev-tree .go
+	@# leaves a path mismatch -> Guile distrusts it -> falls back to the global
+	@# ~/.cache, which can be stale = the "v1.0.1 banner" gremlin.)
+	@for f in $(GUILE_SITE_DIR)/sage/*.scm; do \
+		b=$$(basename "$$f" .scm); \
+		$(GUILD) compile -L $(GUILE_SITE_DIR) -o $(GUILE_CCACHE_DIR)/sage/$$b.go "$$f" 2>/dev/null || true; \
 	done
 	@# Install resources
 	@if [ -d resources/prompts ]; then \
@@ -94,7 +96,10 @@ install: build | $(BINDIR)/ $(GUILE_SITE_DIR)/sage/ $(GUILE_CCACHE_DIR)/sage/ $(
 	@# Create wrapper script
 	@echo '#!/bin/sh' > $(BINDIR)/sage
 	@echo '# guile-sage wrapper script' >> $(BINDIR)/sage
-	@echo 'exec $(GUILE) -L $(GUILE_SITE_DIR) -C $(GUILE_CCACHE_DIR) -c "(use-modules (sage main)) (main (command-line))" "$$@"' >> $(BINDIR)/sage
+	@# --no-auto-compile: use ONLY the installed site-ccache (or interpret the
+	@# installed source); never fall back to the global ~/.cache/guile/ccache,
+	@# whose stale .go can shadow the version (the "v1.0.1 banner" gremlin).
+	@echo 'exec $(GUILE) --no-auto-compile -L $(GUILE_SITE_DIR) -C $(GUILE_CCACHE_DIR) -c "(use-modules (sage main)) (main (command-line))" "$$@"' >> $(BINDIR)/sage
 	@chmod +x $(BINDIR)/sage
 	@echo "Installed:"
 	@echo "  Binary:  $(BINDIR)/sage"
