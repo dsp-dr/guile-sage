@@ -104,6 +104,28 @@ So the whole feature is one entrypoint.
 
 Tracked: =SAGE-t2l=.
 
+** Bidirectional MCP integration — milestone plan (Claude Code ↔ sage)
+
+Two directions, two contracts:
+- *OUTBOUND* — sage as *client* (=src/sage/mcp.scm=, [[file:MCP-CONTRACT.org][MCP-CONTRACT.org]]): sage
+  calls external MCP servers.
+- *INBOUND* — sage as *server* (=src/sage/mcp-server.scm=,
+  [[file:MCP-SERVER-CONTRACT.org][MCP-SERVER-CONTRACT.org]]): Claude Code / Emacs call sage.
+
+| M  | Milestone | Dir | Exit criteria | Status | Bead |
+|----+-----------+-----+---------------+--------+------|
+| M0 | sage MCP client | out | sage connects an external SSE server, registers its tools | *DONE* | — |
+| M1 | inbound wizard | in | Claude Code connects =sage-wizard=; tools/list + tools/call round-trip | *DONE* — proven LIVE 2026-06-26 (=sage_whoami=/=sage_echo= called from inside Claude Code) | =SAGE-t2l= |
+| M2 | inbound real (safe-only) | in | =sage= server serves =*tools*= (24 safe); B2 blocks unsafe; Claude Code connects | *DONE* (=sage= connected live; tool exercise pending) | =SAGE-t2l= |
+| M3 | harden inbound | in | tools/call args validated vs =inputSchema= → =-32602=; limits | open | =SAGE-090= |
+| M4 | red-team inbound | in | N1–N5 negatives automated (=gmake=), proven by runtime evidence | open | =SAGE-4yy= |
+| M5 | bidirectional loop | both | a Claude-Code-invoked sage tool itself fans out via sage's MCP *client* (round trip both ways in one workflow) | open | =SAGE-o4y= |
+| M6 | multi-host + deploy | in | Emacs (=mcp.el=) connects sage; both wirings documented | open | =SAGE-eil= |
+
+Current state: inbound (Claude Code → sage) is *live and proven*; outbound shipped.
+Next: M3 (harden) / M4 (red-team) before leaning on it, then M5 (the real
+bidirectional loop) and M6 (Emacs + deploy).
+
 * Notes
 
 - This supersedes the old v0.1-era roadmap (removed 2026-06-24). It is a

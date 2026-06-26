@@ -132,7 +132,11 @@ One stdio entrypoint serves both (= =gmake mcp-server=):
 5. [ ] *Harden* — B2/B3 enforcement, schema validation, limits.
 6. [ ] *Red-team* — caller tries unsafe tool / path escape / stdout-poison /
    arg-injection (negative tests, N1–N5).
-7. [ ] *Deploy* — document the wiring, add to dogfood loop.
+7. [~] *Deploy* — INBOUND proven LIVE 2026-06-26: Claude Code connected =sage= +
+   =sage-wizard= via =.mcp.json=; =mcp__sage-wizard__sage_whoami= /
+   =sage_echo= called from inside Claude Code, round-trip OK. Remaining: exercise
+   the real =sage= server's tools from Claude Code + wire Emacs (=mcp.el=).
+   Milestone plan: [[file:ROADMAP.org][ROADMAP.org]] "Bidirectional MCP integration". Bead =SAGE-eil=.
 
 * 6b. Worked reference — =@jwalsh/mcp-server-qrcode= (real third-party server)
 
