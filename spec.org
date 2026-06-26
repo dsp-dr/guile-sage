@@ -26,7 +26,9 @@ subcommand). Runtime: guile3/guild3.
 - Per-provider: chat, streaming, tool-calling, token-usage extraction, model list.
 - *Error normalization* (all providers): non-200 → a single clean
   =[<Provider> <label>: <msg>]= assistant line (never throw the raw body);
-  permanent (401/403/404) vs transient (0/429/5xx) distinguished.
+  permanent (401/403/404) vs transient (0/408/429/5xx) distinguished. =<msg>=
+  MUST be *single-line and length-bounded* (whitespace collapsed, ≤200 chars) —
+  a provider body may not inject newlines into the transcript or dump kilobytes.
 - *Model-tier auto-select*: fast/standard tiers (defaults =llama3.2:latest=,
   ceilings 4000/8000); probe installed models, fall back if missing.
 
@@ -36,8 +38,9 @@ subcommand). Runtime: guile3/guild3.
 - *Permission model*: safe tools always allowed; mutating tools (write_file,
   edit_file, git_commit, git_push, eval_scheme, …) require YOLO mode or
   confirmation. =SAGE_YOLO_MODE=1= permits all.
-- Path containment (=safe-path?=): workspace-relative; =/tmp/= allowed; block
-  =..=, =.env=, =.git/=, =.ssh=, =.gnupg=; symlink-safe canonicalization.
+- Path containment (=safe-path?=): workspace-relative; =/tmp/= allowed; reject
+  *NUL bytes* and =..=; block =.env=, =.git/=, =.ssh=, =.gnupg=; symlink-safe
+  canonicalization. MUST be total (never raises on hostile input).
 - Tool families: file read/list/glob/search; file write/edit (unsafe); git
   status/diff/log/fetch (+ commit/push/add-note unsafe); fetch_url; log
   search/stats (self-inspection); agent tasks (beads-backed); generate_image;
@@ -49,8 +52,13 @@ subcommand). Runtime: guile3/guild3.
   MCP tools default unsafe.
 - *Server* (=mcp-server.scm=, new in 1.1.0): =sage mcp-server= serves the tool
   registry over *stdio newline-JSON-RPC 2.0* (=initialize= / =tools/list= /
-  =tools/call=); safe-only by default, unsafe behind =SAGE_MCP_EXPOSE_UNSAFE=1=;
-  stdout is JSON-RPC only (logs→stderr). Lets Claude Code / Emacs call sage.
+  =tools/call= / =ping=); safe-only by default, unsafe behind
+  =SAGE_MCP_EXPOSE_UNSAFE=1=; stdout is JSON-RPC only (logs→stderr). Error codes:
+  =-32700= (parse error, id null — malformed JSON MUST get a reply, not a silent
+  drop), =-32600=, =-32601=, =-32602=. Lets Claude Code / Emacs call sage.
+  *Taint scope*: served results are *plain MCP content* — the taint envelope
+  (§7) is for sage's OWN-LLM path, NOT the server wire; a peer client owns its
+  own trust boundary (a server-side guard may sanitize but must not wrap).
 
 * 5. Agent loop & REPL
 - Interactive REPL: prompt → provider chat (streaming or not) → tool-call loop
@@ -80,8 +88,10 @@ subcommand). Runtime: guile3/guild3.
 
 * 8. HTTP transport & resilience
 - All HTTP via curl with =--connect-timeout 5=; startup model probe fails fast
-  (no retry); chat (=http-post-with-timeout=) retries 429/5xx with exponential
-  backoff (=SAGE_HTTP_MAX_RETRIES=, default 2).
+  (no retry); chat (=http-post-with-timeout=) retries the *transient set*
+  =408/429/5xx= with exponential backoff (=SAGE_HTTP_MAX_RETRIES=, default 2).
+  Connection failure (code 0) fails fast (no retry — each retry costs a full
+  connect-timeout for no gain).
 - *Spawn boundary*: shell out via libc =(system …)= only — never =system*= /
   =open-pipe*= / =open-input-pipe= (they SIGSEGV in this long-lived,
   multi-threaded runtime). Streaming = =(system "curl … > FIFO &")= +

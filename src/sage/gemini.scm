@@ -473,7 +473,7 @@
                      ((>= code 500) "server error")
                      (else (format #f "request failed (HTTP ~a)" code)))))
     `(("message" . (("role" . "assistant")
-                    ("content" . ,(format #f "[Gemini ~a: ~a]" label msg))))
+                    ("content" . ,(format #f "[Gemini ~a: ~a]" label (clean-error-message msg)))))
       ("done" . ,#t)
       ("prompt_eval_count" . 0)
       ("eval_count" . 0))))

@@ -97,8 +97,12 @@
 
 ;;; safe-path?: Check if path is within workspace
 (define (safe-path? path)
-  ;; Traversal check applies globally — no path with ".." is ever safe
-  (if (string-contains path "..")
+  ;; Reject NUL bytes (truncation attacks) and ".." traversal globally — no such
+  ;; path is ever safe. NUL guard made explicit per cross-port hardening audit
+  ;; (2026-06): the ports rejected NUL up front; guile-sage relied on implicit
+  ;; canonicalize-path behaviour.
+  (if (or (string-index path #\nul)
+          (string-contains path ".."))
       #f
       (let ((ws (workspace))
             (expanded (resolve-path path)))

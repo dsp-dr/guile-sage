@@ -26,6 +26,7 @@
             json-read-string
             json-write-string
             json-empty-object
+            clean-error-message
             as-list
             string-replace-substring
             shell-escape
@@ -543,8 +544,24 @@ Cloudflare AI Gateway (cf-aig-authorization)."
 ;;; let the provider surface a clean "connection failed" message immediately.
 ;;; See docs/CHAOS-TESTING.org boundary policy.
 (define (http-retryable-code? code)
-  (or (= code 429)
+  (or (= code 408)                      ; Request Timeout — transient (cross-port finding 2026-06)
+      (= code 429)
       (and (>= code 500) (< code 600))))
+
+;;; clean-error-message: collapse all whitespace (incl. newlines) to single
+;;; spaces and bound the length, so a provider's non-200 body becomes ONE safe
+;;; assistant line — it can never inject newlines into the transcript or dump a
+;;; multi-kilobyte body. Surfaced by the cross-port hardening audit (2026-06):
+;;; the ports bounded error bodies; guile-sage did not.
+(define *error-message-max-length* 200)
+(define (clean-error-message s)
+  (if (not (string? s))
+      ""
+      (let* ((collapsed (regexp-substitute/global #f "[ \t\r\n]+" s 'pre " " 'post))
+             (trimmed (string-trim-both collapsed)))
+        (if (> (string-length trimmed) *error-message-max-length*)
+            (string-append (substring trimmed 0 *error-message-max-length*) "…")
+            trimmed))))
 
 ;;; Backoff is applied to chat requests (http-post-with-timeout) only — NEVER
 ;;; to the startup model probe (http-get), which must fail fast (#4). Tune or

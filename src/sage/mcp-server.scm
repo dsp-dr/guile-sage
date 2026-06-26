@@ -38,6 +38,14 @@
   (send `(("jsonrpc" . "2.0") ("id" . ,id)
           ("error" . (("code" . ,code) ("message" . ,msg))))))
 
+;; JSON-RPC parse error: id is null per spec. Emit a raw line so a malformed
+;; request is never silently dropped from the client's view (cross-port finding
+;; 2026-06: ports emitted -32700; guile-sage logged-and-dropped).
+(define (send-parse-error)
+  (display "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32700,\"message\":\"Parse error\"}}")
+  (newline)
+  (force-output (current-output-port)))
+
 (define (text-block s) `(("type" . "text") ("text" . ,s)))
 
 ;; --- B2: default-safe tool exposure ------------------------------------------
@@ -122,7 +130,13 @@
        (else
         (let ((trimmed (string-trim-both line)))
           (unless (string-null? trimmed)
-            (catch #t
-              (lambda () (dispatch (json-read-string trimmed)))
-              (lambda (k . a) (logmsg "!! dispatch error: ~a ~a~%" k a)))))
+            (let ((parsed (catch #t
+                            (lambda () (json-read-string trimmed))
+                            (lambda _ 'parse-error))))
+              (if (eq? parsed 'parse-error)
+                  (begin (logmsg "!! parse error (-32700)~%")
+                         (send-parse-error))
+                  (catch #t
+                    (lambda () (dispatch parsed))
+                    (lambda (k . a) (logmsg "!! dispatch error: ~a ~a~%" k a)))))))
         (loop))))))

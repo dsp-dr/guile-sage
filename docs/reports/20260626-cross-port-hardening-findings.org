@@ -1,0 +1,68 @@
+#+TITLE: guile-sage — cross-port hardening findings (2026-06)
+#+AUTHOR: guile-sage
+#+STATUS: Actioned — fixes landed in guile-sage; spec clarified
+#+DATE: 2026-06-26
+#+OPTIONS: toc:2 num:t ^:nil
+
+Five teams independently implemented the same boundary spec (=spec.org=): the
+Guile reference + Python/Go/Janet/Common-Lisp ports (the ports are ephemeral and
+private — their VALUE is what they reveal about the spec and the reference impl).
+Their independent choices were diffed against guile-sage's own source. Result:
+*4 real gaps + 1 partial in guile-sage*, and *1 spec ambiguity* that sent the
+ports astray. All actioned below.
+
+* Findings & actions
+
+| # | Boundary | Verdict | Action |
+|---+----------+---------+--------|
+| 1 | MCP server result taint-wrapping | *spec ambiguity* | spec clarified (see below) — guile-sage correct |
+| 2 | CDATA =]]>= breakout escape | confirmed-OK | + round-trip regression test |
+| 3 | HTTP retryable codes (408) | GAP | fixed: 408 added |
+| 4 | provider error-body bounding | GAP | fixed: =clean-error-message= |
+| 5 | =safe-path?= NUL bytes | partial | fixed: explicit NUL reject |
+| 6 | MCP =-32700= on parse error | GAP | fixed: emit parse-error line |
+
+** 1 — taint envelope scope (the ambiguity that misled 4 ports)
+All four ports routed *MCP-server* =tools/call= results through the taint
+envelope (=<tool-result safe="false">= CDATA). guile-sage does NOT
+(=mcp-server.scm= returns plain MCP =content[].text=) — and guile-sage is
+*right*: that XML envelope is sage's INTERNAL convention for feeding its OWN LLM
+(the REPL path); forcing it onto the MCP wire would make a peer client (Claude
+Code) render literal =<tool-result>= tags. The spec said results "pass through
+the taint choke point" without saying *which* path — so the ports over-applied
+it. *Fix = spec*: the taint envelope is for the inbound / own-LLM consumption
+path only; as an MCP *server*, sage returns plain protocol content and the
+client owns its own trust boundary. (A server-side guard may still sanitize, but
+must not impose the envelope.)
+
+** 3 — HTTP 408 (=util.scm=)
+=http-retryable-code?= retried 429/5xx only; 408 (Request Timeout) is transient.
+Ports retried it. *Fixed*: 408 added to the retryable set.
+
+** 4 — provider error body (=openai/gemini/ollama.scm=)
+A non-200 body was embedded verbatim into the =[Provider …]= line — a multi-line
+or multi-kilobyte body could inject newlines into the transcript / flood it. The
+ports bounded + single-lined it. *Fixed*: new =clean-error-message= (util)
+collapses whitespace and caps at 200 chars; applied at all three provider sites.
+
+** 5 — =safe-path?= NUL (=tools.scm=)
+NUL-byte rejection was implicit (relied on =canonicalize-path=). Ports rejected
+NUL up front. *Fixed*: explicit =(string-index path #\nul)= guard alongside the
+=..= check.
+
+** 6 — MCP =-32700= (=mcp-server.scm=)
+Malformed JSON was caught and logged to stderr only — silently dropped from the
+client's view. Ports replied =-32700 Parse error= (id null). *Fixed*: parse is
+now separated from dispatch; a parse failure emits the canonical
+=-32700= line.
+
+** 2 — CDATA escape (confirmed-OK)
+=escape-cdata-sequence= / =fetch-cdata-safe= already use =]]]]><![CDATA[>= and
+are injection-tested. Added a byte-faithful round-trip regression (the ports all
+had one; guile-sage's was implicit).
+
+* What the ports did NOT change
+The agent-loop surface (repl, sessions/compaction, streaming, hooks, telemetry,
+mcp-client) was stubbed in every port — confirming §12: the *boundaries* are the
+hard contract; that surface is where each impl legitimately differs. No
+boundary divergence beyond the six above.
