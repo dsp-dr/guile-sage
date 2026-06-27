@@ -1,8 +1,8 @@
-#+TITLE: guile-sage — Feature Specification (spec v3.0)
+#+TITLE: guile-sage — Feature Specification (spec v4.0)
 #+AUTHOR: dsp-dr
 #+DATE: 2026-06-27
-#+VERSION: 3.0
-#+STATUS: Current — round-driven boundary spec; references (guile-sage + sage-clojure) track latest; round 4 targets v3
+#+VERSION: 4.0
+#+STATUS: Current — round-driven boundary spec; references (guile-sage + sage-clojure) track latest; round 5 targets v4
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 
@@ -194,32 +194,30 @@ value is what they reveal about the spec + the reference impl, fed back as
 hardening (see =docs/reports/20260626-cross-port-hardening-findings.org=). They
 are kept private/local; the focus stays guile-sage.
 
-| Port | Runtime | PBT | Result |
-|------+---------+-----+--------|
 | Port | Runtime | PBT | Result (spec level) |
 |------+---------+-----+---------------------|
-| Guile (*reference 1*) | guile3 | test-pbt.scm | shipped v1.1.0 — *spec-v3* |
-| Clojure (*reference 2*) | clojure 1.12 | test.check | feature parity, 65 tests — *spec-v3* |
+| Guile (*reference 1*) | guile3 | test-pbt.scm | shipped v1.1.0 — *spec-v4* |
+| Clojure (*reference 2*) | clojure 1.12 | test.check | feature parity, 65 tests — *spec-v4* |
 | Python / Go / Janet | py3 / go / janet | hypothesis / testing-quick / hand-rolled | private (round 1) |
 | Common Lisp / Lua | ecl / lua54 | hand-rolled | local (round 1) — 26.5k / 41 |
 | C++ / Ruby / Haskell / Scala / Kotlin | (round 2, dep-free) | hand-rolled | local — 55 / 64 / 50 / 31 / 75 (spec-v2) |
 | C / Chez / Fennel / Elixir / OCaml / Perl | (round 3, dep-free) | hand-rolled | local — 882k / 118 / 49 / 95 / 136 / ~120 (spec-v3) |
+| Java/Erlang/Racket/Elisp/Babashka/Deno/Tcl/AWK/Io/Zig/Rust | (round 4, dep-free) | hand-rolled | local — all green (spec-v4) |
 
-Three harvest rounds drove real guile-sage hardening (408 retry, control-byte +
-byte-bounded errors, =safe-path?= per-token + =/tmp=, MCP =-32700= + no-oracle
-name-free, config-precedence reconcile) + ~18 spec clarifications. Full
-changelog: §14.
+Four harvest rounds drove real guile-sage hardening (408 retry, control-byte +
+byte-bounded errors, =safe-path?= per-token + =/tmp= + total/effectful split, MCP
+=-32700= + no-oracle name-free, config-precedence reconcile, value-gated
+EXPOSE_UNSAFE/YOLO) + ~25 spec clarifications. Full changelog: §14; v4 detail §15.
 
 ** Grind roadmap (v3 → spec → v4)
 Teams get only =spec.org= + [[file:PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIVE.org]]; each ships its own =CLAUDE.md=.
 - *v3 grind (DONE):* C, Chez, Fennel, Elixir, OCaml, Perl — all green; findings
   folded into this spec (= v3.0). C: 882k checks; Chez: 118 (chez+petite); OCaml
   136; Perl ~120; Elixir 95; Fennel 49.
-- *v4 (targets spec v3):* the =hydra= languages not yet covered — *Java*,
-  *Erlang*, *Racket*, *Emacs Lisp*, *Babashka*, *Node/Deno (JS/TS)*, *Tcl*,
-  *AWK (gawk)*, *Io*, *Zig*, *Rust*. All runtimes present except *Rust*
-  (=pkg install rust=; in =deps-cohort=). Same protocol; v4 findings → spec v4,
-  and the references advance to v4.
+- *v4 grind (DONE):* Java, Erlang, Racket, Emacs Lisp, Babashka, Deno, Tcl, AWK,
+  Io, Zig, Rust — all 11 green (AWK/Io did most + honest bails). Findings folded
+  into spec v4 (§15); references advanced to v4. Standouts: value-type-identity is
+  universal (typed + untyped converge); the =EXPOSE_UNSAFE/YOLO=0= footgun.
 - *v5 (targets spec v4):* *SBCL* (sibling Common Lisp — cross-impl probe vs our
   ECL port), *Janet↺* (round-1 re-run = upgrade/regression probe at the latest
   spec — the first real test of the v5→v6 beads loop), *Nim* + *Crystal*
@@ -245,13 +243,76 @@ spec-v3 compliant). Patch bumps (v3.0→v3.1) carry within-round clarifications.
 | v1 | round 1 (Python/Go/Janet/CL/Lua) | round 2 | first formal boundary spec |
 | v2 | round 2 (C++/Ruby/Haskell/Scala/Kotlin) | round 3 | oracle-leak fix, per-token safe-path, control-byte error, no-oracle name-free, JSON null/{}/absent, int-coercion, retry-set exact, lattice-chain |
 | *v3* | round 3 (C/Chez/Fennel/Elixir/OCaml/Perl) | round 4 | byte-bounded UTF-8 error; config precedence reconciled (dotenv shadows env); spawn-rule marked Guile-specific; JSON {}/[] decode-collapse noted; other-4xx = permanent/non-retried |
-| v4 | round 4 (Java/Erlang/Racket/EmacsLisp/Babashka/Deno/Tcl/AWK/Io/Zig/Rust) | round 5 | (pending) |
+| v4 | round 4 (Java/Erlang/Racket/EmacsLisp/Babashka/Deno/Tcl/AWK/Io/Zig/Rust) | round 5 | value-type-identity is universal (§15.1); error-code taxonomy + no-oracle scope (§15.2); safe-path total/effectful split + value-gated flags (§15.3); compaction pure-vs-LLM split (§15.4); backoff params + spawn→native API (§15.5); UTF-8 encode-first + label buckets (§15.6); correct CDATA invariant + §4/§7 cross-ref (§15.7) |
 | v5 | round 5 (SBCL/Janet↺/Nim/Crystal/tsgo) | round 6 | (pending; Deno covered in v4) |
 
-*Compliance now:* references =guile-sage= + =sage-clojure= are *spec-v3*. Each
+*Compliance now:* references =guile-sage= + =sage-clojure= are *spec-v4*. Each
 probe declares the spec version it targeted in its =README.org=/=CLAUDE.md=.
 
 *Tracking (v5+):* every impl has beads (=bd setup claude=, local/private). From
 the v5 round on, teams use =bd= to track upgrade/regression issues when
 re-targeting a newer spec; those beads are the harvest feeding the next version
 (v5 issues → v6). See [[file:docs/PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIVE.org]].
+
+* 15. v4 boundary clarifications (round-4 harvest)
+Each amends the same-named section above. Every item is backed by multiple of the
+11 round-4 ports; full evidence: =docs/reports/20260627-v4-grind-findings.org=.
+
+** 15.1 Value-type identity is UNIVERSAL (amends §4)
+The decoder MUST carry value-type identity: =null= / empty-object =\{}= / *absent*
+/ number-vs-string are pairwise-distinct at every node. This is *not* a typed-port
+nicety — both extremes converged on it: typed ports via sum types (Haskell/Rust/
+Scala/OCaml/Zig), untyped string ports via an explicit ={TYPE PAYLOAD}= tag
+(AWK/Tcl), hash-reader langs for free (Racket/Clojure/Erlang/JS). Only the Guile
+*reference's alist* collapses it (it special-cases =json-empty-object= / id-null).
+Partner requirement: *canonical / deterministic-ordered encoding* — else the §4
+no-oracle byte-identity silently breaks on map round-trips.
+
+** 15.2 MCP error-code taxonomy + no-oracle scope (amends §4)
+- =-32700= parse error (id null); =-32600= valid-JSON-but-not-an-object;
+  =-32601= unknown method AND (separately) no-oracle unknown/unexposed *tool*;
+  =-32602= invalid params (checked BEFORE tool lookup); =-32603= tool-exec failure.
+- *No-oracle scope:* applies to =tools/call= only; the guarantee is "the error
+  *object* is byte-identical given the same =id=, with a name-free message". An
+  unknown *method* legitimately differs. Absent/null =arguments= → tool defaults;
+  an id-less =tools/call= is a notification (no reply).
+
+** 15.3 safe-path total/effectful split + value-gated flags (amends §3)
+- Split the two conflicting requirements: a *pure, total* lexical guard (the
+  contract — NUL/=..=/empty/per-token block, never raises) and an *optional,
+  best-effort effectful* symlink-canonicalization pass (may do I/O, may fail).
+  Ordering is load-bearing: reject =..= (substring; intentional fail-closed on
+  benign =my..notes=) BEFORE any canonicalization.
+- *Value-gated dangerous flags:* =SAGE_MCP_EXPOSE_UNSAFE= and =SAGE_YOLO_MODE=
+  enable only on an affirmative VALUE (=1/true/yes/on=), never mere presence —
+  =…=0= must NOT enable. (Fixed in guile-sage; was a footgun.)
+
+** 15.4 Compaction: pure vs LLM-backed (amends §6)
+Two classes: *pure/portable* (=truncate=, =token-limit= — deterministic,
+property-testable in a boundary port) and *LLM-backed* (=summarize=, =intent=,
+=importance= — require a model, NOT unit-testable at the boundary; a port stubs
+them honestly). Auto-compact threshold is *0.9 × the model token limit* (was
+unspecified; warnings stay at 75/90/95%).
+
+** 15.5 HTTP backoff + spawn (amends §8)
+- Backoff: exponential, base *200ms · 2^n* up to =SAGE_HTTP_MAX_RETRIES= (default
+  2); jitter optional. Retry set stays exactly 408/429/5xx; code 0 fails fast.
+- *Spawn:* the rule is generic — *use the runtime's native fork-safe process API*.
+  Guile's =system*=/=open-pipe*= SIGSEGV is the *example/motivation*, not a
+  cross-language constraint (Babashka/Elisp/Racket/Rust/… confirmed no such class).
+
+** 15.6 Error excerpt: encode-first + label buckets (amends §2)
+- "≤200 bytes, UTF-8-safe" means *truncate already-valid UTF-8 at a char boundary*;
+  sanitize MUST NOT *introduce* invalidity, and decoded-string runtimes (Tcl/Io/
+  Elisp) must *encode to bytes first* before measuring. Empty sanitized body →
+  render =[<Provider> <label>]= (no trailing =: <msg>=).
+- =<label>= example strings are *illustrative*; the stable contract is the
+  *classification bucket* (permanent vs transient), not byte-identical tokens.
+
+** 15.7 Correct CDATA taint invariant + scope cross-ref (amends §7)
+- The sound verification is *round-trip identity* + ="]]>"-count == content-count+1=,
+  NOT "balanced/nested =<![CDATA[=" (CDATA does not nest; a literal marker in
+  attacker bytes is inert). Name a =cdata-no-escape= property alongside round-trip.
+- *Cross-ref (resolves an apparent §4↔§7 contradiction):* §7's "EVERY tool result
+  is wrapped" is the *own-LLM* path; an MCP *server* returns *plain* protocol
+  content (§4 served-plain). The envelope never goes on the server wire.

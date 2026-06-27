@@ -1,0 +1,66 @@
+#+TITLE: guile-sage — v4 grind findings (round 4)
+#+AUTHOR: guile-sage
+#+STATUS: Actioned — folded into spec v4 (§15) + reference fixes landed
+#+DATE: 2026-06-27
+#+OPTIONS: toc:2 num:t ^:nil
+
+Round 4 reimplemented the spec across **11 languages** as dep-free, property-tested
+conformance probes (lean protocol: spec v3 + =PORT-BUILD-DIRECTIVE= only; each
+derived the boundaries itself + shipped its own =CLAUDE.md=). All green; AWK/Io
+did most boundaries + honest documented bails. Findings → *spec v4* (§15).
+
+* Ports (all local, dep-free)
+| Port | Runtime | Tests |
+|------+---------+-------|
+| Java | JDK 21 | 26,597 checks |
+| Erlang | OTP 26 | 29 props (2k trials) |
+| Racket | v9 | 35 props ×1000 |
+| Emacs Lisp | Emacs 30.2 | 21 props |
+| Babashka | bb 1.12 | 59 tests / 175 assns |
+| Deno (TS) | 2.6.6 | 31 props |
+| Tcl | 8.6 | 133 / ~30k |
+| AWK | gawk 5.4 | 13 props / ~34k |
+| Io | 2017 | 51 props |
+| Zig | 0.15.2 | ~618k checks |
+| Rust | 1.94.0 | 5000/prop, 0 deps |
+
+* The signal: cross-port AGREEMENT
+- *Value-type identity is universal (→ §15.1).* Typed ports (Rust/Haskell/Scala/
+  OCaml/Zig) reach it via sum types; untyped string ports (AWK/Tcl) *manufacture*
+  it via an explicit ={TYPE PAYLOAD}= tag; hash-reader langs (Racket/Clojure/
+  Erlang/JS) get it free. Both extremes converging proves it's a spec requirement,
+  not a typed nicety. Only the Guile *reference alist* collapses null/{}/absent.
+  Partner: canonical/ordered encoding (Erlang/Tcl) for no-oracle byte-identity.
+- *§3 symlink-safe vs "total" is a real contradiction (→ §15.3).* Java + Elixir(v3)
+  + Deno + AWK: real symlink resolution does I/O that can throw. Split into a
+  pure-total guard + optional effectful pass.
+- *§4 error-code taxonomy + no-oracle scope (→ §15.2).* ~all ports: pin
+  -32700/-32600/-32601/-32602/-32603; no-oracle = byte-identical error object,
+  same id, name-free, =tools/call= only; unknown *method* differs.
+- *§6 compaction split (→ §15.4).* Java/Deno/Erlang/Racket/Rust: =importance/
+  summarize/intent= are named but undefined → split pure (testable) vs LLM-backed;
+  pin auto-compact at 0.9×limit.
+- *§8 spawn → generic native process API (→ §15.5).* Babashka/Elisp/Racket/Rust:
+  no SIGSEGV class — the Guile rule is impl-specific. Backoff base 200ms·2^n
+  (Java/Deno/Zig/Rust).
+- *§2 encode-first + label buckets (→ §15.6).* Tcl/Io/Elisp/Erlang/Zig: "≤200
+  bytes UTF-8-safe" assumes byte strings; decoded-string runtimes must encode
+  first; sanitize must never *introduce* invalidity; =<label>= is illustrative.
+- *§7 correct CDATA invariant (→ §15.7).* Zig + Deno + Rust: round-trip identity +
+  =]]>=-count, NOT cdata-nesting/balance. §4/§7 served-plain cross-ref (Tcl).
+
+* Reference fixes (code) — both landed
+1. *=SAGE_MCP_EXPOSE_UNSAFE= / =YOLO_MODE= footgun (sage-racket).* Both were
+   presence-checked, so =…=0= silently ENABLED the dangerous mode. Fixed:
+   value-gated via =env-affirmative?= (1/true/yes/on). Regression in
+   =tests/test-hardening.scm=. (guile-sage)
+2. *=sage-clojure-v2= §11 config lagged spec (sage-babashka):* it did env-wins
+   (v2) while spec-v3+ mandates dotenv-shadows-env. Reconciled → the 2nd
+   reference is now truly v4.
+
+* Notable per-language
+- *Babashka:* ~all of =sage-clojure-v2= runs on the bb subset unchanged (deltas
+  packaging-only) — a clean 2nd data point for the runtime-specific spawn rule.
+- *AWK/Tcl:* graceful bails named the spec's hidden assumptions (tagged values,
+  closures-as-values) — first-class results, exactly as intended.
+- *Zig:* ~618k checks, allocator-rigorous; corrected the taint invariant.
