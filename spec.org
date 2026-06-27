@@ -246,3 +246,8 @@ spec-v3 compliant). Patch bumps (v3.0→v3.1) carry within-round clarifications.
 
 *Compliance now:* references =guile-sage= + =sage-clojure= are *spec-v3*. Each
 probe declares the spec version it targeted in its =README.org=/=CLAUDE.md=.
+
+*Tracking (v5+):* every impl has beads (=bd setup claude=, local/private). From
+the v5 round on, teams use =bd= to track upgrade/regression issues when
+re-targeting a newer spec; those beads are the harvest feeding the next version
+(v5 issues → v6). See [[file:docs/PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIVE.org]].

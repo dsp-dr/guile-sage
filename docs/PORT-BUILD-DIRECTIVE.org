@@ -34,3 +34,18 @@ A continuation guide so *another team can pick up the work cold*. Must cover:
 
 Also ship =README.org= (one-paragraph what/why + link to =dsp-dr/guile-sage=)
 and =.gitignore=. Report the same four points back to the orchestrator.
+
+*Clobber lesson (2026-06):* =bd setup claude= OVERWRITES =CLAUDE.md= (it owns
+that file). So either (a) run =bd setup claude= FIRST, then write your guide
+*below* the =<!-- END BEADS INTEGRATION -->= marker, or (b) keep the guide and
+let the orchestrator merge. Don't write the guide and then run setup — the guide
+is lost (it bit sage-py).
+
+* Task tracking with beads (required from spec v5)
+Every port repo has beads (=bd setup claude= + =bd init= → =.beads/=); it is
+local/private per repo. *From the v5 round onward*, teams MUST use beads to track
+the *upgrade* work: when re-targeting a newer spec version, file a =bd= issue per
+conformance gap / regression / ambiguity hit, and resolve or carry it. Those
+beads are the harvest input for the *next* spec version — e.g. *v5 upgrade
+issues → spec v6*. Commands: =bd ready= (find work), =bd create=, =bd close=.
+This makes the "we always learn" loop explicit and auditable per impl.
