@@ -222,7 +222,7 @@ Teams get only =spec.org= + [[file:PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIV
   ECL port), *Janet↺* (round-1 re-run = upgrade/regression probe at the latest
   spec — the first real test of the v5→v6 beads loop), *Nim* + *Crystal*
   (compiled/typed, new paradigms), *TypeScript (tsgo)* (the Go-based TS 7
-  compiler; Deno already covered JS/TS in v4). All installed (SBCL 2.6.3, Janet
+  compiler; Deno already covered JS/TS in v4) + *Hy* (Lisp-on-Python — macro layer vs plain Python/Perl). All installed (SBCL 2.6.3, Janet
   1.41.2). v5 findings → spec v5; references advance to v5.
 Coverage after v4/v5: the full host language set. References stay Guile +
 Clojure, always at the latest spec.
@@ -244,7 +244,7 @@ spec-v3 compliant). Patch bumps (v3.0→v3.1) carry within-round clarifications.
 | v2 | round 2 (C++/Ruby/Haskell/Scala/Kotlin) | round 3 | oracle-leak fix, per-token safe-path, control-byte error, no-oracle name-free, JSON null/{}/absent, int-coercion, retry-set exact, lattice-chain |
 | *v3* | round 3 (C/Chez/Fennel/Elixir/OCaml/Perl) | round 4 | byte-bounded UTF-8 error; config precedence reconciled (dotenv shadows env); spawn-rule marked Guile-specific; JSON {}/[] decode-collapse noted; other-4xx = permanent/non-retried |
 | v4 | round 4 (Java/Erlang/Racket/EmacsLisp/Babashka/Deno/Tcl/AWK/Io/Zig/Rust) | round 5 | value-type-identity is universal (§15.1); error-code taxonomy + no-oracle scope (§15.2); safe-path total/effectful split + value-gated flags (§15.3); compaction pure-vs-LLM split (§15.4); backoff params + spawn→native API (§15.5); UTF-8 encode-first + label buckets (§15.6); correct CDATA invariant + §4/§7 cross-ref (§15.7) |
-| v5 | round 5 (SBCL/Janet↺/Nim/Crystal/tsgo) | round 6 | (pending; Deno covered in v4) |
+| v5 | round 5 (SBCL/Janet↺/Nim/Crystal/tsgo/Hy) | round 6 | (pending; Deno covered in v4) |
 
 *Compliance now:* references =guile-sage= + =sage-clojure= are *spec-v4*. Each
 probe declares the spec version it targeted in its =README.org=/=CLAUDE.md=.
