@@ -553,23 +553,34 @@ Cloudflare AI Gateway (cf-aig-authorization)."
 ;;; assistant line — it can never inject newlines into the transcript or dump a
 ;;; multi-kilobyte body. Surfaced by the cross-port hardening audit (2026-06):
 ;;; the ports bounded error bodies; guile-sage did not.
-(define *error-message-max-length* 200)
+(define *error-message-max-bytes* 200)
+;; utf8-prefix: longest whole-char prefix of S whose UTF-8 encoding is <= MAXBYTES
+;; (never splits a multibyte char — UTF-8-boundary-safe).
+(define (utf8-prefix s maxbytes)
+  (let loop ((i 0) (b 0))
+    (if (>= i (string-length s))
+        s
+        (let ((cb (bytevector-length (string->utf8 (string (string-ref s i))))))
+          (if (> (+ b cb) maxbytes)
+              (substring s 0 i)
+              (loop (+ i 1) (+ b cb)))))))
 (define (clean-error-message s)
   (if (not (string? s))
       ""
       ;; Neutralize ALL control bytes (C0 <0x20 and DEL 0x7f) to spaces — not
       ;; just [ \t\r\n] — so a provider body carrying NUL/escape/etc. cannot
-      ;; smuggle control characters into the one-line transcript. Cross-port
-      ;; audit 2026-06 (sage-cpp): whitespace-only collapse left control bytes.
+      ;; smuggle control characters into the one-line transcript. Then bound to
+      ;; <=200 BYTES UTF-8-safe (chars≠bytes for multibyte). Cross-port audit
+      ;; 2026-06 (sage-cpp): whitespace-only collapse + char-bound were too weak.
       (let* ((mapped (string-map (lambda (c)
                                    (if (or (char<? c #\space) (char=? c #\delete))
                                        #\space c))
                                  s))
              (collapsed (regexp-substitute/global #f " +" mapped 'pre " " 'post))
              (trimmed (string-trim-both collapsed)))
-        (if (> (string-length trimmed) *error-message-max-length*)
-            (string-append (substring trimmed 0 *error-message-max-length*) "…")
-            trimmed))))
+        (if (<= (bytevector-length (string->utf8 trimmed)) *error-message-max-bytes*)
+            trimmed
+            (string-append (utf8-prefix trimmed *error-message-max-bytes*) "…")))))
 
 ;;; Backoff is applied to chat requests (http-post-with-timeout) only — NEVER
 ;;; to the startup model probe (http-get), which must fail fast (#4). Tune or

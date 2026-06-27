@@ -17,6 +17,10 @@ workspace, with sessions, context management, guardrails, and observability. CLI
 entry =sage= (interactive default; =-p/--print= one-shot; =sage mcp-server=
 subcommand). Runtime: guile3/guild3.
 
+*Reference implementations* (two, kept current with this spec): =guile-sage=
+(Guile, primary) and =sage-clojure= (Clojure, second — built to feature parity).
+The other language ports are ephemeral conformance probes (§13).
+
 * 2. Providers (LLM backends)
 - =SAGE_PROVIDER= ∈ {=ollama=, =gemini=, =openai=}. One active per session.
 - *ollama* — local/cloud, =SAGE_OLLAMA_HOST=, NDJSON streaming.
@@ -184,12 +188,13 @@ are kept private/local; the focus stays guile-sage.
 
 | Port | Runtime | PBT | Result |
 |------+---------+-----+--------|
-| Guile (reference) | guile3 | test-pbt.scm | shipped v1.1.0 |
-| Python / Go / Janet | py3 / go / janet | hypothesis / testing-quick / hand-rolled | private |
+| Guile (*reference 1*) | guile3 | test-pbt.scm | shipped v1.1.0 |
+| Clojure (*reference 2*) | clojure 1.12 | test.check | feature parity — maintained |
+| Python / Go / Janet | py3 / go / janet | hypothesis / testing-quick / hand-rolled | private (probe) |
 | Common Lisp | ecl | hand-rolled | local — 26.5k trials |
 | Lua | lua54 | hand-rolled | local — 41 |
 | C++ | clang 19 | hand-rolled | local — 55 / ~45k trials |
-| Ruby / Haskell / Clojure / Scala / Kotlin | (v2 cohort, dep-free) | hand-rolled / test.check | local — 64 / 50 / 33 / 31 / 75 |
+| Ruby / Haskell / Scala / Kotlin | (v2 cohort, dep-free) | hand-rolled | local — 64 / 50 / 31 / 75 |
 
 Two harvest rounds drove real guile-sage hardening (408 retry, control-byte-safe
 bounded errors, =safe-path?= per-token + =/tmp= block, MCP =-32700=, no-oracle

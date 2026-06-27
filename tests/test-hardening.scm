@@ -13,7 +13,8 @@
 
 (use-modules (sage util)
              (sage tools)
-             (ice-9 format))
+             (ice-9 format)
+             (rnrs bytevectors))
 
 ;;; Load shared harness (test-suite / test / assert-* / test-summary)
 (load (string-append (dirname (current-filename)) "/test-harness.scm"))
@@ -31,6 +32,9 @@
       (lambda () (assert-equal (clean-error-message "  a   b   ") "a b" "collapsed")))
     (test "bounds length (<=200 + ellipsis)"
       (lambda () (assert-true (<= (string-length (clean-error-message (make-string 500 #\x))) 201) "bounded")))
+    (test "bounds by BYTES, UTF-8-safe (multibyte body)"
+      (lambda () (assert-true (<= (bytevector-length (string->utf8 (clean-error-message (make-string 300 #\λ)))) 210)
+                              "<=200 bytes (+ellipsis)")))
     (test "tolerates non-strings"
       (lambda () (assert-equal (clean-error-message 42) "" "non-string -> empty")))
     (test "neutralizes ALL control bytes (NUL/BEL), not just whitespace"
