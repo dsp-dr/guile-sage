@@ -74,6 +74,21 @@ clean:
 %/:
 	install -d $@
 
+# Dependencies (FreeBSD pkg) — run as root. Optional dev/test + reference-impl
+# toolchain. guile3/gmake (the core runtime) are assumed already present.
+SAGE_PKGS_CLOJURE ?= clojure clojure-mode.el clojure-cider
+SAGE_PKGS_COHORT  ?= ecl lua54 fennel chez-scheme node ruby ghc scala kotlin
+.PHONY: deps deps-clojure deps-cohort
+deps: deps-clojure ## (FreeBSD/root) install the Clojure 2nd-reference dev stack (clojure + emacs clojure-mode + CIDER)
+deps-clojure:
+	@[ "$$(uname)" = "FreeBSD" ] || { echo "deps-clojure: FreeBSD pkg only (got $$(uname))"; exit 0; }
+	pkg install -y $(SAGE_PKGS_CLOJURE)
+	@echo "Clojure dev stack installed: $(SAGE_PKGS_CLOJURE)"
+deps-cohort: ## (FreeBSD/root) install the language-probe cohort toolchains
+	@[ "$$(uname)" = "FreeBSD" ] || { echo "deps-cohort: FreeBSD pkg only (got $$(uname))"; exit 0; }
+	pkg install -y $(SAGE_PKGS_COHORT)
+	@echo "Cohort toolchains installed: $(SAGE_PKGS_COHORT)"
+
 # Installation
 install: build | $(BINDIR)/ $(GUILE_SITE_DIR)/sage/ $(GUILE_CCACHE_DIR)/sage/ $(DATADIR)/sage/prompts/
 	@echo "Installing guile-sage to $(PREFIX)..."
@@ -388,6 +403,8 @@ uat-yolo:
 help:
 	@echo "Targets:"
 	@echo "  all/build     - Compile all modules to .go files"
+	@echo "  deps          - (FreeBSD/root) install Clojure 2nd-ref dev stack (clojure+clojure-mode+cider)"
+	@echo "  deps-cohort   - (FreeBSD/root) install language-probe toolchains"
 	@echo "  install       - Install to PREFIX (default: ~/.local)"
 	@echo "  uninstall     - Remove installed files"
 	@echo "  version       - Show version"
