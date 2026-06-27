@@ -2,13 +2,13 @@
 #+AUTHOR: dsp-dr
 #+DATE: 2026-06-27
 #+VERSION: 4.0
-#+STATUS: Current — round-driven boundary spec; references (guile-sage + sage-clojure) track latest; round 5 targets v4
+#+STATUS: Current — round-driven boundary spec; references (guile-sage + sajure) track latest; round 5 targets v4
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 
 The language-agnostic implementation contract. *Spec version is independent of an
-impl's own release version*: =guile-sage= ships release =v1.1.0= and is *spec-v3
-compliant*; =sage-clojure= (2nd reference) is likewise spec-v3. The spec advances
+impl's own release version*: =guile-sage= ships release =v1.1.0= and is *spec-v4
+compliant*; =sajure= (2nd reference) is likewise spec-v4. The spec advances
 by *rounds* — each port round's findings fold forward (§14). Architecture +
 boundaries: [[file:docs/ARCHITECTURE.org][docs/ARCHITECTURE.org]]; build protocol: [[file:docs/PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIVE.org]].
 
@@ -19,7 +19,7 @@ entry =sage= (interactive default; =-p/--print= one-shot; =sage mcp-server=
 subcommand). Runtime: guile3/guild3.
 
 *Reference implementations* (two, kept current with this spec): =guile-sage=
-(Guile, primary) and =sage-clojure= (Clojure, second — built to feature parity).
+(Guile, primary) and =sajure= (Clojure, second — built to feature parity).
 The other language ports are ephemeral conformance probes (§13).
 
 * 2. Providers (LLM backends)
@@ -231,7 +231,7 @@ Clojure, always at the latest spec.
 *Nomenclature: a grind vN consumes spec v(N−1) and produces spec vN* — each
 round builds against the previous spec, and its findings harden the spec into the
 same-numbered version (grind v3 consumed v2, produced v3; grind v4 consumes v3,
-produces v4). The two *references* (=guile-sage=, =sage-clojure=) always track the
+produces v4). The two *references* (=guile-sage=, =sajure=) always track the
 *latest* version — we always learn. Methodology as a reusable skill:
 =dsp-dr/skills → spec-driven-port-grind=. A spec
 version is independent of an impl's own release (=guile-sage= release v1.1.0 is
@@ -246,7 +246,7 @@ spec-v3 compliant). Patch bumps (v3.0→v3.1) carry within-round clarifications.
 | v4 | round 4 (Java/Erlang/Racket/EmacsLisp/Babashka/Deno/Tcl/AWK/Io/Zig/Rust) | round 5 | value-type-identity is universal (§15.1); error-code taxonomy + no-oracle scope (§15.2); safe-path total/effectful split + value-gated flags (§15.3); compaction pure-vs-LLM split (§15.4); backoff params + spawn→native API (§15.5); UTF-8 encode-first + label buckets (§15.6); correct CDATA invariant + §4/§7 cross-ref (§15.7) |
 | v5 | round 5 (SBCL/Janet↺/Nim/Crystal/tsgo/Hy) | round 6 | (pending; Deno covered in v4) |
 
-*Compliance now:* references =guile-sage= + =sage-clojure= are *spec-v4*. Each
+*Compliance now:* references =guile-sage= + =sajure= are *spec-v4*. Each
 probe declares the spec version it targeted in its =README.org=/=CLAUDE.md=.
 
 *Tracking (v5+):* every impl has beads (=bd setup claude=, local/private). From
