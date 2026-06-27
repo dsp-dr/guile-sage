@@ -258,24 +258,37 @@ re-targeting a newer spec; those beads are the harvest feeding the next version
 Each amends the same-named section above. Every item is backed by multiple of the
 11 round-4 ports; full evidence: =docs/reports/20260627-v4-grind-findings.org=.
 
-** 15.1 Value-type identity is UNIVERSAL (amends §4)
-The decoder MUST carry value-type identity: =null= / empty-object =\{}= / *absent*
-/ number-vs-string are pairwise-distinct at every node. This is *not* a typed-port
-nicety — both extremes converged on it: typed ports via sum types (Haskell/Rust/
-Scala/OCaml/Zig), untyped string ports via an explicit ={TYPE PAYLOAD}= tag
-(AWK/Tcl), hash-reader langs for free (Racket/Clojure/Erlang/JS). Only the Guile
-*reference's alist* collapses it (it special-cases =json-empty-object= / id-null).
-Partner requirement: *canonical / deterministic-ordered encoding* — else the §4
-no-oracle byte-identity silently breaks on map round-trips.
+The grind's purpose was *spec clarity + coverage of cases not in our own
+tests/feature list* — NOT to retrofit the reference to every port's choice. So:
+where the reference made a *deliberate call*, this spec states the *reference's*
+behavior as authoritative and marks port-suggested alternatives as *optional
+refinements* (not gaps). Only genuine *bugs* surfaced by the grind were fixed in
+the reference (e.g. the §15.3 EXPOSE_UNSAFE/YOLO footgun). Disagreement is a
+recorded finding, not a re-litigation trigger.
+
+** 15.1 Value-type identity (amends §4)
+A port SHOULD carry value-type identity: =null= / empty-object =\{}= / *absent* /
+number-vs-string distinct at every node. Both extremes converged on it — typed
+ports via sum types (Haskell/Rust/Scala/OCaml/Zig), untyped string ports via an
+explicit ={TYPE PAYLOAD}= tag (AWK/Tcl), hash-reader langs for free
+(Racket/Clojure/Erlang/JS) — which is why it's stated as the clear target.
+*Reference (decided):* guile-sage's alist collapses =\{}= and =[]= to ='()=; it
+preserves the *wire-critical* states explicitly (=null= sentinel, *absent* via
+missing key, =\{}= on the wire via =json-empty-object=). The full per-node
+distinction is a *port* target, not retrofitted to the reference alist. Partner
+note: encoding is deterministic (alist order) — keep it canonical so the §4
+no-oracle byte-identity holds across re-encodes.
 
 ** 15.2 MCP error-code taxonomy + no-oracle scope (amends §4)
-- =-32700= parse error (id null); =-32600= valid-JSON-but-not-an-object;
-  =-32601= unknown method AND (separately) no-oracle unknown/unexposed *tool*;
-  =-32602= invalid params (checked BEFORE tool lookup); =-32603= tool-exec failure.
-- *No-oracle scope:* applies to =tools/call= only; the guarantee is "the error
-  *object* is byte-identical given the same =id=, with a name-free message". An
-  unknown *method* legitimately differs. Absent/null =arguments= → tool defaults;
-  an id-less =tools/call= is a notification (no reply).
+- *Reference (decided) code set:* =-32700= parse error (id null); =-32601= unknown
+  method AND (separately) no-oracle unknown/unexposed *tool*; =-32603= tool-exec
+  failure. *Optional refinements* a port MAY add (not in the reference): =-32600=
+  for valid-JSON-but-not-an-object, =-32602= for invalid params pre-checked before
+  tool lookup. Either is conformant.
+- *No-oracle scope (contract):* applies to =tools/call= only; the guarantee is
+  "the error *object* is byte-identical given the same =id=, with a name-free
+  message". An unknown *method* legitimately differs. Absent/null =arguments= →
+  tool defaults; an id-less =tools/call= is a notification (no reply).
 
 ** 15.3 safe-path total/effectful split + value-gated flags (amends §3)
 - Split the two conflicting requirements: a *pure, total* lexical guard (the
@@ -291,12 +304,15 @@ no-oracle byte-identity silently breaks on map round-trips.
 Two classes: *pure/portable* (=truncate=, =token-limit= — deterministic,
 property-testable in a boundary port) and *LLM-backed* (=summarize=, =intent=,
 =importance= — require a model, NOT unit-testable at the boundary; a port stubs
-them honestly). Auto-compact threshold is *0.9 × the model token limit* (was
-unspecified; warnings stay at 75/90/95%).
+them honestly). Auto-compact threshold *(reference, decided)* is *0.8 × the model
+token limit* (was unspecified before v4 — ports picked 0.8–0.9; the reference's
+0.8 is authoritative); warnings stay at 75/90/95%.
 
 ** 15.5 HTTP backoff + spawn (amends §8)
-- Backoff: exponential, base *200ms · 2^n* up to =SAGE_HTTP_MAX_RETRIES= (default
-  2); jitter optional. Retry set stays exactly 408/429/5xx; code 0 fails fast.
+- Backoff: exponential, *impl-defined base · 2^n* up to =SAGE_HTTP_MAX_RETRIES=
+  (default 2); jitter optional. *Reference (decided):* base 500ms (ports used
+  200–500ms — the base is a tuning knob, not a contract). Retry set stays exactly
+  408/429/5xx; code 0 fails fast.
 - *Spawn:* the rule is generic — *use the runtime's native fork-safe process API*.
   Guile's =system*=/=open-pipe*= SIGSEGV is the *example/motivation*, not a
   cross-language constraint (Babashka/Elisp/Racket/Rust/… confirmed no such class).
@@ -304,8 +320,9 @@ unspecified; warnings stay at 75/90/95%).
 ** 15.6 Error excerpt: encode-first + label buckets (amends §2)
 - "≤200 bytes, UTF-8-safe" means *truncate already-valid UTF-8 at a char boundary*;
   sanitize MUST NOT *introduce* invalidity, and decoded-string runtimes (Tcl/Io/
-  Elisp) must *encode to bytes first* before measuring. Empty sanitized body →
-  render =[<Provider> <label>]= (no trailing =: <msg>=).
+  Elisp) must *encode to bytes first* before measuring. Empty sanitized body:
+  the *reference (decided)* renders =[<Provider> <label>: ]=; omitting the
+  trailing =: = is an *optional* cosmetic refinement.
 - =<label>= example strings are *illustrative*; the stable contract is the
   *classification bucket* (permanent vs transient), not byte-identical tokens.
 
