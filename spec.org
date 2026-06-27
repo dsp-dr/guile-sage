@@ -224,7 +224,7 @@ Teams get only =spec.org= + [[file:PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIV
   (compiled/typed, new paradigms), *TypeScript (tsgo)* (the Go-based TS 7
   compiler; Deno already covered JS/TS in v4). All installed (SBCL 2.6.3, Janet
   1.41.2). v5 findings → spec v5; references advance to v5.
-Coverage after v4/v5: the full hydra language set. References stay Guile +
+Coverage after v4/v5: the full host language set. References stay Guile +
 Clojure, always at the latest spec.
 
 * 14. Spec version history (round-driven)
