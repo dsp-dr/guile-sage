@@ -195,7 +195,20 @@ are kept private/local; the focus stays guile-sage.
 | Lua | lua54 | hand-rolled | local — 41 |
 | C++ | clang 19 | hand-rolled | local — 55 / ~45k trials |
 | Ruby / Haskell / Scala / Kotlin | (v2 cohort, dep-free) | hand-rolled | local — 64 / 50 / 31 / 75 |
+| *v3 grind* C / Chez / Fennel / Elixir / OCaml / Perl | clang / chez / fennel / elixir / ocaml / perl | hand-rolled | in progress |
 
 Two harvest rounds drove real guile-sage hardening (408 retry, control-byte-safe
 bounded errors, =safe-path?= per-token + =/tmp= block, MCP =-32700=, no-oracle
-name-free) + ~15 spec clarifications. C is the next planned port.
+name-free) + ~15 spec clarifications.
+
+** Grind roadmap (v3 → spec → v4)
+Teams get only =spec.org= + [[file:PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIVE.org]]; each ships its own =CLAUDE.md=.
+- *v3 (in progress):* C, Chez, Fennel, Elixir, OCaml, Perl. *Gate:* fold their
+  findings back into this spec before v4 starts.
+- *v4 (gated on the v3→spec update):* the languages on =hydra= not yet covered —
+  *Java*, *Erlang*, *Racket*, *Emacs Lisp*, *Babashka*, *Node/Deno (JS/TS)*,
+  *Tcl*, *AWK (gawk)*, *Io*, *Zig*, *Rust*. All runtimes present except *Rust*
+  (=pkg install rust=; now in =deps-cohort=). Same protocol: dep-free, PBT,
+  local, CLAUDE.md.
+Coverage after v4: the full ~28-language set on hydra. References stay Guile +
+Clojure.
