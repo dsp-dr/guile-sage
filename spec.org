@@ -1,15 +1,16 @@
-#+TITLE: guile-sage — Feature Specification (v1.3)
+#+TITLE: guile-sage — Feature Specification (spec v3.0)
 #+AUTHOR: dsp-dr
-#+DATE: 2026-06-26
-#+VERSION: 1.3
-#+STATUS: Current — language-agnostic boundary spec; reference impl = guile-sage v1.1.0
+#+DATE: 2026-06-27
+#+VERSION: 3.0
+#+STATUS: Current — round-driven boundary spec; references (guile-sage + sage-clojure) track latest; round 4 targets v3
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 
-The implementation contract for *guile-sage v1.1.0* — what the agent does, as
-shipped. Versioned to match =src/sage/version.scm= (=*version* "1.1.0"=). This is
-the reimplementation target for ports (e.g. =sage-py-1.1.0=). Architecture +
-boundaries: [[file:docs/ARCHITECTURE.org][docs/ARCHITECTURE.org]]; contracts index: [[file:docs/CONTRACTS-INDEX.org][docs/CONTRACTS-INDEX.org]].
+The language-agnostic implementation contract. *Spec version is independent of an
+impl's own release version*: =guile-sage= ships release =v1.1.0= and is *spec-v3
+compliant*; =sage-clojure= (2nd reference) is likewise spec-v3. The spec advances
+by *rounds* — each port round's findings fold forward (§14). Architecture +
+boundaries: [[file:docs/ARCHITECTURE.org][docs/ARCHITECTURE.org]]; build protocol: [[file:docs/PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIVE.org]].
 
 * 1. Identity & scope
 A terminal (REPL/TUI) AI coding agent: an LLM drives a tool-use loop over a
@@ -143,10 +144,13 @@ The other language ports are ephemeral conformance probes (§13).
   =408/429/5xx= with exponential backoff (=SAGE_HTTP_MAX_RETRIES=, default 2).
   Connection failure (code 0) fails fast (no retry — each retry costs a full
   connect-timeout for no gain).
-- *Spawn boundary*: shell out via libc =(system …)= only — never =system*= /
+- *Spawn boundary* (*Guile-runtime-specific* — v3 note, flagged by the Chez
+  port): in guile3 shell out via libc =(system …)= only — never =system*= /
   =open-pipe*= / =open-input-pipe= (they SIGSEGV in this long-lived,
   multi-threaded runtime). Streaming = =(system "curl … > FIFO &")= +
-  =(open-input-file FIFO)=.
+  =(open-input-file FIFO)=. This is a Guile constraint, NOT a cross-language
+  contract — other runtimes use their native process API (e.g. Chez =(system)=,
+  =System.cmd=, =popen=).
 
 * 9. Hooks
 - Lifecycle hooks (PreToolUse / PostToolUse) — register guards/observers; can
@@ -165,8 +169,12 @@ The other language ports are ephemeral conformance probes (§13).
 - Tests: SRFI-64 suite (=gmake check=, ~40 files) + *property-based testing*
   (=test-pbt.scm=, thousands of trials) + contract/doc lints + a tmux PTY chaos
   harness. Custom runners propagate failures (no masked greens).
-- Config precedence: =SAGE_<KEY>= env → =<KEY>= env → dotenv (=.env=,
-  =~/.config/sage/.env=) → default. XDG dirs.
+- Config precedence (v3 reconcile — *dotenv shadows env*, matching the
+  reference's intentional behavior; the Chez port flagged the spec had it
+  backwards): loaded *dotenv* (=.env=, =~/.config/sage/.env=) for
+  =SAGE_<KEY>=/=<KEY>= → shell env =SAGE_<KEY>= → shell env =<KEY>= → default.
+  I.e. a value present in =.env= wins over the shell environment (deliberate, if
+  unconventional). XDG dirs.
 
 * 12. Reimplementation notes (port priorities)
 A port MUST preserve, in priority order: (1) the *taint boundary* (§7) — single
@@ -188,27 +196,47 @@ are kept private/local; the focus stays guile-sage.
 
 | Port | Runtime | PBT | Result |
 |------+---------+-----+--------|
-| Guile (*reference 1*) | guile3 | test-pbt.scm | shipped v1.1.0 |
-| Clojure (*reference 2*) | clojure 1.12 | test.check | feature parity — maintained |
-| Python / Go / Janet | py3 / go / janet | hypothesis / testing-quick / hand-rolled | private (probe) |
-| Common Lisp | ecl | hand-rolled | local — 26.5k trials |
-| Lua | lua54 | hand-rolled | local — 41 |
-| C++ | clang 19 | hand-rolled | local — 55 / ~45k trials |
-| Ruby / Haskell / Scala / Kotlin | (v2 cohort, dep-free) | hand-rolled | local — 64 / 50 / 31 / 75 |
-| *v3 grind* C / Chez / Fennel / Elixir / OCaml / Perl | clang / chez / fennel / elixir / ocaml / perl | hand-rolled | in progress |
+| Port | Runtime | PBT | Result (spec level) |
+|------+---------+-----+---------------------|
+| Guile (*reference 1*) | guile3 | test-pbt.scm | shipped v1.1.0 — *spec-v3* |
+| Clojure (*reference 2*) | clojure 1.12 | test.check | feature parity, 65 tests — *spec-v3* |
+| Python / Go / Janet | py3 / go / janet | hypothesis / testing-quick / hand-rolled | private (round 1) |
+| Common Lisp / Lua | ecl / lua54 | hand-rolled | local (round 1) — 26.5k / 41 |
+| C++ / Ruby / Haskell / Scala / Kotlin | (round 2, dep-free) | hand-rolled | local — 55 / 64 / 50 / 31 / 75 (spec-v2) |
+| C / Chez / Fennel / Elixir / OCaml / Perl | (round 3, dep-free) | hand-rolled | local — 882k / 118 / 49 / 95 / 136 / ~120 (spec-v3) |
 
-Two harvest rounds drove real guile-sage hardening (408 retry, control-byte-safe
-bounded errors, =safe-path?= per-token + =/tmp= block, MCP =-32700=, no-oracle
-name-free) + ~15 spec clarifications.
+Three harvest rounds drove real guile-sage hardening (408 retry, control-byte +
+byte-bounded errors, =safe-path?= per-token + =/tmp=, MCP =-32700= + no-oracle
+name-free, config-precedence reconcile) + ~18 spec clarifications. Full
+changelog: §14.
 
 ** Grind roadmap (v3 → spec → v4)
 Teams get only =spec.org= + [[file:PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIVE.org]]; each ships its own =CLAUDE.md=.
-- *v3 (in progress):* C, Chez, Fennel, Elixir, OCaml, Perl. *Gate:* fold their
-  findings back into this spec before v4 starts.
-- *v4 (gated on the v3→spec update):* the languages on =hydra= not yet covered —
-  *Java*, *Erlang*, *Racket*, *Emacs Lisp*, *Babashka*, *Node/Deno (JS/TS)*,
-  *Tcl*, *AWK (gawk)*, *Io*, *Zig*, *Rust*. All runtimes present except *Rust*
-  (=pkg install rust=; now in =deps-cohort=). Same protocol: dep-free, PBT,
-  local, CLAUDE.md.
+- *v3 grind (DONE):* C, Chez, Fennel, Elixir, OCaml, Perl — all green; findings
+  folded into this spec (= v3.0). C: 882k checks; Chez: 118 (chez+petite); OCaml
+  136; Perl ~120; Elixir 95; Fennel 49.
+- *v4 (targets spec v3):* the =hydra= languages not yet covered — *Java*,
+  *Erlang*, *Racket*, *Emacs Lisp*, *Babashka*, *Node/Deno (JS/TS)*, *Tcl*,
+  *AWK (gawk)*, *Io*, *Zig*, *Rust*. All runtimes present except *Rust*
+  (=pkg install rust=; in =deps-cohort=). Same protocol; v4 findings → spec v4,
+  and the references advance to v4.
 Coverage after v4: the full ~28-language set on hydra. References stay Guile +
-Clojure.
+Clojure, always at the latest spec.
+
+* 14. Spec version history (round-driven)
+The spec advances by *rounds*: each round's findings fold forward into the next
+version; *round R targets spec v(R−1)*. The two *references* (=guile-sage=,
+=sage-clojure=) always track the *latest* version — we always learn. A spec
+version is independent of an impl's own release (=guile-sage= release v1.1.0 is
+spec-v3 compliant). Patch bumps (v3.0→v3.1) carry within-round clarifications.
+
+| Spec | Folded from (round) | Targeted by | Headline changes |
+|------+---------------------+-------------+------------------|
+| v0 | — (initial build, informal) | us, building guile-sage | no external contract |
+| v1 | round 1 (Python/Go/Janet/CL/Lua) | round 2 | first formal boundary spec |
+| v2 | round 2 (C++/Ruby/Haskell/Scala/Kotlin) | round 3 | oracle-leak fix, per-token safe-path, control-byte error, no-oracle name-free, JSON null/{}/absent, int-coercion, retry-set exact, lattice-chain |
+| *v3* | round 3 (C/Chez/Fennel/Elixir/OCaml/Perl) | round 4 | byte-bounded UTF-8 error; config precedence reconciled (dotenv shadows env); spawn-rule marked Guile-specific; JSON {}/[] decode-collapse noted; other-4xx = permanent/non-retried |
+| v4 | round 4 (Java/Erlang/Racket/EmacsLisp/Babashka/JS-TS/Tcl/AWK/Io/Zig/Rust) | round 5 | (pending) |
+
+*Compliance now:* references =guile-sage= + =sage-clojure= are *spec-v3*. Each
+probe declares the spec version it targeted in its =README.org=/=CLAUDE.md=.
