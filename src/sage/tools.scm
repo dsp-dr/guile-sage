@@ -294,8 +294,10 @@ that care about the exit code (git_push, git_commit) can surface it."
 ;;;   args - Arguments to tool
 ;;; Returns: #t if allowed
 (define (check-permission tool-name args)
-  (or (member tool-name *safe-tools*)
-      (config-get "YOLO_MODE")
+  (or (and (member tool-name *safe-tools*) #t)
+      ;; value-gated: YOLO_MODE=0 must NOT enable YOLO (v4 footgun fix). Only
+      ;; 1/true/yes/on enables; mere presence (e.g. "=0") does not.
+      (env-affirmative? (config-get "YOLO_MODE"))
       ;; In non-interactive mode, deny unsafe tools by default
       #f))
 

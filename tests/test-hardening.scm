@@ -68,4 +68,17 @@
     (test "ALLOWS .gitignore (exact .git only)"
                                      (lambda () (assert-true (safe-path? ".gitignore") ".gitignore")))))
 
+(test-suite "env-affirmative? — value-gated dangerous flags (v4 footgun fix)"
+  (lambda ()
+    (test "=0 is OFF (the footgun)"   (lambda () (assert-false (env-affirmative? "0") "0")))
+    (test "empty is OFF"              (lambda () (assert-false (env-affirmative? "") "empty")))
+    (test "false/no/off are OFF"      (lambda () (assert-false (or (env-affirmative? "false")
+                                                                   (env-affirmative? "no")
+                                                                   (env-affirmative? "off")) "negatives")))
+    (test "#f is OFF"                 (lambda () (assert-false (env-affirmative? #f) "#f")))
+    (test "1/true/yes/on are ON"      (lambda () (assert-true (and (env-affirmative? "1")
+                                                                   (env-affirmative? "true")
+                                                                   (env-affirmative? "YES")
+                                                                   (env-affirmative? "on")) "affirmatives")))))
+
 (test-summary)

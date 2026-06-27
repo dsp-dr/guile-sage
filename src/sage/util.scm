@@ -27,6 +27,7 @@
             json-write-string
             json-empty-object
             clean-error-message
+            env-affirmative?
             as-list
             string-replace-substring
             shell-escape
@@ -547,6 +548,16 @@ Cloudflare AI Gateway (cf-aig-authorization)."
   (or (= code 408)                      ; Request Timeout — transient (cross-port finding 2026-06)
       (= code 429)
       (and (>= code 500) (< code 600))))
+
+;;; env-affirmative?: is a boolean-ish env/config VALUE actually "on"? Accepts
+;;; 1/true/yes/on (case-insensitive); treats #f, "", "0", "false", "no", "off" as
+;;; OFF. v4 cross-port finding (sage-racket): a mere-presence check made
+;;; SAGE_MCP_EXPOSE_UNSAFE=0 / SAGE_YOLO_MODE=0 silently ENABLE the dangerous mode
+;;; (a footgun — "=0" reads like disabling). Gate on the value, not presence.
+(define (env-affirmative? v)
+  (and (string? v)
+       (member (string-downcase (string-trim-both v)) '("1" "true" "yes" "on"))
+       #t))
 
 ;;; clean-error-message: collapse all whitespace (incl. newlines) to single
 ;;; spaces and bound the length, so a provider's non-200 body becomes ONE safe

@@ -55,7 +55,9 @@
 ;; (sage tools); a reference compiled into THIS module resolves to a different
 ;; (empty) box, so direct variable reads see 0 tools. The procedures are defined
 ;; in (sage tools) and see the live registry.
-(define (expose-unsafe?) (and (getenv "SAGE_MCP_EXPOSE_UNSAFE") #t))
+;; value-gated (not mere presence): SAGE_MCP_EXPOSE_UNSAFE=0 must NOT expose
+;; (v4 finding, sage-racket). Requires 1/true/yes/on.
+(define (expose-unsafe?) (env-affirmative? (getenv "SAGE_MCP_EXPOSE_UNSAFE")))
 (define (safe-name? name)
   (any (lambda (e) (and (equal? (assoc-ref e 'name) name) (assoc-ref e 'safe)))
        (list-tools)))
