@@ -77,7 +77,7 @@ clean:
 # Dependencies (FreeBSD pkg) — run as root. Optional dev/test + reference-impl
 # toolchain. guile3/gmake (the core runtime) are assumed already present.
 SAGE_PKGS_CLOJURE ?= clojure clojure-mode.el clojure-cider
-SAGE_PKGS_COHORT  ?= ecl lua54 fennel chez-scheme node ruby ghc scala kotlin elixir ocaml
+SAGE_PKGS_COHORT  ?= ecl lua54 fennel chez-scheme node ruby ghc scala kotlin elixir ocaml perl5
 .PHONY: deps deps-clojure deps-cohort
 deps: deps-clojure ## (FreeBSD/root) install the Clojure 2nd-reference dev stack (clojure + emacs clojure-mode + CIDER)
 deps-clojure:
