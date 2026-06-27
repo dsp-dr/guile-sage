@@ -1,0 +1,36 @@
+#+TITLE: guile-sage — port build-team directive (meta)
+#+AUTHOR: guile-sage
+#+STATUS: Active — the standard handoff for a language-port build team
+#+DATE: 2026-06-27
+#+OPTIONS: toc:nil num:nil
+
+A build team for a language port receives *exactly two things*: this directive
+and =spec.org=. Nothing else. Derive the contract yourself from the spec —
+there is no hand-fed boundary checklist; reading and interpreting =spec.org=
+(esp. §12 priority boundaries) is part of the job, and where the spec is unclear
+is itself a finding.
+
+* Build approach
+- *Dependency-free.* Runtime/standard library only. If no property-testing or
+  JSON library ships with the language, *hand-roll* them. Do not install network
+  packages.
+- *Property-based testing is the test layer.* The runner MUST exit non-zero on
+  any failure — *no masked greens* (a suite that prints "pass" while a property
+  failed is the worst outcome).
+- *=gmake= conventions* (BSD make mis-parses — use gmake): =help= (awk-only,
+  default goal), =build=, =check= (builds + runs tests), =run=, =mcp-server=.
+- *Local only.* Do not publish or push. No secrets, no private IPs (loopback
+  =127.0.0.1= is fine).
+- Implement the §12 *priority boundaries* fully; *stub the rest* with an explicit
+  "not implemented" error (never fake behaviour) + a spec-section-tagged TODO.
+
+* Mandatory deliverable: =CLAUDE.md= (repo root)
+A continuation guide so *another team can pick up the work cold*. Must cover:
+1. *Build / test / run* — the exact commands that worked, with the runtime
+   version (e.g. =cc -std=c11=, =elixir 1.17=, the =mcp-server= invocation).
+2. *Implemented vs stubbed* — mapped to spec sections.
+3. *Gotchas* — language/runtime traps hit (so the next team doesn't re-hit them).
+4. *Spec ambiguities found* — the feedback that hardens =spec.org=.
+
+Also ship =README.org= (one-paragraph what/why + link to =dsp-dr/guile-sage=)
+and =.gitignore=. Report the same four points back to the orchestrator.
