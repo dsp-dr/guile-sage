@@ -1,14 +1,14 @@
-#+TITLE: guile-sage — Feature Specification (spec v4.0)
+#+TITLE: guile-sage — Feature Specification (spec v5.0)
 #+AUTHOR: dsp-dr
-#+DATE: 2026-06-27
-#+VERSION: 4.0
-#+STATUS: Current — round-driven boundary spec; references (guile-sage + sajure) track latest; round 5 targets v4
+#+DATE: 2026-06-28
+#+VERSION: 5.0
+#+STATUS: Current — round-driven boundary spec; references (guile-sage + sajure) track latest; round 6 targets v5
 #+OPTIONS: toc:3 num:t ^:nil
 #+STARTUP: overview
 
 The language-agnostic implementation contract. *Spec version is independent of an
-impl's own release version*: =guile-sage= ships release =v1.1.0= and is *spec-v4
-compliant*; =sajure= (2nd reference) is likewise spec-v4. The spec advances
+impl's own release version*: =guile-sage= ships release =v1.1.0= and is *spec-v5
+compliant*; =sajure= (2nd reference) is likewise spec-v5. The spec advances
 by *rounds* — each port round's findings fold forward (§14). Architecture +
 boundaries: [[file:docs/ARCHITECTURE.org][docs/ARCHITECTURE.org]]; build protocol: [[file:docs/PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIVE.org]].
 
@@ -196,15 +196,16 @@ are kept private/local; the focus stays guile-sage.
 
 | Port | Runtime | PBT | Result (spec level) |
 |------+---------+-----+---------------------|
-| Guile (*reference 1*) | guile3 | test-pbt.scm | shipped v1.1.0 — *spec-v4* |
-| Clojure (*reference 2*) | clojure 1.12 | test.check | feature parity, 65 tests — *spec-v4* |
+| Guile (*reference 1*) | guile3 | test-pbt.scm | shipped v1.1.0 — *spec-v5* |
+| sajure (*reference 2*) | clojure 1.12 | test.check | feature parity, 65 tests / 274 assns — *spec-v5* |
 | Python / Go / Janet | py3 / go / janet | hypothesis / testing-quick / hand-rolled | private (round 1) |
 | Common Lisp / Lua | ecl / lua54 | hand-rolled | local (round 1) — 26.5k / 41 |
 | C++ / Ruby / Haskell / Scala / Kotlin | (round 2, dep-free) | hand-rolled | local — 55 / 64 / 50 / 31 / 75 (spec-v2) |
 | C / Chez / Fennel / Elixir / OCaml / Perl | (round 3, dep-free) | hand-rolled | local — 882k / 118 / 49 / 95 / 136 / ~120 (spec-v3) |
 | Java/Erlang/Racket/Elisp/Babashka/Deno/Tcl/AWK/Io/Zig/Rust | (round 4, dep-free) | hand-rolled | local — all green (spec-v4) |
+| SBCL/Janet↺/Nim/Crystal/tsgo/Hy | (round 5, dep-free) | hand-rolled | local — all green; *ratified v4* (spec-v5) |
 
-Four harvest rounds drove real guile-sage hardening (408 retry, control-byte +
+Five harvest rounds drove real guile-sage hardening (408 retry, control-byte +
 byte-bounded errors, =safe-path?= per-token + =/tmp= + total/effectful split, MCP
 =-32700= + no-oracle name-free, config-precedence reconcile, value-gated
 EXPOSE_UNSAFE/YOLO) + ~25 spec clarifications. Full changelog: §14; v4 detail §15.
@@ -218,14 +219,13 @@ Teams get only =spec.org= + [[file:PORT-BUILD-DIRECTIVE.org][PORT-BUILD-DIRECTIV
   Io, Zig, Rust — all 11 green (AWK/Io did most + honest bails). Findings folded
   into spec v4 (§15); references advanced to v4. Standouts: value-type-identity is
   universal (typed + untyped converge); the =EXPOSE_UNSAFE/YOLO=0= footgun.
-- *v5 (targets spec v4):* *SBCL* (sibling Common Lisp — cross-impl probe vs our
-  ECL port), *Janet↺* (round-1 re-run = upgrade/regression probe at the latest
-  spec — the first real test of the v5→v6 beads loop), *Nim* + *Crystal*
-  (compiled/typed, new paradigms), *TypeScript (tsgo)* (the Go-based TS 7
-  compiler; Deno already covered JS/TS in v4) + *Hy* (Lisp-on-Python — macro layer vs plain Python/Perl). All installed (SBCL 2.6.3, Janet
-  1.41.2). v5 findings → spec v5; references advance to v5.
+- *v5 grind (DONE):* SBCL, Janet↺, Nim, Crystal, tsgo, Hy — all green; *ratified
+  v4* (no new reference bugs — spec stabilizing). Findings → spec v5 (§16, clarity
+  only); references advanced to v5. Janet↺ produced the *cost-of-drift anchor*
+  (v1→v4 = 15 conformance fixes); tsgo's probe = bare TS7 has no =@types/node= (vs
+  Deno's bundled compat). v5→v6 beads loop exercised (open ambiguity beads per port).
 Coverage after v4/v5: the full host language set. References stay Guile +
-Clojure, always at the latest spec.
+sajure, always at the latest spec.
 
 * 14. Spec version history (round-driven)
 *Nomenclature: a grind vN consumes spec v(N−1) and produces spec vN* — each
@@ -244,9 +244,9 @@ spec-v3 compliant). Patch bumps (v3.0→v3.1) carry within-round clarifications.
 | v2 | round 2 (C++/Ruby/Haskell/Scala/Kotlin) | round 3 | oracle-leak fix, per-token safe-path, control-byte error, no-oracle name-free, JSON null/{}/absent, int-coercion, retry-set exact, lattice-chain |
 | *v3* | round 3 (C/Chez/Fennel/Elixir/OCaml/Perl) | round 4 | byte-bounded UTF-8 error; config precedence reconciled (dotenv shadows env); spawn-rule marked Guile-specific; JSON {}/[] decode-collapse noted; other-4xx = permanent/non-retried |
 | v4 | round 4 (Java/Erlang/Racket/EmacsLisp/Babashka/Deno/Tcl/AWK/Io/Zig/Rust) | round 5 | value-type-identity is universal (§15.1); error-code taxonomy + no-oracle scope (§15.2); safe-path total/effectful split + value-gated flags (§15.3); compaction pure-vs-LLM split (§15.4); backoff params + spawn→native API (§15.5); UTF-8 encode-first + label buckets (§15.6); correct CDATA invariant + §4/§7 cross-ref (§15.7) |
-| v5 | round 5 (SBCL/Janet↺/Nim/Crystal/tsgo/Hy) | round 6 | (pending; Deno covered in v4) |
+| v5 | round 5 (SBCL/Janet↺/Nim/Crystal/tsgo/Hy) | round 6 | round 5 RATIFIED v4 (no new reference bugs — spec stabilizing). Clarity-only (§16): exact empty-body string (§16.1); missing-=name= → =-32601= (§16.2); no-oracle needs only deterministic *encoding*, sentinel ={}=≠=[]= ports conformant (§16.3); effectful symlink pass fails *back to the pure verdict* (§16.4). Janet↺ = v1→v4 cost-of-drift anchor (15 fixes) |
 
-*Compliance now:* references =guile-sage= + =sajure= are *spec-v4*. Each
+*Compliance now:* references =guile-sage= + =sajure= are *spec-v5*. Each
 probe declares the spec version it targeted in its =README.org=/=CLAUDE.md=.
 
 *Tracking (v5+):* every impl has beads (=bd setup claude=, local/private). From
@@ -333,3 +333,36 @@ token limit* (was unspecified before v4 — ports picked 0.8–0.9; the referenc
 - *Cross-ref (resolves an apparent §4↔§7 contradiction):* §7's "EVERY tool result
   is wrapped" is the *own-LLM* path; an MCP *server* returns *plain* protocol
   content (§4 served-plain). The envelope never goes on the server wire.
+
+* 16. v5 boundary clarifications (round-5 harvest)
+Round 5 (SBCL/Janet↺/Nim/Crystal/tsgo/Hy) *ratified v4*: six fresh + re-run ports,
+**no new reference bugs** — the boundary spec has stabilized. All v5 items are
+*clarity* refinements (each pins something every port re-derived). Janet↺ also
+produced the cost-of-drift anchor: a v1→v4 upgrade = *15 distinct conformance
+fixes* (the cumulative hardening); the per-version (stay-current) delta is ~5.
+
+** 16.1 Exact empty-body excerpt string (pins §2/§15.6)
+When the sanitized body is empty, the reference renders exactly =[<Provider>
+<label>]= with a trailing =: = before the (empty) excerpt — i.e. the literal form
+is =[<Provider> <label>: ]=. Stated once so ports stop re-deriving it; omitting
+the trailing =: = remains an optional cosmetic refinement (§15.6).
+
+** 16.2 Missing tool =name= on tools/call (pins §4/§15.2)
+A =tools/call= whose params omit =name= takes the reference's *no-oracle* path:
+=-32601 "Unknown tool"= (a missing name is indistinguishable from an unknown
+tool — fail closed, reveal nothing). Returning =-32602= "invalid params" instead
+is a conformant optional refinement, but the reference uses =-32601=.
+
+** 16.3 No-oracle requires deterministic ENCODING, not collapse (pins §4/§15.1)
+The §4 no-oracle byte-identity guarantee requires only that error objects ENCODE
+deterministically (stable key order, canonical form). A port is NOT required to
+collapse =\{}= / =[]= the way the reference alist does — sentinel/typed ports that
+keep =\{}= ≠ =[]= ≠ =null= ≠ absent are *fully conformant* as long as their encoder
+is deterministic. (Resolves the recurring "must I match the alist?" question.)
+
+** 16.4 Effectful symlink pass fails back to the pure verdict (pins §3/§15.3)
+The optional effectful symlink-canonicalization pass (§15.3) is *best-effort*: on
+any I/O error (missing path, permission, loop) it MUST fall back to the *pure
+lexical guard's verdict* — fail-as-if-pure, never fail-open and never crash. The
+pure total guard is the contract; the effectful pass can only *add* rejections it
+positively proves, never relax the lexical decision.
