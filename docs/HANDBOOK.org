@@ -1,0 +1,377 @@
+#+TITLE: guile-sage — Behavior Handbook
+#+AUTHOR: dsp-dr
+#+DATE: 2026-07-16
+#+STATUS: Generated draft — behavior→code map
+#+OPTIONS: toc:3 num:t ^:nil
+#+STARTUP: overview
+
+This is the *Harness Handbook* for guile-sage (method: arXiv:2607.13285). It is a
+behavior→code map: the harness is organized by *behavior*, not file layout, and
+every behavioral claim is anchored to a real =file:line= in =src/sage/=. Prose
+explains; the =file:line= facts anchor.
+
+It is the companion to [[file:../spec.org][spec.org]]: the *spec says WHAT the boundary is* (the
+language-agnostic contract); this handbook says *WHERE/HOW it is implemented* in
+the Guile reference. Section numbers below cross-link to spec.org's =§N=.
+
+Anchors are stated as =src/sage/<file>.scm:<line>=, verified against the sources at
+generation time. Line numbers drift with edits — re-anchor when a unit moves.
+
+* L1 — System overview
+
+guile-sage is a terminal AI coding agent: an LLM drives a tool-use loop over a
+workspace. There are *two request paths* into the same tool registry.
+
+** Path A — interactive / agent loop (sage drives its OWN LLM)
+
+Entry =main= (=src/sage/main.scm:48=) parses CLI options and calls =repl-start=
+(=src/sage/repl.scm:1294=), which loads dotenv config, inits logging/telemetry,
+registers the tool set (=init-default-tools=), and discovers MCP client tools. The
+interactive loop reads a line via =readline= (around =src/sage/repl.scm:1464=) and
+feeds it to =repl-eval= (=src/sage/repl.scm:1281=): a slash command goes to
+=handle-command= (=src/sage/repl.scm:1059=), otherwise plain text goes to
+=handle-chat= (=src/sage/repl.scm:1092=).
+
+=handle-chat= calls the provider through the dispatch shim in =src/sage/provider.scm=
+— =provider-chat-streaming= (=src/sage/provider.scm:106=) or
+=provider-chat-with-tools= (=src/sage/provider.scm:120=), each a =case= on
+=current-provider= (=src/sage/provider.scm:32=) selecting ollama/gemini/openai. If
+the response carries =tool_calls=, control enters =execute-tool-chain=
+(=src/sage/repl.scm:930=): execute each tool → *guard + wrap the result*
+(=guard-tool-result= / =wrap-tool-result=, §7) → add to session as a =user= message
+→ re-prompt the model with tools, looping to a cap until no more tool calls, then
+return the final text.
+
+#+begin_example
+main (main.scm:48)
+  └─ repl-start (repl.scm:1294)  [config, logging, tools, MCP-client discover]
+       └─ read line (readline)
+            └─ repl-eval (repl.scm:1281)
+                 ├─ handle-command (repl.scm:1059)        [slash commands]
+                 └─ handle-chat (repl.scm:1092)
+                      └─ provider-chat-* (provider.scm:106 / :120)
+                           └─ {ollama|gemini|openai}-chat-*  → non-200 → error line (§2)
+                      └─ execute-tool-chain (repl.scm:930)   [if tool_calls]
+                           ├─ tool execute
+                           ├─ guard-tool-result (repl.scm:820)
+                           ├─ wrap-tool-result  (repl.scm:859)   ← TAINT choke point (§7)
+                           ├─ session-add-message "user"
+                           └─ re-prompt provider  (loop to cap)
+#+end_example
+
+** Path B — MCP server (a PEER client drives sage)
+
+=sage mcp-server= is dispatched *before* option parsing in =main=
+(=src/sage/main.scm:52=), resolving and calling =mcp-serve=
+(=src/sage/mcp-server.scm:132=). =mcp-serve= registers the tool set, logs to stderr,
+and runs a stdin read-print loop: each line is trimmed
+(=src/sage/mcp-server.scm:142=); blank/whitespace lines are silently skipped
+(transport framing, not messages); non-blank lines are parsed as JSON. A parse
+failure emits =-32700= via =send-parse-error= (=src/sage/mcp-server.scm:44=) — never
+a silent drop. A parsed object goes to =dispatch= (=src/sage/mcp-server.scm:116=),
+a =match= on =method=: =initialize= / =tools/list= / =tools/call= / =ping=; anything
+else with an =id= gets =-32601= "Method not found", id-less gets ignored
+(notification). stdout is JSON-RPC only.
+
+#+begin_example
+main (main.scm:52)  [subcommand check, before getopt]
+  └─ mcp-serve (mcp-server.scm:132)   [init-default-tools; logs → stderr]
+       └─ read-line loop
+            ├─ blank/ws line → skip silently (framing; NOT -32700)
+            ├─ parse fail    → send-parse-error -32700 (mcp-server.scm:44)
+            └─ dispatch (mcp-server.scm:116)  [match on method]
+                 ├─ initialize   → on-initialize   (mcp-server.scm:70)
+                 ├─ tools/list   → on-tools-list   (mcp-server.scm:77) [exposed-schema]
+                 ├─ tools/call   → on-tools-call   (mcp-server.scm:85) [no-oracle §4]
+                 ├─ ping         → reply {}
+                 └─ else + id    → -32601 "Method not found"
+                    else, no id  → ignore (notification)
+#+end_example
+
+The two paths share the tool registry but *differ in trust handling*: Path A wraps
+every result in the taint envelope (§7); Path B returns *plain* MCP content — the
+envelope never goes on the server wire (§4 served-plain).
+
+* L2 — Behavior units
+
+Each unit: responsibility, key inputs/outputs, dependencies, and anchoring
+functions. Priority units (spec §12) get L3 detail below.
+
+** U1 — Provider error normalization (spec §2)
+
+Responsibility: any non-200 (or unparseable) provider response becomes a single
+clean =[<Provider> <label>: <msg>]= assistant line — never a raw body, never a
+thrown value; the REPL stays alive.
+
+- Inputs: HTTP =code= + response =body=. Output: an assistant-message alist.
+- =<label>= is bucketed by code: =connection failed= (0), =authentication failed …=
+  (401/403), =rate limited= (429), =server error= (5xx), else =request failed (HTTP
+  n)=. Per-provider cond:
+  - openai: =src/sage/openai.scm:475= (label cond =:477=–=:482=).
+  - gemini: =src/sage/gemini.scm:466= (adds 404 → "model not found", =:471=).
+  - ollama: =src/sage/ollama.scm:178=.
+- =<msg>= sanitized by =clean-error-message= (=src/sage/util.scm:578=): ALL control
+  bytes (C0 <0x20 + DEL 0x7f) → spaces, collapsed, then bounded to ≤200 *bytes*
+  UTF-8-safe via =utf8-prefix= (=src/sage/util.scm:570=). Max =*error-message-max-bytes*=
+  = 200 (=src/sage/util.scm:567=).
+- Dependencies: =clean-error-message= (util) called by all three providers.
+
+** U2 — Tool registry + permission + safe-path (spec §3) — L3 below
+
+Responsibility: hold the tool set; decide whether a mutating tool may run; keep
+file paths inside the workspace.
+
+- Registry: =register-tool= (=src/sage/tools.scm:262=), =get-tool= (=:280=),
+  =list-tools= (=:284=), =tools-to-schema= (=:469=), =init-default-tools= (=:761=).
+- Permission: =check-permission= (=src/sage/tools.scm:296=) — safe tools always
+  allowed; else gated on =env-affirmative?= of =YOLO_MODE=.
+- Path containment: =safe-path?= (=src/sage/tools.scm:119=), with helpers
+  =resolve-path= (=:91=), =blocked-segment?= (=:104=), =path-blocked-segment?=
+  (=:112=), =canonicalize-path-safe= (=:160=).
+- JSON arg coercion: =coerce->int= (=src/sage/tools.scm:149=).
+- Dependencies: =env-affirmative?= (=src/sage/util.scm:557=).
+
+** U3 — MCP client (spec §4)
+
+Responsibility: discover SSE MCP servers from =~/.claude.json=, call their tools
+over JSON-RPC, and register them into sage's own registry.
+
+- Discover/handshake: =mcp-init= (=src/sage/mcp.scm:699=), =mcp-read-claude-json=
+  (=:169=), =mcp-extract-sse-servers= (=:182=).
+- Register: =mcp-register-tools-from-list= (=src/sage/mcp.scm:498=). Namespaced
+  =<server>.<tool>= plus a bare-name alias if no collision.
+- Call: =mcp-call-tool= (=src/sage/mcp.scm:605=), =mcp-call-tool-inner= (=:548=).
+- MCP tools default *unsafe*: =register-tool= is called with no =#:safe=
+  (=src/sage/mcp.scm:518=, =:533=), so they are never added to =*safe-tools*=.
+- Dependencies: registry (U2); results still flow through the taint envelope (U6)
+  because MCP tools execute inside Path A's =execute-tool-chain=.
+
+** U4 — MCP server + no-oracle (spec §4) — L3 below
+
+Responsibility: serve sage's registry over stdio newline-JSON-RPC 2.0; safe-only by
+default; an external peer must not distinguish a gated tool from a nonexistent one.
+
+- Loop/framing: =mcp-serve= (=src/sage/mcp-server.scm:132=); blank-line skip
+  (=:143=); parse error =send-parse-error= (=:44=).
+- Dispatch: =dispatch= (=src/sage/mcp-server.scm:116=); handlers =on-initialize=
+  (=:70=), =on-tools-list= (=:77=), =on-tools-call= (=:85=).
+- Exposure gate: =expose-unsafe?= (=src/sage/mcp-server.scm:60=), =safe-name?=
+  (=:61=), =tool-exposed?= (=:64=), =exposed-schema= (=:66=).
+- No-oracle refusal: =src/sage/mcp-server.scm:104= — fixed =-32601= "Unknown tool".
+- Dependencies: registry (U2), =env-affirmative?= (util), =json-empty-object= (util).
+
+** U5 — HTTP transport & resilience (spec §8)
+
+Responsibility: all chat HTTP via curl with retry of the transient set only; the
+startup model probe fails fast.
+
+- Retry policy: =http-post-with-timeout= (=src/sage/util.scm:603=); retry loop
+  =:619=; backoff =(usleep (* 500000 (expt 2 attempt)))= at =:630= (500ms · 2^n).
+- Retryable set: =http-retryable-code?= (=src/sage/util.scm:547=) = exactly
+  408/429/5xx; code 0 and other 4xx fail fast.
+- Retry count: =http-max-retries= (=src/sage/util.scm:599=), default 2 via
+  =SAGE_HTTP_MAX_RETRIES=.
+- Spawn boundary (Guile-specific): argv-based =primitive-fork + execlp= in
+  =capture-argv-in-dir= (=src/sage/tools.scm:198=) / =run-argv-in-dir= (=:226=) and
+  =prov-exec= (=src/sage/provenance.scm:170=) — never =system*= / =open-pipe*=.
+- Dependencies: providers (U1) call this for chat.
+
+** U6 — Taint envelope (spec §7) — L3 below
+
+Responsibility: the single choke point where every tool result (native AND MCP)
+becomes untrusted DATA the model may not treat as instructions.
+
+- Choke point: =execute-tool-chain= (=src/sage/repl.scm:930=), wrapping at =:992=–
+  =:998=.
+- =guard-tool-result= (=src/sage/repl.scm:820=): anti-hallucination guard on
+  error/empty.
+- =wrap-tool-result= (=src/sage/repl.scm:859=): =<tool-result name=… safe=…>= over
+  CDATA.
+- =escape-cdata-sequence= (=src/sage/repl.scm:844=): =]]>= → =]]]]><![CDATA[>=.
+- System prompt declaring blocks untrusted: =*tool-result-system-prompt*=
+  (=src/sage/repl.scm:877=).
+- Trust lattice: =src/sage/provenance.scm= (=xml-wrap= =:104=; =record-ingress=
+  =:207=).
+- Dependencies: consumed by Path A only; §4 keeps it OFF the server wire.
+
+** U7 — Context + compaction (spec §6)
+
+Responsibility: track token usage against a per-model limit, warn at 75/90/95%, and
+auto-compact at 0.8× the limit.
+
+- Thresholds: =*context-thresholds*= (=src/sage/context.scm:91=) = 0.95/0.90/0.75.
+- Usage + firing: =context-usage= (=src/sage/context.scm:119=),
+  =context-check-thresholds= (=src/sage/context.scm:143=),
+  =reset-fired-thresholds!= (=src/sage/context.scm:100=).
+- Token limit table: =*token-limits*= (=src/sage/config.scm:71=), lookup
+  =get-token-limit= (=src/sage/config.scm:336=).
+- Auto-compact: =session-maybe-compact!= (=src/sage/session.scm:208=), threshold
+  ratio default 0.8 (=:209=, =:213=); driven from =src/sage/repl.scm:1129=.
+- Compaction strategies (pure vs LLM-backed): =compact-truncate=
+  (=src/sage/compaction.scm:83=), =compact-token-limit= (=:106=) — pure/portable;
+  =compact-importance= (=:143=), =compact-summarize= (=:171=), =compact-intent= —
+  LLM-backed.
+
+** U8 — Agent loop / REPL (spec §5)
+
+Responsibility: drive the interactive prompt→chat→tool-loop→answer cycle and the
+background agent task loop.
+
+- Entry: =repl-start= (=src/sage/repl.scm:1294=); eval dispatch =repl-eval=
+  (=:1281=); chat =handle-chat= (=:1092=); slash commands =handle-command= (=:1059=).
+- Tool chain: =execute-tool-chain= (=src/sage/repl.scm:930=); degenerate-loop guard
+  compares name+args (=:940=–=:958=).
+- Agent task loop: =run-agent-loop= (=src/sage/repl.scm:1022=).
+- Dependencies: providers (U1), registry (U2), taint (U6), context (U7),
+  sessions (U9).
+
+** U9 — Sessions (spec §6)
+
+Responsibility: persist a session (name, model, messages, stats) as JSON under XDG.
+
+- Storage dir (XDG, project-local by default): =session-dir=
+  (=src/sage/session.scm:43=).
+- Load: =session-load= (=src/sage/session.scm:268=). Add message + stats:
+  =session-add-message= (used from =src/sage/repl.scm:998=).
+- Dependencies: consumed by the agent loop (U8) and context (U7, via
+  =session-total-tokens= late-bound at =src/sage/context.scm:110=).
+
+* L3 — Priority-unit detail (spec §12)
+
+Only the three highest-priority boundaries get this depth: permission/safe-path
+(§3), MCP-server no-oracle (§4), and the taint envelope (§7).
+
+** L3.1 — Permission model + safe-path (U2, spec §3)
+
+*** Permission trigger + path
+=check-permission= (=src/sage/tools.scm:296=) is the gate before a mutating tool
+runs. Normal path: a safe tool (member of =*safe-tools*=) returns =#t= immediately.
+Otherwise it consults =env-affirmative?= of =YOLO_MODE= (=:300=) — the *value* must
+be one of =1/true/yes/on= (=env-affirmative?=, =src/sage/util.scm:557=). No
+affirmative value ⇒ deny (=#f=, =:302=).
+
+Edge / footgun path: a bare presence of =SAGE_YOLO_MODE=0= must NOT enable YOLO —
+the =env-affirmative?= value-gate closes this (comment =src/sage/tools.scm:298=;
+util note =:552=). This is the round-4 value-gated-flags fix (spec §15.3).
+
+*** safe-path? state + execution path
+=safe-path?= (=src/sage/tools.scm:119=) is *pure and total* — it never raises. It is
+called by file tools before touching the FS (e.g. =src/sage/tools.scm:783=, =:803=,
+=:826=, =:903=, =:964=).
+
+Normal accept path (=src/sage/tools.scm:119=–=133=):
+1. Reject non-string / empty / NUL byte / any =..= substring FIRST (=:121=–=:124=).
+   The =..= substring test is intentional fail-closed (blocks benign =my..notes=)
+   and runs *before* any canonicalization (spec §15.3 ordering).
+2. =resolve-path= (=src/sage/tools.scm:91=): absolute stays absolute; relative/empty
+   anchors to =(workspace)=.
+3. Per-token sensitive-segment block on BOTH raw and expanded path
+   (=path-blocked-segment?=, =:112=; =blocked-segment?=, =:104=): a segment equal to
+   =.env= or starting with =.env.=; exact =.git= / =.ssh= / =.gnupg=. This allows
+   =.gitignore=, =my.env= and blocks =.env.local=.
+4. Containment: accept if =/tmp/=-prefixed OR the =canonicalize-path-safe= form is
+   workspace-prefixed (=:132=–=:133=).
+
+Notable rejection paths:
+- =safe-path? "/tmp/.ssh/id_rsa"= ⇒ =#f=: step 3 fires because the segment block
+  applies to =/tmp/= too (comment =src/sage/tools.scm:127=).
+- =safe-path? ".env.production"= ⇒ =#f= via the =.env.= prefix rule (=:106=).
+- The effectful symlink pass is best-effort: =canonicalize-path-safe=
+  (=src/sage/tools.scm:160=) catches I/O errors and falls back to the raw path — the
+  pure lexical verdict is the contract (spec §16.4).
+
+*** JSON arg coercion
+=coerce->int= (=src/sage/tools.scm:149=) accepts =20=, ="20"=, =20.0=; always
+routes through =(inexact->exact (round raw))= (=:156=) because =(integer? 20.0)= is
+=#t= in Guile. Absent/unparseable ⇒ the tool's default. Never crashes.
+
+** L3.2 — MCP server no-oracle (U4, spec §4)
+
+*** Trigger
+Any =tools/call= for a tool that is *unknown* OR *gated* (unexposed) lands in the
+refusal branch of =on-tools-call= (=src/sage/mcp-server.scm:85=). The guard is the
+=cond= at =:89=: =(or (not tool) (not (tool-exposed? name)))=.
+
+*** State + exposure computation
+=tool-exposed?= (=src/sage/mcp-server.scm:64=) = =expose-unsafe?= OR the tool is
+safe. =expose-unsafe?= (=:60=) is value-gated via =env-affirmative?= — so
+=SAGE_MCP_EXPOSE_UNSAFE=0= does NOT expose (spec §15.3). Missing =name= ⇒ =tool= is
+=#f= (=:88=) ⇒ same refusal branch (spec §16.2).
+
+*** Execution path — the byte-identical refusal
+Normal (exposed) call: =((assoc-ref tool "execute") args)= runs inside a =catch=
+(=src/sage/mcp-server.scm:106=); success replies plain =content= text-block (=:109=);
+a Scheme error becomes =-32603= "Tool error: …" (=:113=). *Served content is plain*
+— no taint envelope on the wire (spec §4 served-plain; §7 cross-ref).
+
+Refusal (unknown OR gated): the human/operator distinction (which case fired) is
+logged to *stderr only* (=src/sage/mcp-server.scm:101=–=103=). The *wire response* is
+=(reply-error id -32601 "Unknown tool")= (=:104=): a fixed code, a fixed
+message that does *not* include the tool name. Because the caller-supplied name is
+never echoed, the response bytes are identical for an unknown tool and a gated one
+— a peer cannot enumerate gated tools or learn how to escalate. This is the
+no-oracle property (a typed port's =Eq= check caught the name-echo leak; comment
+=:98=–=:100=).
+
+Framing edge: blank/whitespace stdin lines are skipped before parse
+(=src/sage/mcp-server.scm:143=), so framing never produces =-32700=; only a
+non-blank line that fails =json-read-string= does (=:145=–=:148=, then
+=send-parse-error= =:44= with =id: null=).
+
+** L3.3 — Taint envelope (U6, spec §7)
+
+*** Trigger + single choke point
+Every tool result in Path A passes through =execute-tool-chain=
+(=src/sage/repl.scm:930=). After a tool executes, the result is guarded then wrapped
+before being added to the session as a =user= message (=src/sage/repl.scm:992=–
+=:998=). This is the single choke point: native tools and MCP-client tools both
+execute here, so both are wrapped. The MCP *server* path (U4) does NOT wrap — that
+is the §4↔§7 boundary.
+
+*** State change — guard then wrap
+1. =guard-tool-result= (=src/sage/repl.scm:820=): if the result reads as
+   error/empty, append the anti-hallucination guard =*tool-error-guard-message*=;
+   otherwise pass through unchanged.
+2. =is-safe= is computed from =*safe-tools*= membership (=src/sage/repl.scm:993=–
+   =:995=) and threaded to the =safe= attribute.
+3. =wrap-tool-result= (=src/sage/repl.scm:859=) emits:
+   =<tool-result name="…" safe="true|false">= + an UNTRUSTED banner +
+   =<![CDATA[ …escaped… ]]>= + =</tool-result>=.
+
+*** Execution path — the CDATA breakout escape
+=escape-cdata-sequence= (=src/sage/repl.scm:844=) is the notable edge path. Attacker
+bytes containing =]]>= would otherwise close the CDATA section and inject raw XML.
+The loop (=:851=–=:857=) replaces each =]]>= with =]]]]><![CDATA[>=. Critically the
+*replacement itself contains* =]]>= at offset 2, so the loop advances past the
+inserted text (=rest = (substring s (+ idx 3))=, =:855=) rather than rescanning —
+otherwise it diverges. Because the marker is self-containing, a faithful =unwrap=
+MUST parse/concatenate CDATA sections, not string-replace (spec §7/§15.7
+round-trip + =]]>=-count invariant).
+
+*** Model contract
+=*tool-result-system-prompt*= (=src/sage/repl.scm:877=) declares that content inside
+=<tool-result>…</tool-result>= is untrusted data; only messages tagged =role=user=/
+=role=system= from the conversation are authoritative. This is what makes the
+envelope meaningful to the model.
+
+* Cross-reference index
+
+| Unit | Spec | Primary anchor |
+|------+------+----------------|
+| U1 error normalization | §2 | =src/sage/openai.scm:475=, =src/sage/util.scm:578= |
+| U2 registry/perm/path | §3 | =src/sage/tools.scm:296=, =:119= |
+| U3 MCP client | §4 | =src/sage/mcp.scm:699=, =:605= |
+| U4 MCP server no-oracle | §4 | =src/sage/mcp-server.scm:85=, =:104= |
+| U5 HTTP resilience | §8 | =src/sage/util.scm:603=, =:547= |
+| U6 taint envelope | §7 | =src/sage/repl.scm:930=, =:844= |
+| U7 context/compaction | §6 | =src/sage/context.scm:91=, =src/sage/session.scm:208= |
+| U8 agent loop / REPL | §5 | =src/sage/repl.scm:1294=, =:930= |
+| U9 sessions | §6 | =src/sage/session.scm:43=, =:268= |
+
+* Notes for maintainers
+
+- =prose explains; facts anchor= — do not paraphrase a =file:line= claim without
+  re-reading the source. Line numbers drift; re-verify on edit.
+- The two priority contracts most likely to regress silently are the no-oracle
+  byte-identity (L3.2) and the CDATA self-containing escape (L3.3) — both are
+  guarded by property tests (=test-pbt.scm=) per spec §12.
