@@ -158,10 +158,25 @@ substrate. We already run *Dolt* (via beads) — a natural backing store. Compac
 (§15.4) becomes memory-management/eviction rather than lossy truncation. Biggest
 architectural lift; sequence last.
 
+** Theme 4 — a self-improving grind loop  /(← Ren et al. survey, arXiv:2607.13104)/
+The spec-driven-port-grind is already a self-improvement system (feedback = ports,
+adaptation = harvest, memory = beads, self-monitoring = PBT vs =spec.org=,
+measurement = the cost-of-drift curve). Today it is *human-triggered*. Theme 4
+closes the loop *autonomously*: agents that monitor conformance + runtime behavior,
+=bd create= proposed spec clarifications / reference fixes, and drive the next
+round — bounded by the PBT gate and human review (the "keep humans in the loop"
+constraint from the Harness Handbook). Depends on Theme 1 (the handbook gives an
+agent the behavior→code map to localize proposals) and Theme 2 (attestation gives
+the audit trail an autonomous loop needs). Prerequisite discipline: same-baseline
+controls before attributing any difference — a self-driving loop that
+mis-attributes optimizes the wrong variable.
+
 ** Sequencing
 1. Theme 1 (Handbook) — now: doc/analysis, feeds the grind + agent-assisted change.
 2. Theme 2 (Governance) — the v6 grind: new testable boundaries → ports → harvest.
 3. Theme 3 (Memory) — after v6.
+4. Theme 4 (Self-improving loop) — once 1+2 exist (needs the behavior map + audit
+   trail); the method turning on itself.
 Cross-cutting: v6 fed by the v5 open beads (§16 carriers) + Theme-2's boundaries;
 references (guile-sage + sajure) stay current; PBT everything.
 
