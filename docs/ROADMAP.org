@@ -126,6 +126,45 @@ Current state: inbound (Claude Code → sage) is *live and proven*; outbound shi
 Next: M3 (harden) / M4 (red-team) before leaning on it, then M5 (the real
 bidirectional loop) and M6 (Emacs + deploy).
 
+* v6+ — research-grounded themes (harness research → the boundary map)
+
+guile-sage *is* an agent harness, so 2026 harness research maps directly onto the
+=H= (harness-owned) rows above. Three themes carry us from spec v5 toward v6+.
+
+| Work | Thesis | Lands on |
+|------+--------+----------|
+| Harness Handbook (arXiv:2607.13285) | 3-level behavior→code map (L1 flow → L2 units → L3 detail w/ =file:line=); "prose explains, facts anchor" | NEW: auditability of the harness itself |
+| CAVA (arXiv:2607.13716) | Canonical Action Verification + Attestation; verify each action vs policy + audit trail | L2 guardrails + L3 tool execution (§3/§4/§7) |
+| Oracle Agent Memory (arXiv:2607.13157) | DB-backed durable, queryable memory substrate | L3 =memory= row (§6) |
+
+** Theme 1 — a Behavior Handbook for guile-sage  /(← Harness Handbook; do first)/
+Generate an L1/L2/L3 behavior→code map of the harness (request flow → provider,
+tool-loop, permission, MCP, taint, compaction → detail anchored to
+=src/sage/*.scm= lines). Companion to =spec.org=: *spec = WHAT the boundary is;
+handbook = WHERE/HOW it's implemented.* Lowest risk, compounds with the grind
+(port teams + change-agents localize faster; humans audit the guardrails).
+→ =docs/HANDBOOK.org=.
+
+** Theme 2 — canonical action verification + attestation  /(← CAVA; the v6 grind)/
+Formalize the guardrails as *canonical actions*: every mutating tool-call → a
+canonical representation, verified vs policy pre-execution, with an
+attestation/audit log. Extends §3 (permission), §4 (MCP no-oracle), §7 (taint) →
+new v6 spec boundaries + PBT properties ("no unattested mutation"). Hardens the
+exact surface the grind keeps probing; moves =guardrails= from =L= toward =H=-owned.
+
+** Theme 3 — long-horizon memory substrate  /(← Oracle Agent Memory; later)/
+Evolve the L3 =memory= row / §6 from file-JSON sessions to a durable, queryable
+substrate. We already run *Dolt* (via beads) — a natural backing store. Compaction
+(§15.4) becomes memory-management/eviction rather than lossy truncation. Biggest
+architectural lift; sequence last.
+
+** Sequencing
+1. Theme 1 (Handbook) — now: doc/analysis, feeds the grind + agent-assisted change.
+2. Theme 2 (Governance) — the v6 grind: new testable boundaries → ports → harvest.
+3. Theme 3 (Memory) — after v6.
+Cross-cutting: v6 fed by the v5 open beads (§16 carriers) + Theme-2's boundaries;
+references (guile-sage + sajure) stay current; PBT everything.
+
 * Notes
 
 - This supersedes the old v0.1-era roadmap (removed 2026-06-24). It is a
