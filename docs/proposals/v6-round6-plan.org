@@ -1,0 +1,78 @@
+#+TITLE: Round 6 — grind plan (grind v6: consumes spec v5 + RFC-004, produces v6)
+#+AUTHOR: dsp-dr
+#+DATE: 2026-06-28
+#+STATUS: Proposed — round-6 roster + boundary-probe checklist + harvest plan
+#+OPTIONS: toc:2 num:t ^:nil
+
+Round 6 stress-tests Theme 2 ([[file:../rfc/004-cava-attestation.org][RFC-004 CAVA]]) so its findings ratify the draft
+into spec §17. Coverage is already the full host-language set (~30, rounds 1–5);
+round 6 shifts from *coverage* to *paradigms that uniquely stress governance*.
+
+* Precondition (must land before teams launch)
+The lean handoff gives teams only =spec.org= + the directive and they *derive* the
+contract — but CAVA is not in spec v5, so there's nothing to derive. So, before
+launch (this does NOT break the method — it mirrors v0-informal → v1-formal):
+1. Land a *reference CAVA impl* in guile-sage (+ sajure) at the existing choke
+   points (=execute-tool= / the §7 guard-wrap in =repl.scm= / Pre/PostToolUse hooks).
+2. Keep RFC-004 as the *v6-draft* boundary the teams target (spec v5 + RFC-004).
+3. Harvest *ratifies* RFC-004 → spec §17 (+ §18 v6-clarifications).
+
+* Roster + rationale (paradigms that stress the new boundary)
+| Slot | Language | Kind | Uniquely stresses |
+|------+----------+------+-------------------|
+| P1 | *Dafny* (or F*/Lean4) | NEW — verification-first | =requires=/=ensures= = verify-before-execute; can *statically prove* "no mutation without an attestation" (C1) instead of testing it |
+| P2 | *Pony* | NEW — ocap + actor | reference capabilities = policy/authority natively; actors stress *audit-log ordering under concurrency* (the total-order case single-threaded ports never hit) |
+| P3 | *Prolog (SWI)* | NEW — logic | policy-as-Horn-clauses tests whether the policy model is a *total decision procedure*; unification probes *canonical-action aliasing* (two actions that unify ⇒ bypass hazard). Expect honest transport stubs (first-class bail) |
+| R1 | *Rust* (re-run v3→v6) | RE-RUN typed/affine | first NEW-boundary cost-of-drift point (v5 was clarity-only): does adding a boundary spike stay-current above ~5/version? affine types ⇒ attestation as a must-consume token (unattested mutation won't compile) |
+| R2 | *Ruby* (re-run →v6) | RE-RUN untyped *control* | finding-#3 experiment on the boundary built to expose it — v6's fail-open surface; Ruby already failed open on value-gated flags. Same-baseline control vs Rust/OCaml |
+| R3 | *OCaml* (re-run, optional) | RE-RUN typed FP | second typed point to de-noise the v5→v6 delta (one point is noise) |
+| Refs | *guile-sage* + *sajure* | REFERENCE | both advance to v6 (mandatory); sajure's persistent structures = natural append-only attestation log; the 0-gap doc-only control |
+
+Stretch (capacity permitting): *Unison* — content-addressed code + ability effects
+map to content-addressed audit records + "may-mutate ⇒ must-attest".
+
+* Boundary-probe checklist (RFC-004 §17 content = the coverage matrix)
+Write-path *fail-open hazards* are the crown jewels — *A2, B3, C1* — where the
+typed-vs-untyped control earns its keep.
+
+*A. Canonical action:* A1 determinism (pure/total, equal⇒byte-identical) · A2
+no-alias *(hazard: collision ⇒ policy-equiv)* · A3 idempotence · A4 coverage (every
+mutating tool; safe = distinct read-class) · A5 reuse-don't-relax (§3 pure guard +
+coercion).
+*B. Verify vs policy:* B1 partition/totality {allow,confirm,deny} · B2 monotonicity ·
+B3 value-gated *(hazard, §15.3)* · B4 default-deny for mutation · B5 write-path
+no-oracle (deny doesn't distinguish policy-deny from unknown).
+*C. Attestation:* C1 no-unattested-mutation *(hazard; fail-closed write)* · C2
+append-only + total order (Pony) · C3 tamper-evident chain (§7 sha) · C4 log
+round-trip (§15.6/§15.7) · C5 taint interplay (store digest, not raw bytes) · C6
+own-LLM-path only (§4 served-plain extends to the log) · C7 query is read-only +
+unforgeable.
+*D. v6 clarity carry-items* (see [[file:v6-clarity-worklist.org][worklist]]): D1 §16.1/2 strings hold under the
+canonical layer · D2 canonicalization uses the *pure* safe-path verdict (§16.4) ·
+D3 deterministic encoding, sentinel {}≠[]≠null≠absent (§16.3).
+
+* Tracking + harvest (beads v6→v7 → spec v6)
+- grind v6 consumes v5 + RFC-004, produces ratified v6; OPEN beads = v6→v7 carriers.
+- per-port beads (setup-claude first per the clobber lesson, then init); type each
+  =governance-boundary | clarity | reference-bug=.
+- *Signal = cross-port AGREEMENT*, weighted for the 3 orthogonal paradigms (P1/P2/P3
+  converging on a gap is the strongest signal); a one-off = optional refinement.
+- artifact: =docs/reports/2026MMDD-v6-grind-findings.org= (Ports → AGREEMENT
+  clusters → reference fixes + regression PBT → per-lang notables → *cost-of-drift
+  addendum*: v5→v6 delta + typed-vs-untyped-at-v6, with the same-baseline caveat).
+- fold-forward: reference fixes (guile-sage + sajure) w/ regression PBT; promote
+  RFC-004 → spec §17; add §18 v6-clarifications; make attestation a §12 top
+  boundary; §13 round-6 row; §14 v6 row; ROADMAP guardrails L→H, Theme 2 landed.
+
+* Partial Theme-4 autonomy (bounded)
+Round 6 is the first round the audit trail Theme 4 needs *exists*. Begin partially:
+- *Do:* a *conformance-monitor* agent — given [[file:../HANDBOOK.org][HANDBOOK]] + spec-v6-draft + each
+  port's PBT/beads, auto-draft candidate beads ("≥3 ports disagree on X" →
+  =bd create= tagged =proposal/needs-human=) + fill the harvest-report skeleton.
+  *Dogfood:* the monitor's =propose-bead= is itself a canonical action, verified +
+  recorded in the new log — round 6 self-hosts Theme 4's audit requirement.
+- *Don't:* no autonomous spec edits, no auto-merged fixes, no auto-triggered round 7
+  (humans fold/version). The monitor MUST refuse to attribute a bead-count delta to
+  "paradigm" without a same-baseline control (accept Rust-vs-Ruby-at-v6; reject any
+  re-run-vs-upgrade comparison — the confound finding #4 caught). Full autonomy →
+  v7, once this round proves the trail.
