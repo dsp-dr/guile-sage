@@ -31,12 +31,18 @@
   (newline)
   (force-output (current-output-port)))
 
+;; An ABSENT id (#f) marks a JSON-RPC 2.0 notification → send NO reply (spec
+;; §4/§15.2). An explicit id: null (the 'null sentinel, truthy) still gets a
+;; reply. Guarding here fixes every request handler at once (C1: on-tools-call
+;; et al. previously emitted "id":false for an id-less tools/call).
 (define (reply id res)
-  (send `(("jsonrpc" . "2.0") ("id" . ,id) ("result" . ,res))))
+  (when id
+    (send `(("jsonrpc" . "2.0") ("id" . ,id) ("result" . ,res)))))
 
 (define (reply-error id code msg)
-  (send `(("jsonrpc" . "2.0") ("id" . ,id)
-          ("error" . (("code" . ,code) ("message" . ,msg))))))
+  (when id
+    (send `(("jsonrpc" . "2.0") ("id" . ,id)
+            ("error" . (("code" . ,code) ("message" . ,msg)))))))
 
 ;; JSON-RPC parse error: id is null per spec. Emit a raw line so a malformed
 ;; request is never silently dropped from the client's view (cross-port finding

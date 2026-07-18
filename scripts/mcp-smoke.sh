@@ -55,4 +55,12 @@ else
   echo "   FAIL: unexposed leaks an oracle (differs from unknown)"; exit 1
 fi
 
+echo "-- id-less tools/call (notification) -> NO reply (C1, spec §4/§15.2) --"
+NOTIF=$(printf '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"whoami","arguments":{}}}\n' | run_server 2>/dev/null)
+if [ -z "$NOTIF" ]; then
+  echo "   PASS: notification produced no reply"
+else
+  echo "   FAIL: id-less tools/call leaked a reply: $NOTIF"; exit 1
+fi
+
 echo "== ok =="
