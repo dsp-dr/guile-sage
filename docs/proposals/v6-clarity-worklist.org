@@ -1,0 +1,63 @@
+#+TITLE: v6 spec-clarity worklist (Handbook + v5-harvest gaps)
+#+AUTHOR: dsp-dr
+#+DATE: 2026-06-28
+#+STATUS: Proposed — v6 clarity items; each has a resolution + a locking test
+#+OPTIONS: toc:2 num:t ^:nil
+
+Companion to [[file:../rfc/004-cava-attestation.org][RFC-004 (CAVA)]]. The v6 grind folds these alongside §17. Grouped
+by kind; every item names its lock so it can't silently regress. Localized via
+[[file:../HANDBOOK.org][the Behavior Handbook]].
+
+* Group C — real bug / real gap (fix first)
+** C1. Id-less =tools/call= still emits a reply  /(reference bug)/
+Spec §4/§15.2: an *absent*-id =tools/call= is a notification (no reply). But
+=on-tools-call= (=mcp-server.scm:85=) always replies; absent id → =#f= →
+=reply= emits ="id":false= (=util.scm:177=) — a spec violation AND malformed
+JSON-RPC 2.0. The generic =else= branch (=:127=) already guards with =(if id …)=;
+the named handlers do not.
+- *Fix (code):* suppress emission when id is absent (=#f=) in the request handlers;
+  keep =id: null= (the ='null= sentinel, truthy) → reply. Preserves no-oracle.
+- *Lock:* PBT — absent-id =tools/call= ⇒ *no* stdout line; =id:null= ⇒ exactly one
+  reply with =id= null. + a =mcp-smoke.sh= case.
+
+** C2. §15.7 invariant has a false Handbook anchor + no PBT lock
+HANDBOOK L3.3 (=:348,376-377=) claims the round-trip/=cdata-no-escape= properties
+are guarded in =test-pbt.scm= — they are NOT there (only wrap-direction unit tests
+in =test-prompt-injection.scm=; no =unwrap-tool-result= in =src/=).
+- *Fix:* (1) add the two *expressible* wrap-side PBT properties: =cdata-no-escape=
+  (arbitrary bytes ⇒ wrapped output has no early-closing =]]>=) + the count
+  invariant; (2) *decide* whether to add an in-source =unwrap-tool-result= so the
+  true round-trip inverse is testable in the reference (recommended: yes, to make
+  §7's inverse a first-class regression-locked property); (3) correct the Handbook
+  anchors once the property lands (facts-anchor discipline).
+
+* Group A — confirm-and-pin (decided; add the lock)
+- *A3 no-oracle byte-identity (§4/§16.3):* PBT — random unknown =N1= vs random
+  gated =N2= ⇒ fully-encoded =reply-error= strings =equal?=, containing neither
+  name. (Today only a substring check, =test-pbt.scm:247=.)
+- *A2 missing =name= → -32601 (§16.2):* fold into A3 (same bytes as unknown-tool).
+- *A5 absolute-path containment (§3):* document the decided rule — containment set
+  = workspace subtree ∪ =/tmp/=; all other absolute paths rejected (=tools.scm:119=).
+  One sentence in §3 + Handbook L3.1; PBT: random abs path ∉ workspace ∉ =/tmp/= ⇒
+  =(not (safe-path? p))=.
+- *A4 effectful symlink fail-back (§16.4):* PBT — (i) =safe-path?= totality (never
+  raises on garbage); (ii) monotonicity: effectful accept-set ⊆ pure guard's.
+- *A1 empty-body excerpt (§16.1):* per-provider test — empty body ⇒ exactly
+  =[<Provider> <label>: ]= (single line, no control bytes).
+- *A6 ="20.0"= integrality (§3):* extend =coerce->int= PBT to assert the *value*
+  (=20.0/"20"/20 → 20=) + pin the reference's rounding of =20.5= (ports MAY reject).
+
+* Group B — open question (needs a call)
+** B1. Structured JSON-RPC =id= (=id:{}=, =id:[]=)
+§4 pins null/{}/absent for *params* + id:null-vs-absent, but not a structured id.
+JSON-RPC 2.0 requires =id ∈ {string,number,null}=. Reference echoes it verbatim
+(=mcp-server.scm:117=) → ="id":{}=, an invalid reply.
+- *Recommended:* structured id → =-32600= with =id: null= (conformant, removes a
+  fingerprinting wire-shape, matches the fail-closed / never-emit-malformed
+  posture). Alt: accept+echo, documented out-of-contract. *Your call.*
+- *Lock:* PBT — id = object/array/bool ⇒ =-32600=, =id: null=, no echo.
+
+* Recommended order
+C1 → C2 → A3 → A2 → A5 → A4 → A1 → A6 → B1 (decision, then implement).
+Batch: {C1,A2,A3,B1} in =mcp-server.scm= + =mcp-smoke.sh=; {A4,A5,A6} in the
+=tools.scm= PBT block; A1 in provider tests. Re-anchor drifted HANDBOOK lines after.
