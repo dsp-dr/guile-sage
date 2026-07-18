@@ -1,0 +1,104 @@
+#+TITLE: RFC-004 — Canonical Action Verification + Attestation (CAVA)
+#+AUTHOR: dsp-dr
+#+DATE: 2026-06-28
+#+STATUS: DRAFT — targets spec v6; round 6 stress-tests → ratifies as spec §17
+#+OPTIONS: toc:2 num:t ^:nil
+
+Roadmap *Theme 2*. Grounds guile-sage's guardrails in runtime *canonical action
+verification + attestation* (after CAVA, arXiv:2607.13716). This RFC is the
+*v6-draft*: round 6 (see [[file:../proposals/v6-round6-plan.org][v6 round-6 plan]]) builds against it; the harvest
+ratifies it into =spec.org= §17. Localized via [[file:../HANDBOOK.org][the Behavior Handbook]].
+
+* Key finding: the substrate already exists
+CAVA is *formalize-and-thread*, not new plumbing. The Handbook's behavior map
+locates the reusable pieces:
+- *Mutation choke point:* =execute-tool= (=src/sage/tools.scm:414=) already runs
+  =check-permission=, fires Pre/PostToolUse hooks (=hooks.scm:127,159=), emits
+  decision counters, and appends a usage ledger.
+- *Append-only ledger:* =provenance-log!= (=src/sage/provenance.scm:227=) with
+  =content-sha256= (=:62=), =now-iso= (=:189=), =gpg-sign= (=:131=) — the
+  attestation backbone (already fail-open, "never break the path").
+- *Tamper-evident chain:* the =prev_sha= convention (=docs/ANNOTATION-SYSTEMS.org=).
+So CAVA = define ={canonical action, policy verdict, attestation record}= as
+first-class values, construct them at the two exec sites (Path A =execute-tool= /
+Path B =on-tools-call=), and bind them via the existing ledger + hash-chain.
+
+* Draft boundaries (→ spec §17)
+** §17.1 Canonical action
+Before any *mutating* tool executes (not in the safe set, §3), build a
+deterministic normalized record ={tool, args*, paths*, mutation-class, actor, ts}=:
+=args*= arg-coerced (§3) + key-ordered canonically (§16.3), =paths*= the
+resolved/canonicalized forms + their *pure* =safe-path?= verdict (§15.3).
+=action-sha = sha256(canonical-encoding)=. =actor= distinguishes own-LLM (Path A)
+from MCP peer (Path B, §4). Canonicalization is pure/total; never mutates state;
+MUST NOT loosen safe-path or coercion.
+** §17.2 Policy verdict
+Pure =(action, env) → {decision ∈ {allow,confirm,deny}, reason, inputs}=, where
+=inputs= records every gate consulted: safe-set membership, value-gated =YOLO_MODE=
+(§15.3), the pure =safe-path?= verdict, any PreToolUse veto (§9). Deterministic;
+*fail-closed* (any gate error/absence ⇒ deny); default-deny for unclassified
+mutations.
+** §17.3 Attestation record
+Every *executed* and every *refused* mutation emits *exactly one* record to an
+append-only audit log: ={ts, actor, action-sha, verdict, result-sha?, prev_sha,
+gpg-sig?}=. =result-sha= = sha256 of the *raw* tool result (pre-taint-wrap,
+§7/§15.7) — absent on deny. =prev_sha= chains the previous record (tamper-evident).
+Records byte-canonical (stable re-encode).
+** §17.4 No-unattested-mutation invariant
+A mutating =execute= MUST NOT run unless (a) a canonical action was built and (b) a
+=decision=allow= verdict was produced; and the run MUST produce exactly one
+=result-sha=-bearing record. Safe (read-only) tools are exempt from mutation
+attestation (MAY be verdict-logged).
+** §17.5 Off-wire attestation (amends §4)
+MCP-server-path attestation goes to the audit log / stderr ONLY; it MUST NOT alter
+the wire response — the no-oracle refusal stays byte-identical (§4, §16.2), served
+results stay plain (§4). The audit log is not the taint envelope (§7).
+** §17.6 Failure modes
+Verdict gate fail-closed (§17.2). Audit *write* best-effort by default (never
+breaks the tool path, matching the provenance/usage ledgers) but observable on
+failure; =SAGE_ATTEST_STRICT= aborts the mutation if the record cannot persist.
+=SAGE_ATTEST_DISABLE= opts out of logging but MUST NOT relax §17.2 verification.
+Honesty: =prev_sha= + optional gpg give *detection*, not prevention.
+
+* PBT properties (→ tests/test-pbt.scm)
+1. every executed mutating tool-call ⇒ exactly one attestation (=result-sha= present)
+2. no mutation executes without a prior =allow= verdict for the same =action-sha=
+3. deny ⇒ record with =decision=deny=, no =result-sha=, probe never ran
+4. =action-sha= deterministic: same (tool,args,env) ⇒ same sha
+5. arg-permutation invariant: reordered args ⇒ same =action-sha= (§16.3)
+6. =result-sha= hashes *pre-wrap* bytes: =sha256(guarded)=, not the CDATA envelope (§7/§15.7)
+7. append-only: N mutations ⇒ N(+deny) records, monotone, priors unchanged
+8. tamper-evident: each =record.prev_sha == sha256(previous)=; a middle edit breaks the chain
+9. no-oracle byte-identity survives attestation (unknown vs gated stay identical; both emit off-wire deny record)
+10. safe tools emit no mutation attestation (no over-attesting)
+11. non-strict write-failure never blocks a mutation; =SAGE_ATTEST_STRICT= aborts on write-failure
+12. verdict fail-closed: any gate error ⇒ deny
+
+* Implementation sites (Handbook-anchored)
+- =tools.scm=: =check-permission= (=:296=, HANDBOOK L3.1 =:247=) → verdict producer;
+  =execute-tool= (=:414=) → build canonical action + gate + emit attestation;
+  =safe-path?= (=:119=), =coerce->int= (=:149=).
+- =provenance.scm=: =provenance-log!= (=:227=), =content-sha256= (=:62=),
+  =now-iso= (=:189=), =gpg-sign= (=:131=) — attestation backbone.
+- =mcp-server.scm=: =on-tools-call= (=:85=, HANDBOOK L3.2 =:291=) — own
+  canonical-action + off-wire attestation (Path B bypasses =execute-tool=).
+- =repl.scm=: =execute-tool-chain= (=:930=), hash the *pre-wrap* =guarded= at =:992=.
+- =hooks.scm=: Pre/PostToolUse (=:127,159=) — verify/attest seams.
+
+* Risks / trade-offs
+- *Perf/spawn:* =content-sha256= forks =shasum= via =/tmp= — collides with the §8
+  spawn-SIGSEGV boundary. Mitigate: hash *mutations only*; prefer an *in-process*
+  SHA (pure-Scheme) over forking.
+- *Taint:* hash pre-wrap raw result, never the =]]>=-escaped envelope, or
+  =result-sha= is un-reproducible and Path A/B diverge (property #6 pins this).
+- *Served-plain:* any attestation in =on-tools-call= must stay off-wire or it leaks
+  a no-oracle distinguisher (property #9 pins this).
+- *Fail-open vs no-unattested:* verdict always fail-closed; write best-effort by
+  default with =SAGE_ATTEST_STRICT= for guaranteed-record mode — a policy choice to
+  ratify in the grind.
+
+* Back-compat + roadmap
+Additive, opt-outable (=SAGE_ATTEST_DISABLE=, like =SAGE_STATS_DISABLE=); no
+default wire/behavior change. Moves =guardrails= from =L= (LiteLLM-leaky) to =H=
+(harness-owned) in [[file:../ROADMAP.org][ROADMAP]] §L2, and unblocks Theme 4 (the autonomous loop
+needs this audit trail). References (guile-sage + sajure) advance to v6.
