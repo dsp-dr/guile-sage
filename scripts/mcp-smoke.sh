@@ -63,4 +63,12 @@ else
   echo "   FAIL: id-less tools/call leaked a reply: $NOTIF"; exit 1
 fi
 
+echo "-- structured id (id:{}) -> -32600 Invalid Request, id null (B1) --"
+B1=$(printf '{"jsonrpc":"2.0","id":{},"method":"tools/list","params":{}}\n' | run_server 2>/dev/null | jq -c '{code:.error.code, id:.id}')
+if [ "$B1" = '{"code":-32600,"id":null}' ]; then
+  echo "   PASS: structured id rejected ($B1)"
+else
+  echo "   FAIL: structured id not handled: $B1"; exit 1
+fi
+
 echo "== ok =="

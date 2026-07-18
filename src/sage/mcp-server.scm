@@ -119,11 +119,22 @@
         (lambda (k . a)
           (reply-error id -32603 (format #f "Tool error: ~a ~a" k a))))))))
 
+;; JSON-RPC 2.0: id MUST be string | number | null. A structured id (object,
+;; array, or boolean) is an Invalid Request → -32600 with id null (B1). We never
+;; echo the structured value back (removes a peer-fingerprinting wire shape;
+;; matches the fail-closed / never-emit-malformed posture). Note: {} and [] both
+;; decode to '() via the reference alist; a non-empty object/array is a pair;
+;; explicit null is the 'null sentinel (valid), absent is #f (notification).
+(define (structured-id? id)
+  (or (pair? id) (null? id) (eq? id json-empty-object) (eq? id #t)))
+
 (define (dispatch msg)
   (let ((id (assoc-ref msg "id"))
         (method (assoc-ref msg "method"))
         (params (or (assoc-ref msg "params") '())))
     (logmsg "<< ~a (id=~a)~%" method id)
+    (if (structured-id? id)
+        (reply-error 'null -32600 "Invalid Request")   ; B1
     (match method
       ("initialize"                (on-initialize id))
       ("notifications/initialized" #f)
@@ -132,7 +143,7 @@
       ("ping"                      (reply id json-empty-object))
       (_ (if id
              (reply-error id -32601 (string-append "Method not found: " (if method (format #f "~a" method) "?")))
-             (logmsg "   (ignored notification: ~a)~%" method))))))
+             (logmsg "   (ignored notification: ~a)~%" method)))))))
 
 ;; --- stdio read-print loop ---------------------------------------------------
 (define (mcp-serve)
