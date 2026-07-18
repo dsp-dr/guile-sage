@@ -151,6 +151,11 @@ canonical representation, verified vs policy pre-execution, with an
 attestation/audit log. Extends §3 (permission), §4 (MCP no-oracle), §7 (taint) →
 new v6 spec boundaries + PBT properties ("no unattested mutation"). Hardens the
 exact surface the grind keeps probing; moves =guardrails= from =L= toward =H=-owned.
+*Drafted:* [[file:rfc/004-cava-attestation.org][RFC-004]] (§17 boundaries + 12 PBT properties). *Key finding:* the
+substrate already exists — =execute-tool= choke point, =provenance-log!=
+append-only ledger + =content-sha256=, and the =prev_sha= chain — so CAVA is
+*formalize-and-thread*, not new plumbing. Round-6 stress-tests it → ratifies §17;
+plan: [[file:proposals/v6-round6-plan.org][round-6 plan]] + [[file:proposals/v6-clarity-worklist.org][clarity worklist]].
 
 ** Theme 3 — long-horizon memory substrate  /(← Oracle Agent Memory; later)/
 Evolve the L3 =memory= row / §6 from file-JSON sessions to a durable, queryable
