@@ -14,6 +14,7 @@
 (define-module (sage mcp-server)
   #:use-module (sage util)            ; json-read-string / json-write-string / json-empty-object
   #:use-module (sage tools)           ; procedures only (see binding note below)
+  #:use-module (sage attest)          ; CAVA off-wire attestation (Path B, §17.5)
   #:use-module (sage version)         ; version-string
   #:use-module (ice-9 rdelim)         ; read-line
   #:use-module (ice-9 match)
@@ -88,6 +89,34 @@
                                     ("inputSchema" . ,(assoc-ref t "parameters"))))
                                 (exposed-schema)))))))
 
+;; --- CAVA Path B: OFF-WIRE attestation (RFC-004 §17.5) --------------------
+;; MUST NOT alter the wire response: attestation goes to the audit log / stderr
+;; ONLY. The no-oracle refusal stays byte-identical and served results stay
+;; plain. ALWAYS best-effort here (never throw) — §17.5 byte-identity dominates
+;; SAGE_ATTEST_STRICT on the served path. actor = 'mcp-peer (Path B, §4).
+(define* (attest-mcp! name args #:key (mutation-class 'mutating)
+                      (ran? #f) (result #f) (pre-veto #f))
+  (catch #t
+    (lambda ()
+      (let* ((action (canonical-action (or name "?") (if (pair? args) args '())
+                                       #:actor 'mcp-peer
+                                       #:mutation-class mutation-class
+                                       #:safe-path? safe-path?
+                                       #:resolve-path resolve-path))
+             ;; Path B's authorization gate is EXPOSURE, not YOLO: a mutating
+             ;; tool only RAN because the operator set SAGE_MCP_EXPOSE_UNSAFE.
+             ;; Reflect that so a run yields an allow verdict (record honesty,
+             ;; property #1) and a refusal yields deny (property #3/#9).
+             (env (list (cons "YOLO_MODE" (if (expose-unsafe?) "1" ""))))
+             (verdict (policy-verdict action env #:pre-veto pre-veto))
+             (result-sha (and ran?
+                              (eq? (verdict-decision verdict) 'allow)
+                              (string? result)
+                              (sha256-hex result))))
+        (attest! action verdict #:result-sha result-sha #:actor "mcp-peer")))
+    ;; Never break the served wire for bookkeeping (§17.5).
+    (lambda (key . a) #f)))
+
 (define (on-tools-call id params)
   (let* ((name (assoc-ref params "name"))
          (args (or (assoc-ref params "arguments") '()))
@@ -107,11 +136,23 @@
       (logmsg "   (tools/call refused: ~a~a)~%"
               (if name (format #f "~a" name) "?")
               (if (and tool (not (tool-exposed? name))) " — unexposed; set SAGE_MCP_EXPOSE_UNSAFE=1" " — unknown"))
+      ;; §17.5: emit an OFF-WIRE deny record (unknown OR gated). A gated tool is
+      ;; a known mutation; an unknown name is unclassified. The wire reply below
+      ;; is byte-identical either way (no-oracle, property #9).
+      (attest-mcp! name args
+                   #:mutation-class (if tool 'mutating 'unclassified)
+                   #:ran? #f)
       (reply-error id -32601 "Unknown tool"))
      (else
       (catch #t
         (lambda ()
           (let ((result ((assoc-ref tool "execute") args)))
+            ;; §17.5 served-plain: the served content is untouched. Attest only
+            ;; MUTATING (unsafe, exposed) tools off-wire; safe tools are exempt
+            ;; (property #10). result-sha hashes the plain served bytes.
+            (unless (safe-name? name)
+              (attest-mcp! name args #:mutation-class 'mutating
+                           #:ran? #t #:result result))
             (reply id `(("content" . ,(vector
                                        (text-block (if (string? result)
                                                        result
