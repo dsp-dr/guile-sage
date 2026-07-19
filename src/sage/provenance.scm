@@ -19,6 +19,7 @@
             content-sha256
             xml-wrap
             gpg-sign
+            now-iso
             record-ingress
             provenance-log!))
 
