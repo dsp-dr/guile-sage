@@ -25,6 +25,7 @@
   #:use-module (sage hooks)
   #:use-module (sage telemetry)
   #:use-module (sage usage-stats)
+  #:use-module (sage attest)
   #:use-module (sage mcp)
   #:use-module (srfi srfi-1)
   #:use-module (srfi srfi-19)
@@ -927,6 +928,45 @@ N chars + a single-line marker showing the elided byte count."
          (format #f "~%  \x1b[2m... [~a more bytes; model sees the full result]\x1b[0m"
                  (- n cap))))))
 
+;;; CAVA Path A attestation (RFC-004 §17.4 / §17.6).
+;;;
+;;; execute-tool (tools.scm) is the runtime mutation gate: check-permission
+;;; refuses a mutating tool before its body ("probe") runs. policy-verdict below
+;;; MIRRORS that decision, so threading CAVA in changes NO behavior. Here — the
+;;; single choke point where the pre-wrap GUARDED bytes exist (§7) — we build the
+;;; canonical action, produce the verdict, hash the PRE-WRAP result (never the
+;;; CDATA envelope, property #6), and emit exactly one attestation record.
+;;;
+;;; Read-only (safe) tools are exempt (property #10). RESULT is inspected for the
+;;; execute-tool refusal sentinels to decide whether the mutation actually ran
+;;; (so a deny/veto record carries NO result-sha, property #3).
+(define (repl-attest-mutation! tool-name tool-args result guarded)
+  (catch #t
+    (lambda ()
+      (let* ((ran? (not (or (string-prefix? "Permission denied for tool:" result)
+                            (string-prefix? "Hook vetoed:" result)
+                            (string-prefix? "Unknown tool:" result))))
+             (pre-veto (and (string-prefix? "Hook vetoed:" result)
+                            (substring result (min (string-length result)
+                                                   (string-length "Hook vetoed: ")))))
+             (action (canonical-action tool-name (or tool-args '())
+                                       #:actor 'own-llm
+                                       #:mutation-class 'mutating
+                                       #:safe-path? safe-path?
+                                       #:resolve-path resolve-path))
+             (env (list (cons "YOLO_MODE" (config-get "YOLO_MODE"))))
+             (verdict (policy-verdict action env #:pre-veto pre-veto))
+             (result-sha (and ran?
+                              (eq? (verdict-decision verdict) 'allow)
+                              (sha256-hex guarded))))
+        (attest! action verdict #:result-sha result-sha #:actor "own-llm")))
+    (lambda (key . args)
+      ;; §17.6: SAGE_ATTEST_STRICT aborts the mutation on write failure; the
+      ;; default best-effort mode never breaks the tool path (like provenance).
+      (if (attest-strict?)
+          (apply throw key args)
+          #f))))
+
 (define (execute-tool-chain model message content tokens)
   (let ((tools (tools-to-schema))
         (last-tool-name #f)
@@ -995,7 +1035,11 @@ N chars + a single-line marker showing the elided byte count."
                                         #t))
                           (wrapped (wrap-tool-result tool-name guarded
                                                      #:safe is-safe)))
-                     (session-add-message "user" wrapped))))
+                     (session-add-message "user" wrapped)
+                     ;; CAVA §17.4: attest mutating (non-safe) tool calls only;
+                     ;; safe tools are exempt (property #10). Off the wire path.
+                     (when (and tool-name (not is-safe))
+                       (repl-attest-mutation! tool-name tool-args result guarded)))))
                tool-calls)
               ;; Re-prompt the model with the tool results (WITH tools so
               ;; the model can request further tool calls in the chain)
