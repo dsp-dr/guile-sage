@@ -1522,6 +1522,70 @@
                 (= (- after mid) 1))))))))           ; unknown emitted 1 deny record
 
 ;;; ============================================================
+;;; C2 — §15.7 CDATA taint invariant (v6 clarity-worklist regression LOCK)
+;;; ============================================================
+;;;
+;;; HANDBOOK L3.3 claimed the round-trip / cdata-no-escape properties were
+;;; guarded here — they were NOT (only wrap-direction UNIT cases lived in
+;;; test-prompt-injection.scm). These two PBT properties close that gap by
+;;; generalising the single unit case to arbitrary attacker bytes, using the
+;;; REAL escape/wrap fns from (sage repl).
+;;;
+;;; The sound §15.7 invariant is:  no early-closing "]]>" in the CDATA payload
+;;; (each attacker "]]>" is split + immediately reopened) AND the count law
+;;; "]]>"-in-wrapped == "]]>"-in-raw + 1 (the +1 is the legitimate closer).
+
+(format #t "~%=== PBT: C2 §15.7 CDATA taint invariant ===~%")
+
+(define pbt-escape-cdata (@@ (sage repl) escape-cdata-sequence))
+
+;; Count non-overlapping occurrences of "]]>" in S.
+(define (pbt-count-cdata-close s)
+  (let loop ((i 0) (n 0))
+    (let ((idx (string-contains s "]]>" i)))
+      (if idx (loop (+ idx 3) (1+ n)) n))))
+
+;; #t iff every "]]>" in ESCAPED is immediately followed by "<![CDATA[",
+;; i.e. no "]]>" can terminate the enclosing CDATA section without at once
+;; reopening it — the attacker never gets a bare, early-closing marker.
+(define (pbt-cdata-no-early-close? escaped)
+  (let loop ((i 0))
+    (let ((idx (string-contains escaped "]]>" i)))
+      (if (not idx)
+          #t
+          (let ((after (+ idx 3)))
+            (and (<= (+ after 9) (string-length escaped))
+                 (string=? (substring escaped after (+ after 9)) "<![CDATA[")
+                 (loop after)))))))
+
+;; Attacker-controlled bytes: random control/NUL/printable chars interleaved
+;; with the exact danger sequences ("]]>", "<![CDATA[", NUL, control bytes).
+(define (rng-attacker-bytes)
+  (string-concatenate
+   (map (lambda (_)
+          (rng-element
+           (list "]]>" "<![CDATA[" "]]" ">" "]"
+                 (string #\nul)
+                 (string (integer->char (rng-int 0 31)))   ; C0 control byte
+                 (string (integer->char (rng-int 0 127)))  ; any low byte
+                 (rng-string (rng-int 0 6)))))
+        (iota (rng-int 1 14)))))
+
+(property "C2 cdata-no-escape: attacker bytes never close the CDATA early"
+  rng-attacker-bytes
+  (lambda (payload)
+    ;; The escaped payload (the region that lands inside <![CDATA[...]]>) must
+    ;; contain no bare "]]>" — every one is split and immediately reopened.
+    (pbt-cdata-no-early-close? (pbt-escape-cdata payload))))
+
+(property "C2 count invariant: ']]>' in wrapped == ']]>' in raw + 1"
+  rng-attacker-bytes
+  (lambda (payload)
+    (let ((wrapped (wrap-tool-result "read_file" payload)))
+      (= (pbt-count-cdata-close wrapped)
+         (+ 1 (pbt-count-cdata-close payload))))))
+
+;;; ============================================================
 ;;; Summary
 ;;; ============================================================
 
