@@ -1,0 +1,298 @@
+#+TITLE: guile-sage — core structure & data-representation audit
+#+AUTHOR: Daria Pascal
+#+DATE: 2026-07-19
+#+STATUS: Review — architecture/data-model recommendations only (no src/spec changes)
+#+OPTIONS: toc:2 num:t ^:nil
+
+Scope: the *core structure + intermediate data representations* of =src/sage=,
+read against =spec.org= (§4/§6/§7/§12/§15/§16), =docs/rfc/004-cava-attestation.org=,
+and =docs/reports/20260719-grok-build-comparison.org=. This is an architecture and
+data-model review — *not* a bug hunt. Every finding is a recommendation; nothing in
+=src/= or =spec.org= is changed here. All file:line anchors verified by reading.
+
+The single most important structural fact, established up front: *there is not one
+=define-record-type= (srfi-9 or otherwise) in the entire =src/sage= tree.* Every
+domain value — the JSON value, the tool, the tool result, the message, the session,
+the trust level, the JSON-RPC envelope, and all three CAVA "first-class values" — is
+a string-keyed alist, a bare list, a bare pair, or a string-with-a-tag. The audit is
+largely an argument about *where that costs us now* and *where it is correctly
+right-sized for a reference implementation*.
+
+* 1. Inventory — current core data representations
+Shape legend: A = string-keyed alist · a = symbol-keyed alist · L = bare list ·
+P = bare pair · S = string (incl. string-tagged / XML-enveloped) · G = global box.
+
+** 1.1 JSON value (=util.scm=)
+- Decoder: =parse-obj= (=util.scm:101=) and =parse-arr= (=util.scm:84=) *both*
+  return ='()= for empty. =json-read-string= (=:135=) can never reproduce ={}= vs
+  =[]= vs *absent* — they collapse to ='()=. =null= is the symbol ='null= (=:131=).
+  [Shape: L]
+- Encoder: =json-write= (=util.scm:174=). ='()= eagerly emits ="null"= (=:180=);
+  the empty-object sentinel =json-empty-object= (=:172=) is the *write-only* escape
+  hatch. Object-vs-array is a *heuristic*: =(string? (caar obj))= (=:194=) — an
+  array whose first element is a string-keyed pair is mis-encoded as an object.
+  [Shape: S/L, sentinel = symbol]
+- =as-list= (=util.scm:243=) exists precisely because arrays appear as *both* list
+  (parsed) and vector (constructed) — a second symptom of the missing value type.
+
+** 1.2 Tool registry + tool (=tools.scm=)
+- =*tools*= is a mutable module global, a bare list (=tools.scm:49=). [Shape: G/L]
+- A registered tool is a 4-field string-keyed alist ={name,description,parameters,
+  execute}= (the last a closure), built in =register-tool= (=tools.scm:264=).
+  [Shape: A]
+- =*safe-tools*= is a flat list of name strings (=tools.scm:55=), *duplicated
+  verbatim* in =tools-reinit!= (=tools.scm:1606=) — two literals that must stay in
+  sync. [Shape: L ×2]
+- Key style is inconsistent across projections: registry is string-keyed
+  (=:264=), =list-tools= re-projects *symbol-keyed* (=tools.scm:284=),
+  =tools-to-schema= re-projects back to string-keyed (=tools.scm:469=).
+
+** 1.3 Tool result (=tools.scm= / =repl.scm=)
+- =execute-tool= (=tools.scm:414=) returns a *bare string* on every path: success
+  (=:437=), hook veto (=:429=), tool error (=:457=), permission deny (=:463=),
+  unknown tool (=:466=). No structured distinction between the five outcomes.
+  [Shape: S]
+- Downstream, "did the mutation actually run?" is recovered by *string-prefix?
+  sniffing* the sentinels (=repl.scm:946=–948). The raw result then passes through
+  four shapes for one logical value: raw string → =guarded= (=repl.scm:1032=) →
+  =wrapped= CDATA envelope (=repl.scm:1036=) → session =user= message alist
+  (=repl.scm:1038=). The raw/guarded/wrapped distinction is load-bearing
+  (=result-sha= hashes =guarded=, pre-wrap, §7 / RFC-004 property #6) yet carried
+  only by local =let*= bindings.
+
+** 1.4 Taint / trust (=repl.scm=, =provenance.scm=)
+- The taint boundary is an ad-hoc *string* wrapper: =wrap-tool-result=
+  (=repl.scm:860=), =guard-tool-result= (=repl.scm:821=), CDATA breakout escape
+  =escape-cdata-sequence= (=repl.scm:845=). The only trust tag is the =safe="…"=
+  XML attribute (a string literal, =repl.scm:870=). [Shape: S]
+- The =untrusted<provider<local<verified= trust lattice lives separately in
+  =provenance.scm= =xml-wrap= (=:105=) as a *symbol passed through to a string*; it
+  is NOT threaded as a value into the Path-A wrap (which only carries the =safe=
+  bool). Two unrelated encodings of "how trusted is this".
+
+** 1.5 Message / session / context
+- Session is an alist ={name,model,created,updated,messages,stats}=
+  (=session.scm:68=); a message is an alist ={role,content,timestamp,tokens}=
+  (=session.scm:90=); =stats= is a nested alist. Mutated through a homegrown
+  =assoc-set!= (=session.scm:336=) that *prepends and filters*, so alist key order
+  is not stable. [Shape: A, nested]
+- =session-save= serializes the whole alist via =json-write-string= (=session.scm:256=);
+  because =json-write= renders ='()= as ="null"= (=util.scm:180=), a freshly-created
+  session whose ="messages"= is ='()= round-trips to ='null= — the §1.1 collapse
+  already reaches the persistence layer.
+- Context usage / status are transient display alists (=context.scm:124=,
+  =session.scm:298=). [Shape: A, ephemeral]
+
+** 1.6 CAVA "first-class values" (=attest.scm=)
+RFC-004 calls these first-class; in the reference they are alists.
+- =canonical-action= → string-keyed alist ={tool,args,paths,mutation-class,actor,
+  ts,action-sha}= (=attest.scm:271=). [Shape: A]
+- =policy-verdict= / =make-verdict= → alist ={decision,reason,inputs}=
+  (=attest.scm:300=); =verdict-decision= round-trips string↔symbol (=:305=).
+  [Shape: A]
+- =attestation= → alist ={ts,actor,action-sha,decision,reason,result-sha,prev-sha,
+  gpg-sig}= (=attest.scm:362=). [Shape: A]
+- =canon-json= (=attest.scm:189=) is a *second, independent* deterministic JSON
+  encoder (key-sorted) with its own =alist-of-strings?= object test (=:184=) —
+  deliberately decoupled from =util= so the attestation encoding never drifts.
+
+** 1.7 The three ledgers (append-only JSONL)
+- =provenance-log!= (=provenance.scm:227=), record via =record-ingress=
+  (=:208=, *symbol-keyed* alist — a fourth key-style). [Shape: a]
+- =usage-put!= (=usage-stats.scm:104=), string-keyed entry (=:110=). [Shape: A]
+- =attest-log-append!= (=attest.scm:442=), encoded via =canon-json=. [Shape: A]
+- Each carries its *own* =now-iso= (=provenance.scm:190=, =usage-stats.scm:55=,
+  =util.scm:277=) and its *own* fork-based =mkdir -p= (=provenance.scm:171=,
+  =usage-stats.scm:71=, =session.scm:51=, =util.scm:310=). Same mechanism, ~4 copies.
+
+** 1.8 JSON-RPC envelope (=mcp.scm= / =mcp-server.scm=)
+- Requests hand-built as literal alists in =mcp-make-request= (=mcp.scm:97=) /
+  =mcp-make-notification= (=:108=); replies/errors hand-built inline in =reply= /
+  =reply-error= / =send-parse-error= (=mcp-server.scm:39=–54); the error object is a
+  nested alist ={code,message}= (=mcp-server.scm:46=). No envelope type; every field
+  is a scattered =assoc-ref=. The =("jsonrpc" . "2.0")= literal and the error shape
+  are duplicated across client and server. [Shape: A ×2, duplicated]
+- The registry-box quirk: =mcp-server.scm= reaches =*tools*= *only* through
+  procedures (=list-tools=/=tools-to-schema=/=get-tool=, rationale =mcp-server.scm:59=)
+  because a compiled reference to the imported =*tools*= var resolves to a
+  *different empty box*; =mcp.scm= independently distrusts the same binding and uses
+  =(module-ref (resolve-module '(sage tools)) '*tools*)= (=mcp.scm:526=). Two modules,
+  two different workarounds for one fragile mutable-global registry. [Shape: G]
+
+** 1.9 Hooks
+- =*hooks*= is an alist =(event . list-of-(name . handler))= (=hooks.scm:44=); the
+  handler =ctx= is an alist (=hooks.scm:128=,160=); a descriptive veto is a =(#f .
+  reason)= pair (=hooks.scm:140=). [Shape: A/P — small and stable]
+
+* 2. Prioritized findings
+Ordering is by (value ÷ retrofit-pain). "Blast radius" names the modules a change
+touches. "Do-now" = cheap now / painful later or already biting; "defer" = real but
+not yet load-bearing.
+
+** F1 (biggest IR gap) — the JSON value type: decode-side {}/[]/absent collapse
+*Issue.* The alist collapse (§1.1) is patched on the *write* side (=json-empty-object=)
+but is *unrecoverable on read*. This already bites MCP: =mcp-discover-tools!= tests
+=(assoc-ref capabilities "tools")= (=mcp.scm:468=) — a server advertising
+="tools":{}= (valid "supports tools, none yet") parses to ='()=, =assoc-ref= returns
+=#f=, and the capability reads as *absent* (=mcp.scm:470=). Same class:
+=capabilities=/=server-info= stored as =(or … '())= (=mcp.scm:418=) cannot tell
+"present but empty" from "absent"; =structured-id?= must special-case
+=json-empty-object= (=mcp-server.scm:170=) precisely because ={}= decodes ambiguously.
+CAVA's =canon-json= and MCP's =id:null= vs absent both *depend* on the distinction
+the decoder throws away.
+*Recommendation.* Do NOT build a global algebraic JSON type — spec §15.1/§16.3 state
+the reference alist collapse is a *decided* position and full per-node distinction is
+a *port* target, not a reference retrofit. Instead, surgically preserve on decode
+exactly the states the wire needs: a =json-read-string/preserve= (or a keyword flag)
+that emits =json-empty-object= for ={}= and keeps ='null= / missing-key, reusing the
+*existing* sentinel so encode/decode become inverses for the wire-critical states.
+Adopt it only at the MCP decode boundary first (=mcp.scm= capability/param parsing).
+*Blast radius.* =util.scm= (additive parser) + opt-in call sites in =mcp.scm= /
+=mcp-server.scm=. Non-breaking (old parser stays the default).
+*Effort/value.* S–M / *high*. *Do-now* for the MCP decode boundary (already biting);
+defer any broader rollout.
+
+** F2 — no structured tool-result outcome (the stringly-typed choke point)
+*Issue.* =execute-tool= collapses success/veto/deny/error/unknown into one string
+(§1.3), forcing =repl.scm:946= to reverse-engineer =ran?= by =string-prefix?= on
+human-readable sentinels. This is fragile (rename a sentinel, break attestation
+property #3) and it is the reason Path A and Path B cannot share a governance seam
+(F3): neither has a structured "what happened" value to pass around.
+*Recommendation.* Introduce *one* srfi-9 record — =tool-outcome= ={status ∈
+(ok denied vetoed error unknown), raw, ran?, reason}= — returned by =execute-tool=;
+keep a =tool-outcome->string= for the display/back-compat path so the wire and REPL
+rendering are unchanged. This is the highest-leverage single record in the codebase:
+it deletes the sentinel-sniffing and is the *precondition* for F3.
+*Blast radius.* =tools.scm= (=execute-tool=), =repl.scm= (=execute-tool-chain=,
+=repl-attest-mutation!=), =mcp-server.scm= (=on-tools-call=).
+*Effort/value.* M / *high*. *Do-now* (unblocks F3; small, well-contained record).
+
+** F3 — governance orchestration is forked across Path A / Path B
+*Issue.* The CAVA *primitives* are shared (=attest.scm= exports
+=canonical-action=/=policy-verdict=/=attest!=), but the *orchestration* is copied.
+Path A: =repl-attest-mutation!= (=repl.scm:943=) — actor ='own-llm=, env from
+=YOLO_MODE=, =ran?= by string-sniff, safe-tool exemption at the call site
+(=repl.scm:1041=). Path B: =attest-mcp!= (=mcp-server.scm:97=) — actor ='mcp-peer=,
+env synthesized from *exposure* (not YOLO, =mcp-server.scm:110=), its own =ran?=
+call-site logic (=:142=,153=). Two hand-wired copies of build-action → verdict →
+decide-ran → hash → attest, differing only in actor + authz input. RFC-004 F2/F3
+already record that the two gates differ (YOLO vs EXPOSURE) — that difference is a
+*parameter*, not a reason to fork the pipeline.
+*Recommendation.* Extract a thin shared seam — e.g. =(sage govern)= exporting
+=attest-tool-call! outcome #:actor #:authz-env #:safe?= — that both paths call with
+their own actor/env. Note this is *audit* threading only; Path A's verdict is
+enforcement-bearing while Path B's is off-wire (§17.5), so the seam attests, it does
+not unify the gate. Pairs with F2 (needs =tool-outcome= to carry =ran?= structurally).
+*Blast radius.* new small module + =repl.scm= + =mcp-server.scm=; =attest.scm=
+unchanged.
+*Effort/value.* M / *high*. *Do-now* (extract the seam while only two callers exist;
+a third path — ACP reverse-channel, grok item 5 — is coming and would be a third fork).
+
+** F4 — session/message are alists on the eve of the Dolt memory substrate
+*Issue.* Sessions/messages are unstable-order alists (§1.5) and the save path already
+mis-round-trips empty ="messages"= to ='null= via the §1.1 collapse
+(=session.scm:256= → =util.scm:180=). Theme 3 (grok item 6) puts a *queryable
+Dolt-backed* session/memory store on the roadmap. Migrating a loose-alist,
+JSON-file session shape into a schema'd store *after* the substrate lands is the
+classic painful retrofit — every =assoc-ref *session* "…"= call site is an
+untyped coupling.
+*Recommendation.* Define =session= and =message= records *now*, with an explicit
+=session->json= / =json->session= boundary (that boundary is also the natural place
+to fix the empty-messages round-trip). The record becomes the in-memory contract the
+Dolt mapping later targets, instead of "whatever alist shape happened to be saved".
+*Blast radius.* =session.scm=, =context.scm= (late-bound token accessor,
+=context.scm:110=), =repl.scm= (message construction).
+*Effort/value.* M / *high on the Theme-3 horizon*. *Do-now* (cheap before Dolt,
+expensive after) — or at minimum freeze the JSON boundary now even if the record waits.
+
+** F5 — deny-glob policy needs a representation before safe-path? ossifies
+*Issue.* =safe-path?= (=tools.scm:119=) enforces a *hardcoded* per-segment blocklist
+=blocked-segment?= (=tools.scm:104=: =.env=/=.git=/=.ssh=/=.gnupg=). Grok item 3
+(=sandbox.toml=: =deny= globs, profiles off/workspace/devbox/strict) is a called-out
+CAVA-adjacent candidate. There is no policy/profile value to extend — adding a deny
+rule today means editing the predicate body.
+*Recommendation.* Introduce a =path-policy= value (a deny-set + profile name) threaded
+*into* =safe-path?= as an argument, with the current hardcoded list as the default
+profile. Purely additive; makes the future deny-glob work a data change, not a code
+change, and keeps §15.3's pure/total guarantee (the policy is data; the guard stays
+total). Kernel enforcement remains the root jail's job (privilege boundary) — sage
+owns only the *policy expression*, matching the grok verdict.
+*Blast radius.* =tools.scm= (=safe-path?= signature + one default), =attest.scm=
+(=canonical-action= already consumes =safe-path?= as a passed-in predicate — it
+absorbs a policy-carrying predicate for free).
+*Effort/value.* M / med-high. *Defer the glob engine*; *do-now* the signature/shape
+decision so the predicate does not have to be re-plumbed twice.
+
+** F6 — three ledgers share a mechanism, not a writer (duplication, not a data gap)
+*Issue.* =provenance-log!= / =usage-put!= / =attest-log-append!= (§1.7) are three
+copies of "open-append-one-JSONL-line, best-effort, never throw", plus ~3 =now-iso=
+and ~4 fork-=mkdir= copies. =record-ingress= even uses a *symbol-keyed* alist while
+the other two use string keys.
+*Recommendation.* They are three *logically distinct* ledgers (ingress provenance vs
+usage stats vs governance attestation) and should stay three files — do NOT merge the
+schemas. But share the *mechanism*: one =ledger-append!= + one =now-iso= + one
+=ensure-dir!=. Reduces the "stringly/JSONL-typed" surface and the drift risk between
+them.
+*Blast radius.* a small shared module; =provenance.scm=, =usage-stats.scm=,
+=attest.scm=, =util.scm=. Watch the import cycle (=util= already imports =provenance=;
+=attest= deliberately avoids =tools= — put the shared helper *below* all three).
+*Effort/value.* S–M / med. *Defer* (chore-grade; do it when one of them next changes).
+
+** F7 — the mutable-global tool registry is a fragile module seam
+*Issue.* The registry is a bare exported =*tools*= box whose *identity does not
+survive cross-module variable import*, forcing =mcp-server.scm= (procedures,
+=:59=) and =mcp.scm= (=module-ref=, =:526=) into two different workarounds (§1.8).
+Correctness depends on every consumer *knowing* not to read the imported variable
+directly.
+*Recommendation.* Make registry access an explicit accessor API (a getter/`registry`
+parameter object) and stop exporting the raw box; the =module-ref= hack and the
+"read via procedure" rule both disappear. Low-risk, mechanical.
+*Blast radius.* =tools.scm= (encapsulate box), =mcp.scm=, =mcp-server.scm=.
+*Effort/value.* S–M / med. *Defer* but flag — it is latent breakage waiting for the
+next module that innocently reads =*tools*=.
+
+* 3. Forward-fit summary (roadmap → representation to introduce now)
+| Roadmap theme (source) | Missing intermediate rep | Introduce now? | If deferred, retrofit pain |
+|------------------------+--------------------------+----------------+----------------------------|
+| CAVA shared seam (RFC-004; grok 1/5) | =tool-outcome= record (F2) + govern seam (F3) | *Yes* | 3rd path (ACP) forks a 3rd copy |
+| Deny-glob policy (grok 3) | =path-policy= arg to =safe-path?= (F5) | Shape *yes*, engine no | re-plumb the predicate twice |
+| Theme 3 memory over Dolt (grok 6) | =session=/=message= record + JSON boundary (F4) | *Yes* (boundary), record soon | migrate loose alists post-Dolt |
+| Edit hunk-attribution (grok 1) | edit/diff record in the ledger | *No* — extend =attestation= (=attest.scm:362=) actor field | low (additive) |
+| MCP wire fidelity (spec §4) | decode-side {} preservation (F1) | *Yes* (MCP boundary only) | already biting |
+
+* 4. Keep as-is — do NOT over-engineer
+A Guile *reference* implementation earns its value by being small and legible; the
+spec (§15.1/§16.3) explicitly blesses several of these choices. Leave them alone:
+- *No global algebraic JSON value type.* Spec §15.1 decides the alist collapse is the
+  reference's position and the full sum type is a *port* target. F1 is surgical
+  (wire boundary only), not a rewrite. Resist "make JSON a proper ADT everywhere".
+- *Keep =canon-json= separate from =util= =json-write=* (=attest.scm:189= vs
+  =util.scm:174=). The decoupling is deliberate (§16.3): the attestation encoding must
+  not drift when unrelated JSON changes. Do not "DRY" these into one writer.
+- *Pure-Scheme sha256* (=attest.scm:83=) — correct, FIPS-180-4, PBT-locked against
+  standard vectors, and dodges the §8 spawn boundary on purpose. Leave it.
+- *Trust lattice as symbols* (=provenance.scm:105=). It is a total order; join/meet are
+  =max=/=min=. No lattice type is warranted — a symbol enum is right-sized.
+- *Hooks ctx as an alist* (=hooks.scm:128=) and the =(#f . reason)= veto pair — small,
+  stable, contract-tested. No record needed.
+- *Three logical ledgers stay three ledgers* (F6 shares the writer, not the schema).
+  Ingress ≠ usage ≠ governance; collapsing them would lose meaning for a saving of
+  bytes.
+- *Transient display alists* (=context-usage= =context.scm:124=, =session-status=
+  =session.scm:298=) — ephemeral view models; records would be ceremony.
+- *No gRPC/protobuf tool backbone, no dynamic tool-search index* (grok "do NOT copy"):
+  an alist registry + stdio JSON-RPC is right-sized for ~34 tools. F7 encapsulates the
+  box; it does not replace the model.
+
+* 5. Recommended sequencing
+1. *F2 =tool-outcome= record* — smallest high-value record; precondition for F3.
+2. *F3 govern seam* — extract while only two callers exist.
+3. *F1 MCP decode {} preservation* — closes the one collapse that is actively wrong on
+   the wire.
+4. *F4 session/message JSON boundary* (records to follow) — freeze before Dolt.
+5. *F5 =path-policy= signature* — decide the shape before deny-globs land.
+6. *F6 shared ledger writer*, *F7 registry accessor* — defer to next touch of each.
+
+Net: introduce *two* records now (=tool-outcome=, and the =session=/=message= pair)
+and *one* thin seam (govern). That is the whole "reduce stringly/alist-typed risk"
+budget a reference should spend — everything else stays an alist on purpose.
