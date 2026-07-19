@@ -1,0 +1,68 @@
+#+TITLE: grok-build → guile-sage — feature-gap comparison
+#+AUTHOR: dsp-dr
+#+DATE: 2026-07-19
+#+STATUS: Reconnaissance — candidates only; not yet folded into RFC/roadmap
+#+OPTIONS: toc:2 num:t ^:nil
+
+Read of SpaceXAI's *Grok Build* (=github.com/xai-org/grok-build=, a Rust terminal
+AI coding agent — the closest production analog to guile-sage) for features/gaps
+worth rolling into sage. Ideas/patterns only.
+
+*License:* grok-build first-party code is *Apache-2.0* (it itself ports openai/codex
++ sst/opencode under §4(b) change notices). Patterns are borrowable *with
+attribution*; no code copying (and none needed — sage is Guile; the value is
+architectural).
+
+*Path framing.* grok-build: interactive TUI · headless =-p= (CI) · *ACP*
+editor-embedding. guile-sage: interactive REPL · =-p= one-shot · *MCP server*.
+The interesting delta is the third path + a set of runtime crates that map onto our
+open roadmap themes (CAVA = Theme 2, memory = Theme 3).
+
+* Prioritized adoption candidates
+| # | grok-build feature (crate) | sage today | Idea to roll in | Lands | Effort/Value |
+|---+----------------------------+------------+-----------------+-------+--------------|
+| 1 | Edit attribution =xai-hunk-tracker= (agent-vs-external per file hunk) | audit ledger exists (RFC-004) but no per-hunk author | tag each mutating diff actor=agent in the ledger; flag externally-changed files before re-edit — the missing "who/what" half of the audit trail | §7 / RFC-004 §17 / *Theme 2* | M / *high* |
+| 2 | Background tasks + prompt queue + interjection (=grok_build= bg=true→task_id, =monitor=/=kill_task=, =xai-prompt-queue=, =xai-interjection-core=) | partial (=run-agent-loop=; no handles/queue/interjection) | task_id handle + poll/kill for long shell/agent runs; a prompt queue so input during a turn isn't lost; interjection buffer to steer a running loop | §5 / ROADMAP events+scheduled H-rows | M / *high* |
+| 3 | Declarative sandbox =xai-grok-sandbox= (=sandbox.toml=: =extends=, deny-globs like =**/*.pem=, =restrict_network=; profiles off/workspace/devbox/strict) | hardcoded per-token =safe-path?=; real confinement = external Bastille jail | config-driven policy over =safe-path?= (hardcoded =.env=/=.ssh= list → extensible =deny= set) + per-profile egress. Kernel enforcement stays the root jail; sage owns the *policy expression* | §3 / *Theme 2* | M / med-high |
+| 4 | HTTP circuit breaker =xai-circuit-breaker= (sliding-window trip on error-rate) | retry 408/429/5xx + backoff, never trips | breaker in front of =http-post-with-timeout= so a wedged provider fails fast instead of paying full backoff each call | §8 | S / med |
+| 5 | ACP reverse-channel =xai-acp-lib= (=session/request_permission=, =fs/*=, =terminal/*=) | MCP-server only (no ACP) | borrow the =request_permission= reverse-channel: route §3 permission + CAVA attestation to an out-of-band UI approval instead of stdin | §3 / *Theme 2* | L / med-high |
+| 6 | Memory =xai-grok-memory= (blake3(cwd) md store; embedding+index+search+*MMR*+query-expansion+chunker; *dream* bg consolidation; watcher) | flat JSON sessions | blueprint for Theme 3: embedding + MMR-diversified retrieval + query-expansion over a *Dolt*-backed store (we run Dolt via beads); "dream" = bg eviction → compaction-as-memory-management | §6 / *Theme 3* | L / *high* |
+| 7 | Compaction =xai-grok-compaction= (trait-seamed; intra/inter/code split) | truncate/token-limit/importance/summarize/intent, 0.8× | borrow the intra-vs-inter-vs-code split + transport-agnostic trait seam; refines our pure-vs-LLM split | §6 / §15.4 | M / med |
+| 8 | Hooks =xai-grok-hooks= (file-discovered; session_start/end; *trust* module; env_expand) | Pre/PostToolUse only (§9) | add session lifecycle events + a hook *trust gate* (discovered hook must be trusted before it runs) | §9 | S-M / med |
+| 9 | Subagent resolution =xai-grok-subagent-resolution= (override>role>persona>parent; builtin general/explore/plan) | beads-backed agent tasks; aq coordinator | adopt the resolution precedence + a few built-in subagent personas | ROADMAP multiagent H-row | M / med |
+| 10 | Loop detection =doom_loop= (=xai-grok-sampler=); model precedence CLI>ENV>config>remote>embedded | degenerate-loop guard on name+args (repl.scm:940); tier auto-select | generalize the loop guard beyond exact name+args (semantic doom-loop); document the model-resolution precedence chain | §2 / §5 | S / low-med |
+
+* Verdicts on the called-out questions
+- *ACP vs our MCP-server — 3rd editor path?* They solve *opposite* problems: MCP-server
+  makes sage a *tool provider* others call (shipped, M1/M2 live); ACP makes sage a
+  *full agent an editor drives* (editor owns the loop, calls back for fs/terminal/
+  permission). Full ACP is a *large* lift for a Guile reference and overlaps the
+  MCP-server play. *Do not build full ACP now* — extract only the
+  =session/request_permission= reverse-channel (item 5). Revisit a minimal ACP
+  =session/{new,prompt,update}= subset only if a third consumer (e.g. Zed) appears.
+- *Strongest Theme 2 (CAVA) wins:* items 1 (edit attribution), 3 (deny-glob policy),
+  5 (permission reverse-channel) — all thread through the =execute-tool= choke point
+  RFC-004 already identifies.
+- *Strongest Theme 3 win:* item 6 — a working reference for the Dolt-backed queryable
+  substrate + the "compaction becomes eviction" thesis.
+
+* Deliberately do NOT copy (scope/complexity mismatch for a Guile reference)
+- gRPC/protobuf tool backbone (=xai-grok-tools-api=, =xai-computer-hub-*=) — massive
+  dispatch for a 34-tool registry; our alist + stdio JSON-RPC is right-sized.
+- Dynamic tool search/discovery (=ToolSearchIndex=, =search_tool=) — only pays at
+  hundreds of tools.
+- =xai-fast-worktree= (CoW/BTRFS snapshot pools) — OS-specific perf, irrelevant to a
+  reference.
+- =xai-grok-plugin-marketplace= — a product-distribution feature, not a boundary.
+- =xai-sqlite-journal= (NFS-aware WAL) — Dolt already owns our persistence (Theme 3).
+- TUI/media stack (=xai-ratatui-*=, =xai-grok-voice=, video/image gen, =xai-mixpanel=)
+  — UI polish + proprietary media + Mixpanel (we have OTLP, §10).
+- Full ACP — take the pattern, not the protocol.
+- *Note:* grok's sandbox is genuinely *kernel-enforced* (Landlock/Seatbelt + seccomp).
+  We can't match that in-process/portably — enforcement stays the root jail operator's
+  job (our privilege boundary); we adopt only the *policy expression* (item 3).
+
+* Suggested next step (not yet done)
+Fold the three CAVA-adjacent items (1 edit-attribution, 3 deny-globs, 5 permission
+reverse-channel) into [[file:../rfc/004-cava-attestation.org][RFC-004]] as v6 candidates; note item 6 under Theme 3 and
+item 2 in the ROADMAP H-rows.
