@@ -1586,6 +1586,57 @@
          (+ 1 (pbt-count-cdata-close payload))))))
 
 ;;; ============================================================
+;;; A3 / A2 — MCP no-oracle BYTE-IDENTITY (v6 clarity-worklist LOCK)
+;;; ============================================================
+;;;
+;;; §4/§16.2/§16.3: an unknown tool (N1), a gated/unexposed unsafe tool (N2),
+;;; and a missing name must all yield the FULLY-ENCODED reply-error JSON
+;;; BYTE-IDENTICALLY, and the bytes must leak NEITHER name (no oracle, no
+;;; reflected input). The pre-existing tool-dispatch property (:243) only did a
+;;; substring check on execute-tool; CAVA-9 only compared the single "write_file"
+;;; gated case. These pin the encoded-wire equal? over RANDOM N1/N2 + missing.
+
+(format #t "~%=== PBT: A3/A2 MCP no-oracle byte-identity ===~%")
+
+;; Fully-encoded wire bytes for an on-tools-call refusal, isolated so the
+;; off-wire attestation writes land in a throwaway log dir (not PBT stdout).
+(define (pbt-mcp-refusal-wire params)
+  (let ((saved-exp (getenv "SAGE_MCP_EXPOSE_UNSAFE")))
+    (unsetenv "SAGE_MCP_EXPOSE_UNSAFE")            ; keep unsafe tools GATED
+    (let ((wire
+           (pbt-with-temp-log
+            (lambda (dir file)
+              (attest-reset-chain!)
+              (pbt-capture-stdout
+               (lambda () (pbt-on-tools-call 7 params)))))))
+      (if saved-exp (setenv "SAGE_MCP_EXPOSE_UNSAFE" saved-exp)
+          (unsetenv "SAGE_MCP_EXPOSE_UNSAFE"))
+      wire)))
+
+(property "A3 no-oracle: unknown N1 vs gated N2 wire bytes equal? and name-free"
+  (lambda ()
+    (cons (string-append "nonexistent_" (rng-alpha-string (rng-int 3 14)))  ; N1 unknown
+          (rng-element *adr-unsafe-tools*)))                                  ; N2 gated
+  (lambda (names)
+    (let* ((n1 (car names))
+           (n2 (cdr names))
+           (w1 (pbt-mcp-refusal-wire `(("name" . ,n1) ("arguments" . ()))))
+           (w2 (pbt-mcp-refusal-wire `(("name" . ,n2) ("arguments" . ())))))
+      (and (string=? w1 w2)                       ; byte-identical: no oracle
+           (not (string-contains w1 n1))          ; N1 never reflected
+           (not (string-contains w1 n2))          ; N2 never reflected
+           (string-contains w1 "Unknown tool")))))
+
+(property "A2 missing-name wire == unknown-tool wire (same no-oracle bytes)"
+  (lambda () (string-append "nonexistent_" (rng-alpha-string (rng-int 3 14))))
+  (lambda (n1)
+    (let ((w-missing (pbt-mcp-refusal-wire '(("arguments" . ()))))   ; no "name"
+          (w-unknown (pbt-mcp-refusal-wire `(("name" . ,n1) ("arguments" . ())))))
+      (and (string=? w-missing w-unknown)
+           (not (string-contains w-missing n1))
+           (string-contains w-missing "Unknown tool")))))
+
+;;; ============================================================
 ;;; Summary
 ;;; ============================================================
 
