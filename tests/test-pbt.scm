@@ -1637,6 +1637,82 @@
            (string-contains w-missing "Unknown tool")))))
 
 ;;; ============================================================
+;;; A5 / A4 — safe-path? containment, totality, monotonicity (LOCK)
+;;; ============================================================
+;;;
+;;; A5 (§3): the containment set is workspace-subtree ∪ /tmp/; EVERY other
+;;;   absolute path is rejected. Complements the existing .. / .env / .git /
+;;;   .ssh / .gnupg properties (:181-215).
+;;; A4 (§3/§16.4): (i) TOTALITY — safe-path? never raises on arbitrary/garbage/
+;;;   huge/NUL/non-string/non-existent input, always returns a boolean;
+;;;   (ii) MONOTONICITY — the effectful (canonicalising) verdict never ACCEPTS a
+;;;   path the pure lexical guard rejects (effectful accept-set ⊆ pure).
+
+(format #t "~%=== PBT: A5/A4 safe-path? containment/totality/monotonicity ===~%")
+
+(define pbt-path-blocked-segment? (@@ (sage tools) path-blocked-segment?))
+
+;; The PURE lexical guard: the same checks as safe-path? but WITHOUT the
+;; canonicalize-path step (uses the raw resolved path for the workspace-prefix
+;; test). safe-path? = this guard AND canonicalize(expanded) still in-tree, so
+;; the effectful verdict can only ever be MORE restrictive, never less.
+(define (pbt-pure-safe-path? path)
+  (if (or (not (string? path)) (string-null? path)
+          (string-index path #\nul) (string-contains path ".."))
+      #f
+      (let ((expanded (resolve-path path)))
+        (and (not (pbt-path-blocked-segment? path))
+             (not (pbt-path-blocked-segment? expanded))
+             (or (string-prefix? "/tmp/" expanded)
+                 (string-prefix? (workspace) expanded))))))
+
+;; Absolute roots that are neither the workspace subtree nor /tmp/.
+(define pbt-nonws-roots
+  '("/etc" "/usr" "/bin" "/sbin" "/opt" "/var" "/lib"
+    "/root" "/srv" "/boot" "/dev" "/proc" "/sys"))
+
+(define (rng-abs-nonws-path)
+  (let loop ()
+    (let ((p (string-append (rng-element pbt-nonws-roots)
+                            "/" (rng-alpha-string (rng-int 1 12))
+                            "/" (rng-alpha-string (rng-int 1 12)))))
+      (if (or (string-prefix? "/tmp/" p) (string-prefix? (workspace) p))
+          (loop) p))))
+
+;; A grab-bag of hostile input shapes for the totality / monotonicity checks.
+(define (rng-wild-path)
+  (let ((kind (rng-element '(garbage huge nul abs rel tmp nonstring empty))))
+    (case kind
+      ((garbage)   (rng-string (rng-int 1 40)))
+      ((huge)      (make-string (rng-int 5000 20000)
+                                (integer->char (rng-int 33 126))))
+      ((nul)       (string-append (rng-alpha-string (rng-int 1 8))
+                                  (string #\nul)
+                                  (rng-alpha-string (rng-int 0 8))))
+      ((abs)       (string-append "/" (rng-alpha-string (rng-int 1 10))
+                                  "/" (rng-alpha-string (rng-int 1 10))))
+      ((rel)       (rng-alpha-string (rng-int 1 20)))
+      ((tmp)       (string-append "/tmp/" (rng-alpha-string (rng-int 1 16))))
+      ((nonstring) (rng-element (list 42 #f 3.14 'sym '(1 2))))
+      ((empty)     ""))))
+
+(property "A5 abs path outside workspace & /tmp is always rejected"
+  rng-abs-nonws-path
+  (lambda (p)
+    (not (safe-path? p))))
+
+(property "A4 totality: safe-path? never raises, always returns a boolean"
+  rng-wild-path
+  (lambda (p)
+    (boolean? (catch #t (lambda () (safe-path? p)) (lambda _ 'raised)))))
+
+(property "A4 monotonicity: effectful accept-set ⊆ pure lexical guard"
+  rng-wild-path
+  (lambda (p)
+    ;; effectful ACCEPT ⇒ pure ACCEPT (canonicalisation only tightens).
+    (or (not (safe-path? p)) (pbt-pure-safe-path? p))))
+
+;;; ============================================================
 ;;; Summary
 ;;; ============================================================
 
