@@ -102,3 +102,32 @@ Additive, opt-outable (=SAGE_ATTEST_DISABLE=, like =SAGE_STATS_DISABLE=); no
 default wire/behavior change. Moves =guardrails= from =L= (LiteLLM-leaky) to =H=
 (harness-owned) in [[file:../ROADMAP.org][ROADMAP]] §L2, and unblocks Theme 4 (the autonomous loop
 needs this audit trail). References (guile-sage + sajure) advance to v6.
+
+* Findings from the reference implementation (for round 6 to ratify)
+The guile-sage reference layer (=src/sage/attest.scm=, pure-Scheme FIPS-180-4
+sha256; 89/89 PBT incl. all §17 properties) surfaced three points the grind should
+settle — each a genuine "detection-not-prevention" or policy edge the RFC left open:
+
+** F1. Last-record tamper is invisible to =prev_sha= alone (amends §17.3/§17.6)
+=attestation-verify-chain= detects any edit to a record that HAS a successor, but a
+change to the *final* record (or a truncation of the tail) is not caught by
+=prev_sha= alone — only by a separately-stored chain head (=*attest-chain-head*=)
+or a gpg-signed tail. Round 6 should ratify *persisting the chain head* (or
+signing the tail) so last-line edits / truncation are detectable. (This is the
+RFC's own detection≠prevention caveat, now concrete.)
+
+** F2. Path B's authorization gate is EXPOSURE, not YOLO (amends §17.5)
+On the MCP server a mutating tool runs because =SAGE_MCP_EXPOSE_UNSAFE= is set —
+NOT =YOLO_MODE=. To keep "a run ⇒ allow verdict" honest (property #1), the
+reference feeds the exposure state in as the verdict's authorization input. §17.5
+should state explicitly that *Path B's gate is exposure*, so a verdict =reason=
+string never misreads a Path-B allow as "permitted by YOLO_MODE".
+
+** F3. STRICT abort on Path A is post-effect (amends §17.4/§17.6)
+=result-sha= needs the tool output, so the =SAGE_ATTEST_STRICT= write-failure
+abort in =execute-tool-chain= fires *after* the mutation's side effect has run (it
+aborts the chain, not the effect). True pre-effect abort needs a *two-phase
+record*: reserve =action-sha= + verdict BEFORE running, fill =result-sha= after.
+Round 6 should decide whether §17.4 requires two-phase (guarantees no side effect
+without a persisted intent record) or accepts post-effect abort (simpler; the
+side effect happened but is attested/aborted downstream).
