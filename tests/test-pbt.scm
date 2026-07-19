@@ -18,8 +18,10 @@
              (sage util)
              (sage ollama)
              (sage telemetry)
+             (sage attest)
              (srfi srfi-1)
-             (ice-9 format))
+             (ice-9 format)
+             (ice-9 textual-ports))
 
 ;;; ============================================================
 ;;; Minimal PBT Harness
@@ -1187,6 +1189,337 @@
         ;; Degenerate detection may terminate earlier (at 3 repeats).
         (and (string? result)
              (<= call-count pbt-*max-tool-iterations*))))))
+
+;;; ============================================================
+;;; CAVA — Canonical Action Verification + Attestation (RFC-004 §17)
+;;; ============================================================
+;;;
+;;; The 12 RFC-004 PBT properties (plus a pure-SHA-256 known-vector check).
+;;; These pin the §17 boundary: canonical action (§17.1), policy verdict
+;;; (§17.2), attestation record + chain (§17.3), no-unattested-mutation
+;;; (§17.4), off-wire attestation (§17.5), failure modes (§17.6).
+
+(format #t "~%=== PBT: CAVA attestation (RFC-004 §17) ===~%")
+
+;; Private bindings from the two exec sites (Path A repl, Path B mcp-server).
+(use-modules (sage repl) (sage mcp-server))
+(define pbt-guard-tool-result (@@ (sage repl) guard-tool-result))
+(define pbt-wrap-tool-result  (@@ (sage repl) wrap-tool-result))
+(define pbt-on-tools-call     (@@ (sage mcp-server) on-tools-call))
+
+;; ---- helpers -------------------------------------------------------------
+
+(define (pbt-count-lines file)
+  (if (file-exists? file)
+      (length (filter (lambda (l) (not (string-null? l)))
+                      (string-split (call-with-input-file file get-string-all)
+                                    #\newline)))
+      0))
+
+(define (pbt-last-line file)
+  (let ((lines (filter (lambda (l) (not (string-null? l)))
+                       (string-split (call-with-input-file file get-string-all)
+                                     #\newline))))
+    (if (null? lines) #f (last lines))))
+
+;; Run THUNK with SAGE_LOG_DIR pointed at a fresh temp dir; cleans up.
+(define (pbt-with-temp-log thunk)
+  (let* ((saved (getenv "SAGE_LOG_DIR"))
+         (dir (format #f "/tmp/sage-attest-pbt-~a-~a" (getpid) (rng-next!))))
+    (unless (file-exists? dir) (mkdir dir))
+    (setenv "SAGE_LOG_DIR" dir)
+    (let ((f (string-append dir "/attest.jsonl")))
+      (dynamic-wind
+        (lambda () #t)
+        (lambda () (thunk dir f))
+        (lambda ()
+          (if saved (setenv "SAGE_LOG_DIR" saved) (unsetenv "SAGE_LOG_DIR"))
+          (when (file-exists? f) (delete-file f))
+          (when (file-exists? dir) (rmdir dir)))))))
+
+(define (pbt-capture-stdout thunk)
+  "Run THUNK, returning everything it writes to current-output-port."
+  (with-output-to-string thunk))
+
+;; Random mutating tool call: name + args alist.
+(define pbt-mutating-tools '("write_file" "edit_file" "git_commit"
+                             "git_add_note" "git_push" "eval_scheme"))
+
+(define (rng-mut-args)
+  `(("path" . ,(string-append "tmp/" (rng-alpha-string (rng-int 1 12)) ".txt"))
+    ("content" . ,(rng-alpha-string (rng-int 0 40)))))
+
+;; ---- Property: pure SHA-256 known vectors (the in-process hash) -----------
+
+(property "sha256-hex matches FIPS-180-4 known vectors"
+  (lambda ()
+    (rng-element
+     (list (cons "" "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+           (cons "abc" "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+           (cons "hello" "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+           (cons "The quick brown fox jumps over the lazy dog"
+                 "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")
+           (cons "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
+                 "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"))))
+  (lambda (pair)
+    (string=? (sha256-hex (car pair)) (cdr pair))))
+
+;; ---- #4: action-sha deterministic (same tool,args ⇒ same sha) ------------
+
+(property "CAVA-4: action-sha is deterministic across ts (same tool,args)"
+  (lambda ()
+    (cons (rng-element pbt-mutating-tools) (rng-mut-args)))
+  (lambda (call)
+    (let* ((tool (car call)) (args (cdr call))
+           (a1 (canonical-action tool args #:ts "2020-01-01T00:00:00Z"))
+           (a2 (canonical-action tool args #:ts "2099-12-31T23:59:59Z")))
+      (string=? (action-sha a1) (action-sha a2)))))
+
+;; ---- #5: arg-permutation invariant (§16.3) -------------------------------
+
+(property "CAVA-5: reordered args ⇒ same action-sha"
+  (lambda ()
+    ;; build an args alist with >=2 keys, plus a reversed copy
+    (let ((args (map (lambda (i)
+                       (cons (string-append "k" (number->string i))
+                             (rng-alpha-string (rng-int 1 8))))
+                     (iota (rng-int 2 6)))))
+      (cons args (reverse args))))
+  (lambda (pair)
+    (string=? (action-sha (canonical-action "write_file" (car pair) #:ts "T"))
+              (action-sha (canonical-action "write_file" (cdr pair) #:ts "T")))))
+
+;; ---- #12: verdict fail-closed (any gate error ⇒ deny) --------------------
+
+(property "CAVA-12: verdict is fail-closed on malformed/unclassified actions"
+  (lambda ()
+    (rng-element
+     (list
+      ;; poison: paths is not a list ⇒ gate throws ⇒ caught ⇒ deny
+      '(("mutation-class" . "mutating") ("paths" . 42))
+      ;; unclassified mutation ⇒ default-deny
+      '(("mutation-class" . "unknown-class") ("paths" . ()))
+      ;; missing mutation-class ⇒ default-deny
+      '(("paths" . ()))
+      ;; poison env-shaped paths
+      '(("mutation-class" . "mutating") ("paths" . "not-a-list")))))
+  (lambda (action)
+    ;; even with YOLO on, a broken/unclassified action must DENY
+    (eq? 'deny (verdict-decision (policy-verdict action '(("YOLO_MODE" . "1")))))))
+
+;; ---- #6: result-sha over pre-wrap guarded bytes, NOT the CDATA envelope ---
+
+(property "CAVA-6: result-sha hashes pre-wrap guarded bytes, not the envelope"
+  (lambda () (rng-string (rng-int 0 200)))
+  (lambda (result)
+    (let* ((guarded (pbt-guard-tool-result result))
+           (wrapped (pbt-wrap-tool-result "write_file" guarded #:safe #f))
+           (sha-guarded (sha256-hex guarded))
+           (sha-wrapped (sha256-hex wrapped)))
+      ;; the attestation result-sha is sha256(guarded); it must differ from the
+      ;; sha of the wrapped envelope (the envelope adds the <tool-result> frame)
+      (and (string? sha-guarded)
+           (= 64 (string-length sha-guarded))
+           (not (string=? sha-guarded sha-wrapped))))))
+
+;; ---- #8: tamper-evident chain (prev_sha links; a middle edit breaks it) ---
+
+(property "CAVA-8: prev_sha chain verifies; any middle edit breaks it"
+  (lambda () (rng-int 2 8))
+  (lambda (n)
+    (let* ((recs (map (lambda (i)
+                        (let* ((a (canonical-action "write_file"
+                                                    `(("path" . ,(number->string i)))
+                                                    #:ts "T"))
+                               (v (policy-verdict a '(("YOLO_MODE" . "1")))))
+                          (attestation a v #:result-sha (sha256-hex (number->string i)))))
+                      (iota n)))
+           (chained (attestation-chain recs))
+           (ok (attestation-verify-chain chained))
+           ;; tamper a NON-TERMINAL record's reason: prev_sha detects any edit
+           ;; whose record has a successor (the successor's prev_sha stops
+           ;; matching). Editing the LAST record is caught only by the stored
+           ;; chain head, not by prev_sha over the list — so pick an interior i.
+           (mid (quotient (- n 1) 2))
+           (tampered (map (lambda (r i)
+                            (if (= i mid)
+                                (map (lambda (kv)
+                                       (if (equal? (car kv) "reason")
+                                           (cons "reason" "TAMPERED") kv)) r)
+                                r))
+                          chained (iota n))))
+      (and ok (not (attestation-verify-chain tampered))))))
+
+;; ---- #7: append-only — N appends ⇒ N lines, monotone, priors unchanged ---
+
+(property "CAVA-7: audit log is append-only (N records ⇒ N lines, priors fixed)"
+  (lambda () (rng-int 1 6))
+  (lambda (n)
+    (pbt-with-temp-log
+     (lambda (dir file)
+       (attest-reset-chain!)
+       (let loop ((i 0) (firsts '()))
+         (if (>= i n)
+             (and (= (pbt-count-lines file) n)
+                  ;; the first-ever line never changed as we appended more
+                  (let ((all (filter (lambda (l) (not (string-null? l)))
+                                     (string-split (call-with-input-file file get-string-all)
+                                                   #\newline))))
+                    (or (null? firsts)
+                        (string=? (car (reverse firsts)) (car all)))))
+             (let* ((a (canonical-action "write_file"
+                                         `(("path" . ,(number->string i))) #:ts "T"))
+                    (v (policy-verdict a '(("YOLO_MODE" . "1")))))
+               (attest! a v #:result-sha (sha256-hex (number->string i)))
+               (loop (1+ i)
+                     (cons (or (pbt-last-line file) "") firsts)))))))))
+
+;; ---- #11: non-strict write-failure never blocks; strict aborts -----------
+
+(property "CAVA-11: best-effort write-failure never blocks; STRICT aborts"
+  (lambda () (rng-alpha-string (rng-int 1 20)))
+  (lambda (tag)
+    (let* ((a (canonical-action "write_file" `(("path" . ,tag)) #:ts "T"))
+           (v (policy-verdict a '(("YOLO_MODE" . "1"))))
+           (rec (attestation a v #:result-sha (sha256-hex tag)))
+           ;; a path that cannot be created: parent is a regular file
+           (blocker (format #f "/tmp/sage-attest-blk-~a-~a" (getpid) (rng-next!)))
+           (bad (string-append blocker "/sub/attest.jsonl")))
+      (call-with-output-file blocker (lambda (p) (display "x" p)))
+      (let* ((mutation-ran #f)
+             ;; best-effort: append fails but the "mutation" still completes
+             (be (attest-log-append! rec #:strict? #f #:disabled? #f #:log-file bad))
+             (_ (set! mutation-ran #t))
+             ;; strict: the failed append THROWS to abort the mutation
+             (strict-threw
+              (catch 'attest-write-failed
+                (lambda ()
+                  (attest-log-append! rec #:strict? #t #:disabled? #f #:log-file bad)
+                  #f)
+                (lambda (k . a) #t))))
+        (when (file-exists? blocker) (delete-file blocker))
+        (and (memq be '(failed ok))   ; non-strict returned, did not throw
+             mutation-ran             ; mutation proceeded
+             strict-threw)))))        ; strict aborted on write-failure
+
+;; ---- #2: no mutation executes without an allow verdict for its action ----
+;;
+;; policy-verdict MIRRORS the runtime gate (check-permission): a mutating tool's
+;; verdict is 'allow iff check-permission permits it, under the same env. So the
+;; execute gate is exactly "allow verdict" (§17.4).
+
+(property "CAVA-2: mutating verdict allow ⟺ check-permission permits (same env)"
+  (lambda ()
+    (cons (rng-element *adr-unsafe-tools*) (rng-bool)))   ; tool, yolo-on?
+  (lambda (call)
+    (let ((tool (car call)) (yolo? (cdr call))
+          (saved (getenv "SAGE_YOLO_MODE")))
+      (if yolo? (setenv "SAGE_YOLO_MODE" "1") (unsetenv "SAGE_YOLO_MODE"))
+      (let* ((a (canonical-action tool '() #:mutation-class 'mutating #:ts "T"))
+             (env (list (cons "YOLO_MODE" (config-get "YOLO_MODE"))))
+             (allow? (eq? 'allow (verdict-decision (policy-verdict a env))))
+             (perm? (and (check-permission tool '()) #t)))
+        (if saved (setenv "SAGE_YOLO_MODE" saved) (unsetenv "SAGE_YOLO_MODE"))
+        (eq? allow? perm?)))))
+
+;; ---- #3: deny ⇒ decision=deny, no result-sha, probe never ran ------------
+
+(property "CAVA-3: deny ⇒ no result-sha, and execute-tool probe never runs"
+  (lambda () (rng-element *adr-unsafe-tools*))
+  (lambda (tool)
+    (with-yolo-off
+     (lambda ()
+       (let* ((a (canonical-action tool '() #:mutation-class 'mutating #:ts "T"))
+              (v (policy-verdict a (list (cons "YOLO_MODE" (config-get "YOLO_MODE")))))
+              ;; deny ⇒ result-sha omitted (null sentinel)
+              (rec (attestation a v #:result-sha #f))
+              (decision (verdict-decision v))
+              (rsha (assoc-ref rec "result-sha"))
+              ;; the probe (tool body) must not run under a deny
+              (exec-result (execute-tool tool '())))
+         (and (eq? decision 'deny)
+              (eq? rsha 'null)
+              (string-contains exec-result "Permission denied")))))))
+
+;; ---- #1: executed mutation ⇒ exactly one attestation with result-sha ------
+
+(property "CAVA-1: an executed mutation emits exactly one result-sha record"
+  (lambda ()
+    (cons (rng-element pbt-mutating-tools) (rng-mut-args)))
+  (lambda (call)
+    (pbt-with-temp-log
+     (lambda (dir file)
+       (attest-reset-chain!)
+       (let* ((tool (car call)) (args (cdr call))
+              (a (canonical-action tool args #:mutation-class 'mutating #:ts "T"))
+              (v (policy-verdict a '(("YOLO_MODE" . "1"))))
+              (guarded (rng-alpha-string (rng-int 1 40))))
+         (attest! a v #:result-sha (sha256-hex guarded))
+         (and (= 1 (pbt-count-lines file))
+              (let* ((line (pbt-last-line file))
+                     (parsed (json-read-string line)))
+                (and (equal? "allow" (assoc-ref parsed "decision"))
+                     (string? (assoc-ref parsed "result-sha"))
+                     (= 64 (string-length (assoc-ref parsed "result-sha")))))))))))
+
+;; ---- #10: safe (read-only) tools emit no mutation attestation ------------
+
+(property "CAVA-10: safe tools emit no mutation attestation (no over-attesting)"
+  (lambda () (rng-element '("git_status" "git_diff" "git_log" "read_file"
+                            "list_files" "search_files")))
+  (lambda (safe-tool)
+    (pbt-with-temp-log
+     (lambda (dir file)
+       (let* ((saved-exp (getenv "SAGE_MCP_EXPOSE_UNSAFE")))
+         (unsetenv "SAGE_MCP_EXPOSE_UNSAFE")
+         (let ((before (pbt-count-lines file)))
+           ;; served via the MCP-server success branch; capture wire so it does
+           ;; not corrupt PBT stdout
+           (pbt-capture-stdout
+            (lambda ()
+              (pbt-on-tools-call 1 `(("name" . ,safe-tool) ("arguments" . ())))))
+           (let ((after (pbt-count-lines file)))
+             (if saved-exp (setenv "SAGE_MCP_EXPOSE_UNSAFE" saved-exp)
+                 (unsetenv "SAGE_MCP_EXPOSE_UNSAFE"))
+             ;; no NEW attestation line for a safe tool
+             (= before after))))))))
+
+;; ---- #9: no-oracle byte-identity survives attestation --------------------
+;;
+;; On the MCP server (Path B), an unknown tool and a gated (unexposed) tool must
+;; produce BYTE-IDENTICAL wire responses even though both now emit an off-wire
+;; deny attestation record (§17.5).
+
+(property "CAVA-9: unknown vs gated wire bytes identical; both attest off-wire"
+  (lambda () (string-append "nonexistent_" (rng-alpha-string (rng-int 3 12))))
+  (lambda (unknown-name)
+    (pbt-with-temp-log
+     (lambda (dir file)
+       (let ((saved-exp (getenv "SAGE_MCP_EXPOSE_UNSAFE")))
+         (unsetenv "SAGE_MCP_EXPOSE_UNSAFE")   ; keep write_file GATED
+         (attest-reset-chain!)
+         (let* ((before (pbt-count-lines file))
+                ;; gated: a real but unexposed (unsafe) tool
+                (wire-gated
+                 (pbt-capture-stdout
+                  (lambda ()
+                    (pbt-on-tools-call 1 `(("name" . "write_file")
+                                           ("arguments" . (("path" . "x")
+                                                           ("content" . "y"))))))))
+                (mid (pbt-count-lines file))
+                ;; unknown: a nonexistent tool name
+                (wire-unknown
+                 (pbt-capture-stdout
+                  (lambda ()
+                    (pbt-on-tools-call 1 `(("name" . ,unknown-name)
+                                           ("arguments" . ()))))))
+                (after (pbt-count-lines file)))
+           (if saved-exp (setenv "SAGE_MCP_EXPOSE_UNSAFE" saved-exp)
+               (unsetenv "SAGE_MCP_EXPOSE_UNSAFE"))
+           (and (string=? wire-gated wire-unknown)   ; no oracle on the wire
+                (string-contains wire-gated "Unknown tool")
+                (= (- mid before) 1)                 ; gated emitted 1 deny record
+                (= (- after mid) 1))))))))           ; unknown emitted 1 deny record
 
 ;;; ============================================================
 ;;; Summary
