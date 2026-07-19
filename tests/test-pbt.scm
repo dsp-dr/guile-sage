@@ -1713,6 +1713,41 @@
     (or (not (safe-path? p)) (pbt-pure-safe-path? p))))
 
 ;;; ============================================================
+;;; A6 — coerce->int VALUE (not just no-crash) (v6 clarity-worklist LOCK)
+;;; ============================================================
+;;;
+;;; §3: the existing coerce->int coverage (read_logs / search_logs, :880-912)
+;;; only pins "no wrong-type-arg crash". These assert the VALUE: int / float /
+;;; string forms of the same number all coerce to the SAME exact integer, and
+;;; pin the reference's rounding of the .5 half-way cases (Guile round is
+;;; round-half-to-even: 20.5 -> 20, 21.5 -> 22). A future port that switches to
+;;; reject-instead-of-round returns the default and trips this test.
+
+(format #t "~%=== PBT: A6 coerce->int value ===~%")
+
+(define pbt-coerce->int (@@ (sage tools) coerce->int))
+
+(property "A6 coerce->int: int/float/string forms map to the SAME exact integer"
+  (lambda () (rng-int 0 100000))
+  (lambda (n)
+    (let ((r-int (pbt-coerce->int n -1))
+          (r-flt (pbt-coerce->int (exact->inexact n) -1))
+          (r-str (pbt-coerce->int (number->string n) -1)))
+      (and (= r-int n) (exact? r-int) (integer? r-int)   ; e.g. 20   -> 20
+           (= r-flt n) (exact? r-flt)                    ; e.g. 20.0 -> 20
+           (= r-str n) (exact? r-str)))))                ; e.g. "20" -> 20
+
+(property "A6 coerce->int: reference rounds .5 half-way (20.5->20, 21.5->22)"
+  (lambda () (rng-int 0 1))   ; fixed-vector pin; input unused
+  (lambda (_)
+    (let ((a (pbt-coerce->int 20.5 -1))
+          (b (pbt-coerce->int 21.5 -1)))
+      ;; round-half-to-even, and a real integer (not the -1 default a
+      ;; reject-instead-of-round variant would yield).
+      (and (= a 20) (exact? a)
+           (= b 22) (exact? b)))))
+
+;;; ============================================================
 ;;; Summary
 ;;; ============================================================
 
