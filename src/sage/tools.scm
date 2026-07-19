@@ -21,6 +21,7 @@
   #:use-module (sage version)
   #:use-module (sage netpolicy)
   #:use-module (srfi srfi-1)
+  #:use-module (srfi srfi-9)
   #:use-module (ice-9 match)
   #:use-module (ice-9 format)
   #:use-module (ice-9 ftw)
@@ -37,6 +38,12 @@
             get-tool
             list-tools
             execute-tool
+            make-tool-outcome
+            tool-outcome?
+            tool-outcome-status
+            tool-outcome-text
+            tool-outcome-reason
+            tool-outcome-ran?
             check-permission
             safe-path?
             resolve-path
@@ -405,6 +412,41 @@ that care about the exit code (git_push, git_commit) can surface it."
           (v (cdar args)))
       (format #f "~a=~a" k v)))
    (else (format #f "~a" args))))
+
+;;; ============================================================
+;;; tool-outcome — structured result of a tool execution (F2)
+;;; ============================================================
+;;;
+;;; execute-tool used to collapse success/veto/deny/error/unknown into
+;;; one bare string, forcing consumers (repl.scm) to reverse-engineer
+;;; "did the mutation actually run?" by string-prefix?-sniffing the
+;;; human-readable sentinels. tool-outcome carries that distinction
+;;; structurally so nothing downstream has to parse the display string.
+;;;
+;;; Fields:
+;;;   status — a symbol ∈ {success veto deny error unknown}, one per
+;;;            execute-tool return path (matches the old sentinels).
+;;;   text   — the exact human/LLM-facing string execute-tool returned
+;;;            before this record existed (the WIRE bytes; unchanged).
+;;;   reason — for a hook veto, the raw reason string (the substring the
+;;;            repl used to recover after "Hook vetoed: "); #f otherwise.
+;;;
+;;; ran? (mutation actually executed) is DERIVED from status, matching
+;;; the original string-prefix logic exactly: a call "ran" unless it was
+;;; denied, vetoed, or the tool was unknown. NOTE: a tool that started
+;;; and then threw ('error) DID run — the old code did not sniff
+;;; "Tool error:", so error must count as ran? to stay behaviour-identical.
+(define-record-type <tool-outcome>
+  (make-tool-outcome status text reason)
+  tool-outcome?
+  (status tool-outcome-status)
+  (text   tool-outcome-text)
+  (reason tool-outcome-reason))
+
+;;; tool-outcome-ran?: #t iff the tool body actually executed. Derived
+;;; from status so it can never drift from the display string.
+(define (tool-outcome-ran? o)
+  (not (memq (tool-outcome-status o) '(deny veto unknown))))
 
 ;;; execute-tool: Execute a tool by name
 ;;; Arguments:
