@@ -51,7 +51,7 @@
     (let ((captured
            (with-output-to-string
              (lambda ()
-               (execute-tool "list_files" '(("path" . ".")))))))
+               (execute-tool-text "list_files" '(("path" . ".")))))))
       (assert-true (regexp-exec observer-trace-rx captured)
                    (format #f "observer trace not in captured stdout: ~s"
                            captured)))))
@@ -63,9 +63,9 @@
     (let ((captured
            (with-output-to-string
              (lambda ()
-               (execute-tool "list_files" '(("path" . ".")))
-               (execute-tool "list_files" '(("path" . ".")))
-               (execute-tool "list_files" '(("path" . ".")))))))
+               (execute-tool-text "list_files" '(("path" . ".")))
+               (execute-tool-text "list_files" '(("path" . ".")))
+               (execute-tool-text "list_files" '(("path" . ".")))))))
       ;; Count occurrences of the trace; must be exactly 3.
       (let loop ((pos 0) (count 0))
         (let ((m (regexp-exec observer-trace-rx captured pos)))

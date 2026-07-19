@@ -937,18 +937,16 @@ N chars + a single-line marker showing the elided byte count."
 ;;; canonical action, produce the verdict, hash the PRE-WRAP result (never the
 ;;; CDATA envelope, property #6), and emit exactly one attestation record.
 ;;;
-;;; Read-only (safe) tools are exempt (property #10). RESULT is inspected for the
-;;; execute-tool refusal sentinels to decide whether the mutation actually ran
-;;; (so a deny/veto record carries NO result-sha, property #3).
-(define (repl-attest-mutation! tool-name tool-args result guarded)
+;;; Read-only (safe) tools are exempt (property #10). OUTCOME is the
+;;; tool-outcome record from execute-tool (F2); its status decides whether the
+;;; mutation actually ran (tool-outcome-ran?) — so a deny/veto record carries NO
+;;; result-sha (property #3) — replacing the former string-prefix? sentinel sniff.
+(define (repl-attest-mutation! tool-name tool-args outcome guarded)
   (catch #t
     (lambda ()
-      (let* ((ran? (not (or (string-prefix? "Permission denied for tool:" result)
-                            (string-prefix? "Hook vetoed:" result)
-                            (string-prefix? "Unknown tool:" result))))
-             (pre-veto (and (string-prefix? "Hook vetoed:" result)
-                            (substring result (min (string-length result)
-                                                   (string-length "Hook vetoed: ")))))
+      (let* ((ran? (tool-outcome-ran? outcome))
+             (pre-veto (and (eq? (tool-outcome-status outcome) 'veto)
+                            (tool-outcome-reason outcome)))
              (action (canonical-action tool-name (or tool-args '())
                                        #:actor 'own-llm
                                        #:mutation-class 'mutating
@@ -1018,8 +1016,14 @@ N chars + a single-line marker showing the elided byte count."
                  (let* ((fn (assoc-ref tc "function"))
                         (tool-name (and fn (assoc-ref fn "name")))
                         (tool-args (and fn (assoc-ref fn "arguments")))
-                        (result (if tool-name
-                                    (execute-tool tool-name (or tool-args '()))
+                        ;; F2: execute-tool now yields a tool-outcome record.
+                        ;; `result` stays the display/LLM STRING (byte-identical
+                        ;; to before); `outcome` carries the structured status
+                        ;; the attestation path keys off (no string sniffing).
+                        (outcome (and tool-name
+                                      (execute-tool tool-name (or tool-args '()))))
+                        (result (if outcome
+                                    (tool-outcome-text outcome)
                                     "Unknown tool call format")))
                    (when *debug*
                      (format #t "[DEBUG] Tool: ~a~%" (or tool-name "?"))
@@ -1039,7 +1043,7 @@ N chars + a single-line marker showing the elided byte count."
                      ;; CAVA §17.4: attest mutating (non-safe) tool calls only;
                      ;; safe tools are exempt (property #10). Off the wire path.
                      (when (and tool-name (not is-safe))
-                       (repl-attest-mutation! tool-name tool-args result guarded)))))
+                       (repl-attest-mutation! tool-name tool-args outcome guarded)))))
                tool-calls)
               ;; Re-prompt the model with the tool results (WITH tools so
               ;; the model can request further tool calls in the chain)

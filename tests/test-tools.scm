@@ -143,31 +143,31 @@
 
 (run-test "execute unknown tool returns error"
   (lambda ()
-    (let ((result (execute-tool "nonexistent" '())))
+    (let ((result (execute-tool-text "nonexistent" '())))
       (unless (string-contains result "Unknown tool")
         (error "should return unknown tool error" result)))))
 
 (run-test "execute git_status works"
   (lambda ()
-    (let ((result (execute-tool "git_status" '())))
+    (let ((result (execute-tool-text "git_status" '())))
       (unless (string? result)
         (error "git_status should return string" result)))))
 
 (run-test "execute list_files works"
   (lambda ()
-    (let ((result (execute-tool "list_files" '(("path" . ".")))))
+    (let ((result (execute-tool-text "list_files" '(("path" . ".")))))
       (unless (string? result)
         (error "list_files should return string" result)))))
 
 (run-test "read_file on missing file returns error"
   (lambda ()
-    (let ((result (execute-tool "read_file" '(("path" . "nonexistent.txt")))))
+    (let ((result (execute-tool-text "read_file" '(("path" . "nonexistent.txt")))))
       (unless (string-contains result "not found")
         (error "should report file not found" result)))))
 
 (run-test "read_file with unsafe path returns error"
   (lambda ()
-    (let ((result (execute-tool "read_file" '(("path" . "../../../etc/passwd")))))
+    (let ((result (execute-tool-text "read_file" '(("path" . "../../../etc/passwd")))))
       (unless (string-contains result "Unsafe")
         (error "should report unsafe path" result)))))
 
@@ -209,7 +209,7 @@
 
 (run-test "execute unsafe custom tool denied"
   (lambda ()
-    (let ((result (execute-tool "test_unsafe" '())))
+    (let ((result (execute-tool-text "test_unsafe" '())))
       (unless (string-contains result "Permission denied")
         (error "should deny unsafe tool" result)))))
 
@@ -226,7 +226,7 @@
 
 (run-test "execute safe custom tool"
   (lambda ()
-    (let ((result (execute-tool "test_safe" '())))
+    (let ((result (execute-tool-text "test_safe" '())))
       (unless (equal? result "safe result")
         (error "unexpected result" result)))))
 
@@ -243,7 +243,7 @@
 
 (run-test "read_logs accepts integer lines"
   (lambda ()
-    (let ((result (execute-tool "read_logs" '(("lines" . 5)))))
+    (let ((result (execute-tool-text "read_logs" '(("lines" . 5)))))
       (unless (string? result)
         (error "expected string result" result))
       (when (string-contains result "wrong-type-arg")
@@ -251,7 +251,7 @@
 
 (run-test "read_logs accepts string-int lines (the original bug)"
   (lambda ()
-    (let ((result (execute-tool "read_logs" '(("lines" . "5")))))
+    (let ((result (execute-tool-text "read_logs" '(("lines" . "5")))))
       (unless (string? result)
         (error "expected string result" result))
       (when (string-contains result "wrong-type-arg")
@@ -262,13 +262,13 @@
     ;; Some models emit numbers as floats. (integer? 20.0) is #t in
     ;; Guile, so a naive coerce that fast-paths on integer? would
     ;; pass 20.0 through unchanged and downstream math would fail.
-    (let ((result (execute-tool "read_logs" '(("lines" . 20.0)))))
+    (let ((result (execute-tool-text "read_logs" '(("lines" . 20.0)))))
       (when (string-contains result "wrong-type-arg")
         (error "should not crash on inexact integer lines" result)))))
 
 (run-test "read_logs accepts unparseable string lines (falls back to default)"
   (lambda ()
-    (let ((result (execute-tool "read_logs" '(("lines" . "garbage")))))
+    (let ((result (execute-tool-text "read_logs" '(("lines" . "garbage")))))
       (unless (string? result)
         (error "expected string result" result))
       (when (string-contains result "wrong-type-arg")
@@ -276,7 +276,7 @@
 
 (run-test "read_logs accepts missing lines arg (uses default)"
   (lambda ()
-    (let ((result (execute-tool "read_logs" '())))
+    (let ((result (execute-tool-text "read_logs" '())))
       (unless (string? result)
         (error "expected string result" result))
       (when (string-contains result "wrong-type-arg")
@@ -284,7 +284,7 @@
 
 (run-test "search_logs accepts string-int limit"
   (lambda ()
-    (let ((result (execute-tool "search_logs"
+    (let ((result (execute-tool-text "search_logs"
                                 '(("pattern" . "info")
                                   ("limit" . "10")))))
       (when (string-contains result "wrong-type-arg")
@@ -312,7 +312,7 @@
       ;; Cleanup before test
       (when (file-exists? tmp-path)
         (delete-file tmp-path))
-      (let ((result (execute-tool "write_file"
+      (let ((result (execute-tool-text "write_file"
                                   `(("path" . ,tmp-path)
                                     ("content" . "abs content")))))
         ;; Result should mention the resolved (absolute) path
@@ -334,7 +334,7 @@
            (full (string-append (workspace) "/" rel)))
       (when (file-exists? full)
         (delete-file full))
-      (let ((result (execute-tool "write_file"
+      (let ((result (execute-tool-text "write_file"
                                   `(("path" . ,rel)
                                     ("content" . "rel content")))))
         (unless (string-contains result (workspace))
@@ -345,7 +345,7 @@
 
 (run-test "read_file File-not-found error reports the resolved path"
   (lambda ()
-    (let ((result (execute-tool "read_file"
+    (let ((result (execute-tool-text "read_file"
                                 '(("path" . "/tmp/sage-does-not-exist-xyzzy")))))
       ;; Should NOT find the file but the error should NAME the
       ;; absolute path the user asked for, not silently substitute
@@ -370,7 +370,7 @@
 
 (run-test "search_files honours path=src/sage scope"
   (lambda ()
-    (let ((result (execute-tool "search_files"
+    (let ((result (execute-tool-text "search_files"
                                 '(("pattern" . "define-module")
                                   ("path" . "src/sage")))))
       (unless (string? result)
@@ -384,7 +384,7 @@
 
 (run-test "search_files default scope returns mixed tree"
   (lambda ()
-    (let ((result (execute-tool "search_files"
+    (let ((result (execute-tool-text "search_files"
                                 '(("pattern" . "define-module")))))
       ;; Without scope, the default '.' walk should still produce
       ;; some result (mixed across trees, exact composition is
@@ -394,7 +394,7 @@
 
 (run-test "search_files rejects unsafe scope path"
   (lambda ()
-    (let ((result (execute-tool "search_files"
+    (let ((result (execute-tool-text "search_files"
                                 '(("pattern" . "root")
                                   ("path" . "../../../etc")))))
       (unless (string-contains result "Unsafe")
@@ -418,7 +418,7 @@
 (run-test "edit_file File-not-found echoes the resolved path"
   (lambda ()
     (setenv "SAGE_YOLO_MODE" "1")
-    (let ((result (execute-tool "edit_file"
+    (let ((result (execute-tool-text "edit_file"
                                 '(("path" . "/tmp/sage-does-not-exist-xyzzy")
                                   ("search" . "x")
                                   ("replace" . "y")))))

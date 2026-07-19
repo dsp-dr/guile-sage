@@ -336,7 +336,7 @@
 
             (run-test "execute generate_image tool via tool system"
               (lambda ()
-                (let ((result (execute-tool "generate_image"
+                (let ((result (execute-tool-text "generate_image"
                                            '(("prompt" . "yellow star on black background")
                                              ("filename" . "test-tool-exec")
                                              ("width" . 256)

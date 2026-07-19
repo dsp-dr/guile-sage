@@ -117,7 +117,7 @@
 
 (run-test "log_stats returns statistics"
   (lambda ()
-    (let ((result (execute-tool "log_stats" '())))
+    (let ((result (execute-tool-text "log_stats" '())))
       (assert-contains result "Log Statistics" "should contain header")
       (assert-contains result "Total entries" "should contain total")
       (assert-contains result "Error rate" "should contain error rate")
@@ -125,36 +125,36 @@
 
 (run-test "log_errors returns error entries"
   (lambda ()
-    (let ((result (execute-tool "log_errors" '(("count" . 5)))))
+    (let ((result (execute-tool-text "log_errors" '(("count" . 5)))))
       (assert-contains result "Error" "should contain error info"))))
 
 (run-test "log_timeline returns timeline"
   (lambda ()
-    (let ((result (execute-tool "log_timeline" '(("count" . 10)))))
+    (let ((result (execute-tool-text "log_timeline" '(("count" . 10)))))
       (assert-contains result "Timeline" "should contain timeline header"))))
 
 (run-test "log_timeline with module filter"
   (lambda ()
-    (let ((result (execute-tool "log_timeline" '(("count" . 5) ("module" . "test")))))
+    (let ((result (execute-tool-text "log_timeline" '(("count" . 5) ("module" . "test")))))
       (assert-contains result "Timeline" "should contain timeline header"))))
 
 (run-test "log_search_advanced by level"
   (lambda ()
-    (let ((result (execute-tool "log_search_advanced" '(("level" . "error") ("limit" . 5)))))
+    (let ((result (execute-tool-text "log_search_advanced" '(("level" . "error") ("limit" . 5)))))
       (unless (or (string-contains result "ERROR")
                   (string-contains result "No matching"))
         (error "should find errors or say none found")))))
 
 (run-test "log_search_advanced by module"
   (lambda ()
-    (let ((result (execute-tool "log_search_advanced" '(("module" . "test") ("limit" . 5)))))
+    (let ((result (execute-tool-text "log_search_advanced" '(("module" . "test") ("limit" . 5)))))
       (unless (or (string-contains result "test")
                   (string-contains result "No matching"))
         (error "should find test module entries or say none found")))))
 
 (run-test "log_search_advanced by message pattern"
   (lambda ()
-    (let ((result (execute-tool "log_search_advanced"
+    (let ((result (execute-tool-text "log_search_advanced"
                                 '(("message_pattern" . "warning") ("limit" . 5)))))
       (unless (or (string-contains result "warning")
                   (string-contains result "No matching"))
@@ -162,7 +162,7 @@
 
 (run-test "log_search_advanced with time range"
   (lambda ()
-    (let ((result (execute-tool "log_search_advanced"
+    (let ((result (execute-tool-text "log_search_advanced"
                                 '(("from_time" . "2026-01-01") ("to_time" . "2099-12-31") ("limit" . 3)))))
       (unless (string? result)
         (error "should return string result")))))
@@ -175,18 +175,18 @@
 
 (run-test "log_errors with count=0"
   (lambda ()
-    (let ((result (execute-tool "log_errors" '(("count" . 0)))))
+    (let ((result (execute-tool-text "log_errors" '(("count" . 0)))))
       (unless (string? result)
         (error "should handle count=0 gracefully")))))
 
 (run-test "log_timeline with count=1"
   (lambda ()
-    (let ((result (execute-tool "log_timeline" '(("count" . 1)))))
+    (let ((result (execute-tool-text "log_timeline" '(("count" . 1)))))
       (assert-contains result "Timeline" "should work with count=1"))))
 
 (run-test "log_search_advanced with no criteria returns entries"
   (lambda ()
-    (let ((result (execute-tool "log_search_advanced" '())))
+    (let ((result (execute-tool-text "log_search_advanced" '())))
       (assert-contains result "Search Results" "should return results with no filters"))))
 
 ;;; Summary

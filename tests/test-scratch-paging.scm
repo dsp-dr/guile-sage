@@ -86,15 +86,15 @@
     ;; Isolate this test from prior runs.
     (scratch-clear!)
     (scratch-put! *test-sha* *test-body*)
-    (let* ((chunk0 (execute-tool "scratch_get"
+    (let* ((chunk0 (execute-tool-text "scratch_get"
                                  `(("sha" . ,*test-sha*)
                                    ("offset" . 0)
                                    ("len" . 1000))))
-           (chunk1 (execute-tool "scratch_get"
+           (chunk1 (execute-tool-text "scratch_get"
                                  `(("sha" . ,*test-sha*)
                                    ("offset" . 1000)
                                    ("len" . 1000))))
-           (chunk2 (execute-tool "scratch_get"
+           (chunk2 (execute-tool-text "scratch_get"
                                  `(("sha" . ,*test-sha*)
                                    ("offset" . 2000)
                                    ("len" . 1000)))))

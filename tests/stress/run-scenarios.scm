@@ -83,7 +83,7 @@
                     (set! tool-calls (1+ tool-calls))
                     (let* ((tool-name (assoc-ref tool-call "name"))
                            (tool-args (assoc-ref tool-call "arguments"))
-                           (result (execute-tool tool-name tool-args)))
+                           (result (execute-tool-text tool-name tool-args)))
                       (format #t "[Tool: ~a]~%" tool-name)
                       (format #t "~a~%"
                               (if (> (string-length result) 200)

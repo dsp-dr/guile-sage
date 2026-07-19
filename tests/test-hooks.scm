@@ -169,7 +169,7 @@
                      (if (equal? (assoc-ref ctx "tool") "test-exec")
                          (cons #f "test veto")
                          #t)))
-    (let ((result (execute-tool "test-exec" '())))
+    (let ((result (execute-tool-text "test-exec" '())))
       (assert-false executed "tool body did not run")
       (assert-true (string-contains result "Hook vetoed") "result mentions veto"))))
 
@@ -185,7 +185,7 @@
     (hook-register 'PostToolUse "observer"
                    (lambda (ctx)
                      (set! observed (assoc-ref ctx "result"))))
-    (execute-tool "test-obs" '())
+    (execute-tool-text "test-obs" '())
     (assert-equal "ok" observed "observer saw tool result")))
 
 ;;; ============================================================

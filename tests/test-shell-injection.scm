@@ -77,7 +77,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gc-semi"))
                (payload (format #f "hi'; rm -f '~a'; echo '" sentinel)))
-          (execute-tool "git_commit"
+          (execute-tool-text "git_commit"
                         `(("files" . ("README.md"))
                           ("message" . ,payload)))
           (assert-true (sentinel-survived? sentinel)
@@ -88,7 +88,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gc-backtick"))
                (payload (format #f "msg `rm -f ~a`" sentinel)))
-          (execute-tool "git_commit"
+          (execute-tool-text "git_commit"
                         `(("files" . ("README.md"))
                           ("message" . ,payload)))
           (assert-true (sentinel-survived? sentinel)
@@ -99,7 +99,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gc-dollar"))
                (payload (format #f "msg $(rm -f ~a)" sentinel)))
-          (execute-tool "git_commit"
+          (execute-tool-text "git_commit"
                         `(("files" . ("README.md"))
                           ("message" . ,payload)))
           (assert-true (sentinel-survived? sentinel)
@@ -110,7 +110,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gc-newline"))
                (payload (format #f "first line~%rm -f ~a~%third" sentinel)))
-          (execute-tool "git_commit"
+          (execute-tool-text "git_commit"
                         `(("files" . ("README.md"))
                           ("message" . ,payload)))
           (assert-true (sentinel-survived? sentinel)
@@ -123,7 +123,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gc-fl-semi"))
                (bad-file (format #f "README.md; rm -f '~a'" sentinel)))
-          (let ((result (execute-tool "git_commit"
+          (let ((result (execute-tool-text "git_commit"
                                       `(("files" . (,bad-file))
                                         ("message" . "msg")))))
             (assert-true (sentinel-survived? sentinel)
@@ -136,7 +136,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gc-fl-back"))
                (bad-file (format #f "`rm -f ~a`" sentinel)))
-          (let ((result (execute-tool "git_commit"
+          (let ((result (execute-tool-text "git_commit"
                                       `(("files" . (,bad-file))
                                         ("message" . "msg")))))
             (assert-true (sentinel-survived? sentinel)
@@ -155,7 +155,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gn-semi"))
                (payload (format #f "note'; rm -f '~a'; echo '" sentinel)))
-          (execute-tool "git_add_note"
+          (execute-tool-text "git_add_note"
                         `(("message" . ,payload)))
           (assert-true (sentinel-survived? sentinel)
                        "Sentinel must still exist after note injection")
@@ -165,7 +165,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gn-dollar"))
                (payload (format #f "$(rm -f ~a)" sentinel)))
-          (execute-tool "git_add_note"
+          (execute-tool-text "git_add_note"
                         `(("message" . ,payload)))
           (assert-true (sentinel-survived? sentinel)
                        "Sentinel must still exist after $() injection")
@@ -181,7 +181,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gp-remote"))
                (bad-remote (format #f "origin; rm -f '~a'" sentinel))
-               (result (execute-tool "git_push"
+               (result (execute-tool-text "git_push"
                                      `(("remote" . ,bad-remote)))))
           (assert-true (sentinel-survived? sentinel)
                        "Sentinel must still exist after remote injection")
@@ -193,7 +193,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gp-branch"))
                (bad-branch (format #f "main`rm -f ~a`" sentinel))
-               (result (execute-tool "git_push"
+               (result (execute-tool-text "git_push"
                                      `(("remote" . "origin")
                                        ("branch" . ,bad-branch)))))
           (assert-true (sentinel-survived? sentinel)
@@ -212,7 +212,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "sf-semi"))
                (payload (format #f "x'; rm -f '~a'; echo '" sentinel)))
-          (execute-tool "search_files"
+          (execute-tool-text "search_files"
                         `(("pattern" . ,payload)))
           (assert-true (sentinel-survived? sentinel)
                        "Sentinel survives search_files injection")
@@ -222,7 +222,7 @@ original contents."
       (lambda ()
         (let* ((sentinel (make-sentinel "gl-pipe"))
                (payload (format #f "*.scm | rm -f ~a" sentinel)))
-          (execute-tool "glob_files"
+          (execute-tool-text "glob_files"
                         `(("pattern" . ,payload)))
           (assert-true (sentinel-survived? sentinel)
                        "Sentinel survives glob_files pipe injection")
@@ -236,28 +236,28 @@ original contents."
   (lambda ()
     (test "rejects ;"
       (lambda ()
-        (let ((r (execute-tool "git_commit"
+        (let ((r (execute-tool-text "git_commit"
                                '(("files" . ("a;b"))
                                  ("message" . "m")))))
           (assert-contains r "unsafe" "semicolon"))))
 
     (test "rejects |"
       (lambda ()
-        (let ((r (execute-tool "git_commit"
+        (let ((r (execute-tool-text "git_commit"
                                '(("files" . ("a|b"))
                                  ("message" . "m")))))
           (assert-contains r "unsafe" "pipe"))))
 
     (test "rejects &"
       (lambda ()
-        (let ((r (execute-tool "git_commit"
+        (let ((r (execute-tool-text "git_commit"
                                '(("files" . ("a&b"))
                                  ("message" . "m")))))
           (assert-contains r "unsafe" "ampersand"))))
 
     (test "rejects newline"
       (lambda ()
-        (let ((r (execute-tool "git_commit"
+        (let ((r (execute-tool-text "git_commit"
                                `(("files" . (,(string #\a #\newline #\b)))
                                  ("message" . "m")))))
           (assert-contains r "unsafe" "newline"))))
@@ -267,7 +267,7 @@ original contents."
         ;; README.md should not be rejected with "unsafe"; the git
         ;; operation may fail for other reasons (clean tree / no
         ;; changes) but the argv-cleanliness check should pass.
-        (let ((r (execute-tool "git_commit"
+        (let ((r (execute-tool-text "git_commit"
                                '(("files" . ("README.md"))
                                  ("message" . "valid message")))))
           (assert-not-contains r "unsafe path"

@@ -38,6 +38,7 @@
             get-tool
             list-tools
             execute-tool
+            execute-tool-text
             make-tool-outcome
             tool-outcome?
             tool-outcome-status
@@ -452,7 +453,9 @@ that care about the exit code (git_push, git_commit) can surface it."
 ;;; Arguments:
 ;;;   name - Tool name
 ;;;   args - Alist of arguments
-;;; Returns: Result string or error
+;;; Returns: a tool-outcome record (F2). tool-outcome-text is byte-identical
+;;;   to the string execute-tool returned before F2; execute-tool-text is the
+;;;   back-compat helper that yields just that string.
 (define (execute-tool name args)
   (let ((tool (get-tool name))
         (hook-mod (false-if-exception (resolve-module '(sage hooks) #:ensure #f))))
@@ -468,7 +471,9 @@ that care about the exit code (git_push, git_commit) can surface it."
                               `(("tool" . ,name) ("reason" . ,reason)))
                     (inc-counter! "guile_sage.code_edit.tool_decision"
                                   `(("tool_name" . ,name) ("decision" . "veto")) 1)
-                    (format #f "Hook vetoed: ~a" reason))
+                    (make-tool-outcome 'veto
+                                       (format #f "Hook vetoed: ~a" reason)
+                                       reason))
                   (begin
                     (log-tool-call name args)
                     (inc-counter! "guile_sage.code_edit.tool_decision"
@@ -492,20 +497,32 @@ that care about the exit code (git_push, git_commit) can surface it."
                                         (if (string? result)
                                             (string-length result)
                                             0))
-                            result))
+                            (make-tool-outcome 'success result #f)))
                         (lambda (key . rest)
                           (log-error "tools" (format #f "Tool execution failed: ~a" name)
                                      `(("error" . ,(format #f "~a ~a" key rest))))
-                          (format #f "Tool error: ~a ~a" key rest)))))))
+                          (make-tool-outcome 'error
+                                             (format #f "Tool error: ~a ~a" key rest)
+                                             #f)))))))
             (begin
               (log-warn "tools" (format #f "Permission denied: ~a" name)
                         `(("tool" . ,name)))
               (inc-counter! "guile_sage.code_edit.tool_decision"
                             `(("tool_name" . ,name) ("decision" . "reject")) 1)
-              (format #f "Permission denied for tool: ~a" name)))
+              (make-tool-outcome 'deny
+                                 (format #f "Permission denied for tool: ~a" name)
+                                 #f)))
         (begin
           (log-warn "tools" (format #f "Unknown tool: ~a" name))
-          (format #f "Unknown tool: ~a" name)))))
+          (make-tool-outcome 'unknown
+                             (format #f "Unknown tool: ~a" name)
+                             #f)))))
+
+;;; execute-tool-text: back-compat helper — run a tool and return only its
+;;; display/LLM string (tool-outcome-text). Byte-identical to what
+;;; execute-tool returned before F2; used where only the text is needed.
+(define (execute-tool-text name args)
+  (tool-outcome-text (execute-tool name args)))
 
 ;;; tools-to-schema: Convert tools to JSON schema for LLM
 (define (tools-to-schema)

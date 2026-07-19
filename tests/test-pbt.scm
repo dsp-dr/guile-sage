@@ -250,7 +250,7 @@
   (lambda ()
     (string-append "fake_" (rng-alpha-string (rng-int 5 20))))
   (lambda (name)
-    (let ((result (execute-tool name '())))
+    (let ((result (execute-tool-text name '())))
       (string-contains result "Unknown tool"))))
 
 ;;; ============================================================
@@ -333,7 +333,7 @@
   (lambda (name)
     (with-yolo-off
      (lambda ()
-       (let ((result (execute-tool name '())))
+       (let ((result (execute-tool-text name '())))
          (string-contains result "Permission denied"))))))
 
 ;;; ============================================================
@@ -890,7 +890,7 @@
         ((nil)         '()))))
   (lambda (lines-arg)
     (let* ((args (if lines-arg `(("lines" . ,lines-arg)) '()))
-           (result (execute-tool "read_logs" args)))
+           (result (execute-tool-text "read_logs" args)))
       (and (string? result)
            (not (string-contains result "wrong-type-arg"))))))
 
@@ -907,7 +907,7 @@
   (lambda (limit-arg)
     (let* ((args `(("pattern" . "info")
                    ,@(if limit-arg `(("limit" . ,limit-arg)) '())))
-           (result (execute-tool "search_logs" args)))
+           (result (execute-tool-text "search_logs" args)))
       (and (string? result)
            (not (string-contains result "wrong-type-arg"))))))
 
@@ -950,14 +950,14 @@
   (lambda (path+content)
     (let* ((path (car path+content))
            (content (cdr path+content))
-           (write-result (execute-tool "write_file"
+           (write-result (execute-tool-text "write_file"
                                        `(("path" . ,path)
                                          ("content" . ,content))))
            ;; The success message must name the resolved path, which
            ;; for /tmp/* equals the input path.
            (path-honest? (string-contains write-result path))
            ;; Read it back via read_file
-           (read-back (execute-tool "read_file" `(("path" . ,path))))
+           (read-back (execute-tool-text "read_file" `(("path" . ,path))))
            (roundtrip-ok? (equal? read-back content)))
       ;; Cleanup
       (when (file-exists? path) (delete-file path))
@@ -973,12 +973,12 @@
     (let* ((rel (car path+content))
            (content (cdr path+content))
            (full (string-append (or (getenv "SAGE_WORKSPACE") (getcwd)) "/" rel))
-           (write-result (execute-tool "write_file"
+           (write-result (execute-tool-text "write_file"
                                        `(("path" . ,rel)
                                          ("content" . ,content))))
            ;; Result should mention the FULL resolved path, not just rel
            (path-honest? (string-contains write-result full))
-           (read-back (execute-tool "read_file" `(("path" . ,rel))))
+           (read-back (execute-tool-text "read_file" `(("path" . ,rel))))
            (roundtrip-ok? (equal? read-back content)))
       (when (file-exists? full) (delete-file full))
       (and path-honest? roundtrip-ok?))))
@@ -1001,7 +1001,7 @@
     ;; generated dir names won't exist on disk.
     (rng-element '("src/sage" "tests" "scripts" "docs")))
   (lambda (scope)
-    (let* ((result (execute-tool "search_files"
+    (let* ((result (execute-tool-text "search_files"
                                  `(("pattern" . "define")
                                    ("path" . ,scope))))
            (lines (filter (lambda (l) (not (string-null? l)))
@@ -1026,7 +1026,7 @@
     ;; No knob — just verifies the no-arg fallback still works
     (rng-int 0 1))
   (lambda (_)
-    (let ((result (execute-tool "search_files" '(("pattern" . "define")))))
+    (let ((result (execute-tool-text "search_files" '(("pattern" . "define")))))
       (and (string? result) (> (string-length result) 0)))))
 
 (property "search_files unsafe path is rejected"
@@ -1035,7 +1035,7 @@
     (let ((depth (rng-int 1 5)))
       (string-join (map (lambda (_) "..") (iota depth)) "/")))
   (lambda (bad-path)
-    (let ((result (execute-tool "search_files"
+    (let ((result (execute-tool-text "search_files"
                                 `(("pattern" . "x") ("path" . ,bad-path)))))
       (string-contains result "Unsafe"))))
 
@@ -1436,7 +1436,7 @@
               (decision (verdict-decision v))
               (rsha (assoc-ref rec "result-sha"))
               ;; the probe (tool body) must not run under a deny
-              (exec-result (execute-tool tool '())))
+              (exec-result (execute-tool-text tool '())))
          (and (eq? decision 'deny)
               (eq? rsha 'null)
               (string-contains exec-result "Permission denied")))))))

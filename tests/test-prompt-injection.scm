@@ -150,7 +150,7 @@
         (lambda (port) (display payload port)))
       ;; Simulate the REPL's tool-result handling: execute the tool,
       ;; then wrap its output the same way execute-tool-chain does.
-      (let* ((raw (execute-tool "read_file"
+      (let* ((raw (execute-tool-text "read_file"
                                 `(("path" . ,fixture-path))))
              (is-safe (and (member "read_file" *safe-tools*) #t))
              (wrapped (wrap-tool-result "read_file" raw #:safe is-safe)))

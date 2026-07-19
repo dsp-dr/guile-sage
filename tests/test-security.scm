@@ -48,7 +48,7 @@
 
     (test "handle null byte in path"
       (lambda ()
-        (let ((result (execute-tool "read_file"
+        (let ((result (execute-tool-text "read_file"
                         `(("path" . ,(string-append "test.txt" (string #\nul) "../../etc/passwd"))))))
           (assert-not-contains result "root:"
                                "Should not leak /etc/passwd via null byte"))))
@@ -128,42 +128,42 @@
   (lambda ()
     (test "search_files: semicolon injection"
       (lambda ()
-        (let ((result (execute-tool "search_files"
+        (let ((result (execute-tool-text "search_files"
                         '(("pattern" . "'; cat /etc/passwd #")))))
           (assert-not-contains result "root:"
                                "Should not execute injected command"))))
 
     (test "search_files: backtick injection"
       (lambda ()
-        (let ((result (execute-tool "search_files"
+        (let ((result (execute-tool-text "search_files"
                         '(("pattern" . "`cat /etc/passwd`")))))
           (assert-not-contains result "root:"
                                "Should not execute backtick command"))))
 
     (test "search_files: $() injection"
       (lambda ()
-        (let ((result (execute-tool "search_files"
+        (let ((result (execute-tool-text "search_files"
                         '(("pattern" . "$(cat /etc/passwd)")))))
           (assert-not-contains result "root:"
                                "Should not execute $() command"))))
 
     (test "glob_files: command injection"
       (lambda ()
-        (let ((result (execute-tool "glob_files"
+        (let ((result (execute-tool-text "glob_files"
                         '(("pattern" . "*.scm; cat /etc/passwd")))))
           (assert-not-contains result "root:"
                                "Should not execute via glob"))))
 
     (test "search_files: pipe injection"
       (lambda ()
-        (let ((result (execute-tool "search_files"
+        (let ((result (execute-tool-text "search_files"
                         '(("pattern" . "test | cat /etc/passwd")))))
           (assert-not-contains result "root:"
                                "Should not execute pipe command"))))
 
     (test "search_files: && injection"
       (lambda ()
-        (let ((result (execute-tool "search_files"
+        (let ((result (execute-tool-text "search_files"
                         '(("pattern" . "test && cat /etc/passwd")))))
           (assert-not-contains result "root:"
                                "Should not execute && command"))))))
@@ -176,7 +176,7 @@
   (lambda ()
     (test "write_file denied without YOLO"
       (lambda ()
-        (let ((result (execute-tool "write_file"
+        (let ((result (execute-tool-text "write_file"
                         '(("path" . "pwned.txt")
                           ("content" . "pwned")))))
           (assert-contains result "Permission denied"
@@ -184,7 +184,7 @@
 
     (test "edit_file denied without YOLO"
       (lambda ()
-        (let ((result (execute-tool "edit_file"
+        (let ((result (execute-tool-text "edit_file"
                         '(("path" . "test.txt")
                           ("search" . "foo")
                           ("replace" . "bar")))))
@@ -193,14 +193,14 @@
 
     (test "eval_scheme denied without YOLO"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         '(("code" . "(system \"id\")")))))
           (assert-contains result "Permission denied"
                            "eval_scheme should be denied"))))
 
     (test "create_tool denied without YOLO"
       (lambda ()
-        (let ((result (execute-tool "create_tool"
+        (let ((result (execute-tool-text "create_tool"
                         '(("name" . "backdoor")
                           ("description" . "evil")
                           ("code" . "(lambda (args) (system \"id\"))")))))
@@ -209,7 +209,7 @@
 
     (test "git_commit denied without YOLO"
       (lambda ()
-        (let ((result (execute-tool "git_commit"
+        (let ((result (execute-tool-text "git_commit"
                         '(("files" . ("README.md"))
                           ("message" . "malicious commit")))))
           (assert-contains result "Permission denied"
@@ -217,7 +217,7 @@
 
     (test "reload_module denied without YOLO"
       (lambda ()
-        (let ((result (execute-tool "reload_module"
+        (let ((result (execute-tool-text "reload_module"
                         '(("module" . "sage tools")))))
           (assert-contains result "Permission denied"
                            "reload_module should be denied"))))))
@@ -230,14 +230,14 @@
   (lambda ()
     (test "git_status cleans temp file"
       (lambda ()
-        (let* ((result (execute-tool "git_status" '()))
+        (let* ((result (execute-tool-text "git_status" '()))
                (tmp-file (format #f "/tmp/sage-git-~a" (getpid))))
           (assert-false (file-exists? tmp-file)
                         "Temp file should be cleaned up"))))
 
     (test "search_files cleans temp file"
       (lambda ()
-        (let* ((result (execute-tool "search_files" '(("pattern" . "test"))))
+        (let* ((result (execute-tool-text "search_files" '(("pattern" . "test"))))
                (tmp-file (format #f "/tmp/sage-grep-~a" (getpid))))
           (assert-false (file-exists? tmp-file)
                         "Temp file should be cleaned up"))))))
@@ -263,14 +263,14 @@
     (test "glob_files limits output"
       (lambda ()
         ;; The tool uses head -100 to limit results
-        (let ((result (execute-tool "glob_files" '(("pattern" . "*")))))
+        (let ((result (execute-tool-text "glob_files" '(("pattern" . "*")))))
           (assert-true (string? result)
                        "Should return without hanging"))))
 
     (test "search_files limits output"
       (lambda ()
         ;; The tool uses head -50 to limit results
-        (let ((result (execute-tool "search_files" '(("pattern" . ".")))))
+        (let ((result (execute-tool-text "search_files" '(("pattern" . ".")))))
           (assert-true (string? result)
                        "Should return without hanging"))))))
 
@@ -282,21 +282,21 @@
   (lambda ()
     (test "handle newline in search pattern"
       (lambda ()
-        (let ((result (execute-tool "search_files"
+        (let ((result (execute-tool-text "search_files"
                         `(("pattern" . ,(string-append "test" (string #\newline) "cat /etc/passwd"))))))
           (assert-not-contains result "root:"
                                "Should not execute via newline"))))
 
     (test "handle quotes in pattern"
       (lambda ()
-        (let ((result (execute-tool "search_files"
+        (let ((result (execute-tool-text "search_files"
                         '(("pattern" . "test\"'; cat /etc/passwd")))))
           (assert-not-contains result "root:"
                                "Should not execute via quote escape"))))
 
     (test "handle backslash in pattern"
       (lambda ()
-        (let ((result (execute-tool "search_files"
+        (let ((result (execute-tool-text "search_files"
                         '(("pattern" . "test\\'; cat /etc/passwd")))))
           (assert-not-contains result "root:"
                                "Should not execute via backslash escape"))))))

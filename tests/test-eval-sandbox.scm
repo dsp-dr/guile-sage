@@ -58,7 +58,7 @@
     (test "reject (system \"touch ...\")"
       (lambda ()
         (let* ((code (format #f "(system \"touch ~a\")" rce-proof-path))
-               (result (execute-tool "eval_scheme" `(("code" . ,code)))))
+               (result (execute-tool-text "eval_scheme" `(("code" . ,code)))))
           (assert-contains result "sandbox denied"
                            "system call should be denied by sandbox")
           (assert-false (file-exists? rce-proof-path)
@@ -66,7 +66,7 @@
 
     (test "reject (system* ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(system* \"/bin/touch\" \"/tmp/x\")")))))
           (assert-contains result "sandbox denied"
                            "system* must be denied"))))
@@ -75,7 +75,7 @@
       (lambda ()
         ;; Defense-in-depth: even if the call is hidden inside a let
         ;; or lambda, symbol-walk should find it.
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(let ((x system)) (x \"echo pwned\"))")))))
           (assert-contains result "sandbox denied"
                            "system aliased inside let must be denied"))))
@@ -90,21 +90,21 @@
   (lambda ()
     (test "reject (open-input-pipe ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(open-input-pipe \"echo test\")")))))
           (assert-contains result "sandbox denied"
                            "open-input-pipe must be denied"))))
 
     (test "reject (open-output-pipe ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(open-output-pipe \"cat > /tmp/x\")")))))
           (assert-contains result "sandbox denied"
                            "open-output-pipe must be denied"))))
 
     (test "reject (open-pipe ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(open-pipe \"sh\" OPEN_BOTH)")))))
           (assert-contains result "sandbox denied"
                            "open-pipe must be denied"))))))
@@ -121,7 +121,7 @@
     (test "reject (delete-file ...)"
       (lambda ()
         (let* ((code (format #f "(delete-file \"~a\")" delete-target-path))
-               (result (execute-tool "eval_scheme" `(("code" . ,code)))))
+               (result (execute-tool-text "eval_scheme" `(("code" . ,code)))))
           (assert-contains result "sandbox denied"
                            "delete-file must be denied")
           (assert-true (file-exists? delete-target-path)
@@ -129,21 +129,21 @@
 
     (test "reject (rename-file ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(rename-file \"/tmp/a\" \"/tmp/b\")")))))
           (assert-contains result "sandbox denied"
                            "rename-file must be denied"))))
 
     (test "reject (copy-file ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(copy-file \"/etc/passwd\" \"/tmp/x\")")))))
           (assert-contains result "sandbox denied"
                            "copy-file must be denied"))))
 
     (test "reject (chmod ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(chmod \"/tmp/x\" 511)")))))
           (assert-contains result "sandbox denied"
                            "chmod must be denied"))))
@@ -158,21 +158,21 @@
   (lambda ()
     (test "reject (eval-string ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(eval-string \"(system \\\"ls\\\")\")")))))
           (assert-contains result "sandbox denied"
                            "recursive eval-string must be denied"))))
 
     (test "reject (primitive-load ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(primitive-load \"/tmp/evil.scm\")")))))
           (assert-contains result "sandbox denied"
                            "primitive-load must be denied"))))
 
     (test "reject (load ...)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(load \"/tmp/evil.scm\")")))))
           (assert-contains result "sandbox denied"
                            "load must be denied"))))))
@@ -185,7 +185,7 @@
   (lambda ()
     (test "allow (+ 1 2)"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(+ 1 2)")))))
           (assert-not-contains result "sandbox denied"
                                "(+ 1 2) should not be denied")
@@ -194,7 +194,7 @@
 
     (test "allow (map 1+ '(1 2 3))"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(map 1+ '(1 2 3))")))))
           (assert-not-contains result "sandbox denied"
                                "map should not be denied")
@@ -203,7 +203,7 @@
 
     (test "allow (string-upcase \"hi\")"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(string-upcase \"hi\")")))))
           (assert-not-contains result "sandbox denied"
                                "string-upcase should not be denied")
@@ -212,7 +212,7 @@
 
     (test "allow (let ...) with arithmetic"
       (lambda ()
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(let ((x 5) (y 7)) (* x y))")))))
           (assert-not-contains result "sandbox denied"
                                "let+arithmetic should not be denied")
@@ -223,7 +223,7 @@
       (lambda ()
         ;; Prove higher-order functions work — this is a common and
         ;; safe pattern we don't want the sandbox to break.
-        (let ((result (execute-tool "eval_scheme"
+        (let ((result (execute-tool-text "eval_scheme"
                         `(("code" . "(fold + 0 '(1 2 3 4 5))")))))
           (assert-not-contains result "sandbox denied"
                                "fold should not be denied")
