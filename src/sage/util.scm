@@ -51,25 +51,49 @@
             (loop (1+ i))
             i))))
 
+;;; hex4->int: parse the 4 hex digits of a \uXXXX escape at position I.
+(define (hex4->int str i)
+  (string->number (substring str i (+ i 4)) 16))
+
 (define (parse-str str pos)
-  (let loop ((i pos) (acc '()))
-    (if (>= i (string-length str))
-        (error "Unterminated string")
-        (let ((c (string-ref str i)))
-          (cond
-           ((char=? c #\")
-            (cons (list->string (reverse acc)) (1+ i)))
-           ((char=? c #\\)
-            (let ((next (string-ref str (1+ i))))
-              (loop (+ i 2)
-                    (cons (case next
-                            ((#\n) #\newline)
-                            ((#\t) #\tab)
-                            ((#\r) #\return)
-                            (else next))
-                          acc))))
-           (else
-            (loop (1+ i) (cons c acc))))))))
+  (let ((n (string-length str)))
+    (let loop ((i pos) (acc '()))
+      (if (>= i n)
+          (error "Unterminated string")
+          (let ((c (string-ref str i)))
+            (cond
+             ((char=? c #\")
+              (cons (list->string (reverse acc)) (1+ i)))
+             ((char=? c #\\)
+              (let ((next (string-ref str (1+ i))))
+                (if (char=? next #\u)
+                    ;; \uXXXX unicode escape (models emit e.g. < for '<',
+                    ;; > for '>', & for '&'). Without this the
+                    ;; backslash is dropped and code like (<= n 1) arrives as
+                    ;; (u003c= n 1) — an unbound variable. Handle surrogate
+                    ;; pairs so astral chars/emoji don't crash integer->char.
+                    (let ((code (hex4->int str (+ i 2))))
+                      (if (and (>= code #xD800) (<= code #xDBFF)
+                               (< (+ i 11) n)
+                               (char=? (string-ref str (+ i 6)) #\\)
+                               (char=? (string-ref str (+ i 7)) #\u))
+                          (let* ((lo (hex4->int str (+ i 8)))
+                                 (cp (+ #x10000
+                                        (* (- code #xD800) #x400)
+                                        (- lo #xDC00))))
+                            (loop (+ i 12) (cons (integer->char cp) acc)))
+                          (loop (+ i 6) (cons (integer->char code) acc))))
+                    (loop (+ i 2)
+                          (cons (case next
+                                  ((#\n) #\newline)
+                                  ((#\t) #\tab)
+                                  ((#\r) #\return)
+                                  ((#\b) #\backspace)
+                                  ((#\f) #\page)
+                                  (else next))     ; \" \\ \/ -> literal
+                                acc)))))
+             (else
+              (loop (1+ i) (cons c acc)))))))))
 
 (define (parse-num str pos)
   (let loop ((i pos))
