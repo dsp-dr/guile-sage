@@ -1,0 +1,5 @@
+Attribution: observed live — /compact reported 'Compacted 11 messages' (16->6) but /status still showed Tokens: 2275 unchanged.
+Tests: tests/test-auto-compact.scm +2 regressions for both paths (12/12). Verified LIVE: auto-compaction [6592 -> 1656], post-compaction /status showed 2288 (recomputed) not 6592, Requests: 10 preserved.
+Conjecture: the auto path had the identical bug; fixing only /compact would leave session-maybe-compact! stale.
+Validation: unit tests + live mistral REPL crossing the 80% threshold.
+Research: guile-sage-9kv (bd).
