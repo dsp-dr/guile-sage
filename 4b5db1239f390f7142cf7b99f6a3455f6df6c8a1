@@ -1,0 +1,5 @@
+Attribution: user ran with SAGE_PROVIDER=ollama SAGE_MODEL=llama3.2 but the REPL banner showed Provider: gemini.
+Tests: manual — with SAGE_PROVIDER/SAGE_MODEL exported and a gemini .env, config-get PROVIDER/MODEL now return the exported values; .env-only keys (GEMINI_API_KEY) still load.
+Conjecture: mirrors python-dotenv's override=False default; least-surprising precedence.
+Validation: verified live — restarted REPL now shows Provider: ollama / Model: qwen2.5-coder.
+Research: python-dotenv override semantics.
