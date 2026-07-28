@@ -1,0 +1,5 @@
+Attribution: surfaced live driving qwen2.5-coder in the REPL — memoized-fibonacci eval failed with 'Unbound variable: u003c='.
+Tests: tests/test-json-unicode.scm (5/5) — <=, nested object value, &>/ + escaped slash, emoji surrogate pair, \n\t. Full suite 103 tests green.
+Conjecture: matches the claude-api guidance warning that models vary JSON string escaping; raw string-matching on tool input is unsafe.
+Validation: guile one-liners + committed regression test; verified (<= n 1) and 😀 decode correctly.
+Research: JSON RFC 8259 \uXXXX + UTF-16 surrogate pairs (U+10000 offset).
