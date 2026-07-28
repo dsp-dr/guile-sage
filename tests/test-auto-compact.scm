@@ -141,4 +141,34 @@
           (error (format #f "compact keep-recent=5 should leave ≤6 msgs, got ~a"
                          after-count)))))))
 
+;;; --- total_tokens stays in sync after compaction (guile-sage-9kv) ---
+
+(format #t "~%--- token stats after compaction ---~%")
+
+(run-test "session-compact! recomputes total_tokens from survivors"
+  (lambda ()
+    (setup-session! 20 50)  ; 1000 tokens in 20 messages
+    (session-compact! #:keep-recent 5)
+    (let* ((msgs (session-get-messages))
+           (expected (fold + 0 (map (lambda (m) (or (assoc-ref m "tokens") 0)) msgs)))
+           (reported (session-total-tokens)))
+      ;; the bug: reported stayed at the pre-compaction 1000
+      (unless (= reported expected)
+        (error (format #f "total_tokens ~a should equal survivor sum ~a"
+                       reported expected)))
+      (unless (< reported 1000)
+        (error (format #f "total_tokens ~a should drop below pre-compact 1000"
+                       reported))))))
+
+(run-test "session-maybe-compact! recomputes total_tokens"
+  (lambda ()
+    (setup-session! 10 100)  ; 1000 tokens, limit 1000 -> compacts
+    (session-maybe-compact! 1000 compact-auto message-tokens)
+    (let* ((msgs (session-get-messages))
+           (expected (fold + 0 (map message-tokens msgs)))
+           (reported (session-total-tokens)))
+      (unless (= reported expected)
+        (error (format #f "auto-compact total_tokens ~a should equal survivor sum ~a"
+                       reported expected))))))
+
 (test-summary)

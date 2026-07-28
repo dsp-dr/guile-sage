@@ -163,6 +163,29 @@
 (define (session-current-name)
   (and *session* (assoc-ref *session* "name")))
 
+;;; recompute-token-stats!: Refresh token stats from the current message list.
+;;; Compaction drops messages but the stats block was left untouched, so
+;;; total_tokens (and the /status context-window bar) reported the stale
+;;; pre-compaction figure (guile-sage-9kv). Recompute total/input/output from
+;;; the surviving messages; request_count and tool_calls are lifetime
+;;; counters and are preserved as-is.
+(define (recompute-token-stats!)
+  (when *session*
+    (let* ((messages (session-get-messages))
+           (stats (assoc-ref *session* "stats"))
+           (tok (lambda (m) (or (assoc-ref m "tokens") 0)))
+           (role? (lambda (r) (lambda (m) (equal? (assoc-ref m "role") r))))
+           (total (fold + 0 (map tok messages)))
+           (input (fold + 0 (map tok (filter (role? "user") messages))))
+           (output (fold + 0 (map tok (filter (role? "assistant") messages)))))
+      (set! *session*
+            (assoc-set! *session* "stats"
+                        `(("total_tokens" . ,total)
+                          ("input_tokens" . ,input)
+                          ("output_tokens" . ,output)
+                          ("request_count" . ,(assoc-ref stats "request_count"))
+                          ("tool_calls" . ,(assoc-ref stats "tool_calls"))))))))
+
 ;;; session-compact!: Compact conversation history
 ;;; Summarizes older messages to reduce token count
 (define* (session-compact! #:key (keep-recent 5) (summarize #f))
@@ -194,8 +217,10 @@
           ;; Update session
           (set! *session*
                 (assoc-set! *session* "messages" new-messages))
+          (recompute-token-stats!)   ; keep total_tokens in sync (guile-sage-9kv)
           (log-info "session" "Session compacted"
-                    `(("after_messages" . ,(length new-messages))))
+                    `(("after_messages" . ,(length new-messages))
+                      ("after_tokens" . ,(session-total-tokens))))
           (format #f "Compacted ~a messages (~a tokens)" to-remove old-tokens)))))
 
 ;;; session-maybe-compact!: Auto-compact if tokens exceed threshold
@@ -220,6 +245,7 @@
               ;; Replace messages in session
               (set! *session*
                     (assoc-set! *session* "messages" compacted))
+              (recompute-token-stats!)   ; keep total_tokens in sync (guile-sage-9kv)
               (log-info "session" "Auto-compacted"
                         `(("from_tokens" . ,current-tokens)
                           ("to_tokens" . ,new-tokens)
