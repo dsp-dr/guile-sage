@@ -1,0 +1,5 @@
+Attribution: user request — port the platform.claude.com session-memory-compaction cookbook and drive it with the 6 story prompts.
+Tests: tests/test-instant-compaction.scm (10/10) — asserts init@7500, update@2000-delta, no compaction turns 1-6, instant 13->3 swap on the probe, key-reference + negative-feedback preservation, structured section format.
+Conjecture: proactive background summarization removes the 40s reactive-compaction stall; the deterministic stub reproduces the cookbook's threshold milestones without API calls.
+Validation: drive trace matches cookbook milestones (init at outline turn, INSTANT swap at probe).
+Research: platform.claude.com/cookbook/misc-session-memory-compaction; claude-api skill Compaction section.
