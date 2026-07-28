@@ -157,7 +157,12 @@
                           (if (eof-object? line)
                               count
                               (let ((parsed (parse-dotenv-line line)))
-                                (when parsed
+                                ;; Real environment variables win over the
+                                ;; .env file: skip any key already exported in
+                                ;; the shell (convention: explicit > file). So
+                                ;; `SAGE_PROVIDER=ollama sage ...` overrides a
+                                ;; committed `SAGE_PROVIDER=gemini`.
+                                (when (and parsed (not (getenv (car parsed))))
                                   (hash-set! *config* (car parsed) (cdr parsed)))
                                 (loop (get-line port)
                                       (if parsed (1+ count) count)))))))
